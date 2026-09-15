@@ -1,0 +1,7 @@
+{
+  "schema": "zesoftware.interop.v1",
+  "product_id": "zecalibrator",
+  "distribution_name": "ZeCalibrator",
+  "provides": [],
+  "consumes": []
+}

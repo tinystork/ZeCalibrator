@@ -1,0 +1,15 @@
+# Normalize text files to LF in the repository; do not touch binary assets.
+* text=auto
+
+# Supplied artwork and packaged icon resources are binary and byte-identical.
+*.png binary
+*.ico binary
+*.icns binary
+
+# Markdown, Python, TOML, YAML, JSON as text.
+*.md text
+*.py text
+*.toml text
+*.yml text
+*.yaml text
+*.json text

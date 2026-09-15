@@ -1,0 +1,80 @@
+{
+  "schema": "zecalibrator.resources.icons.v1",
+  "description": "Single source-of-truth manifest mapping each canonical supplied icon (icons/) to its byte-identical packaged copy under src/zecalibrator/resources/icons/. Runtime loading uses importlib.resources; development synchronization copies canonical files verbatim and re-verifies these SHA-256 digests. Root icons/ is never read at runtime.",
+  "canonical_source_dir": "icons",
+  "packaged_dir": "resources/icons",
+  "files": [
+    {
+      "name": "zecalibrator.icns",
+      "canonical_path": "icons/zecalibrator.icns",
+      "packaged_path": "zecalibrator/resources/icons/zecalibrator.icns",
+      "sha256": "a43b9b1c53aaedb98ee33c0591ce376a07947967490c67e7018ded2e2665dda6"
+    },
+    {
+      "name": "zecalibrator.ico",
+      "canonical_path": "icons/zecalibrator.ico",
+      "packaged_path": "zecalibrator/resources/icons/zecalibrator.ico",
+      "sha256": "717a04a871867de4cd32f90c3383d8414edbb2c960290ba346a1514e6bc584ca"
+    },
+    {
+      "name": "zecalibrator_1024x1024.png",
+      "canonical_path": "icons/zecalibrator_1024x1024.png",
+      "packaged_path": "zecalibrator/resources/icons/zecalibrator_1024x1024.png",
+      "sha256": "c3582489faed7dfec694719618fd5661c8da2c9236d05a33edd6e0c1b9b18b51"
+    },
+    {
+      "name": "zecalibrator_128x128.png",
+      "canonical_path": "icons/zecalibrator_128x128.png",
+      "packaged_path": "zecalibrator/resources/icons/zecalibrator_128x128.png",
+      "sha256": "1be5ea466e395f59f52b445947e24daefcc7c1dea6cf2abaa015b6aba75f79dc"
+    },
+    {
+      "name": "zecalibrator_16x16.png",
+      "canonical_path": "icons/zecalibrator_16x16.png",
+      "packaged_path": "zecalibrator/resources/icons/zecalibrator_16x16.png",
+      "sha256": "7793ee217e847cc5b506f7d5bc56bb7a64bfd42ad309276cb6b0d592d78f8b20"
+    },
+    {
+      "name": "zecalibrator_24x24.png",
+      "canonical_path": "icons/zecalibrator_24x24.png",
+      "packaged_path": "zecalibrator/resources/icons/zecalibrator_24x24.png",
+      "sha256": "04bbb703d545b012bf63513662d1c5bd4197b92113427971e9f6a5fab5c9c8da"
+    },
+    {
+      "name": "zecalibrator_256x256.png",
+      "canonical_path": "icons/zecalibrator_256x256.png",
+      "packaged_path": "zecalibrator/resources/icons/zecalibrator_256x256.png",
+      "sha256": "205e6fb9260d0e19b71e37069aa753d975109cd36412624dae46eef67bdd4ece"
+    },
+    {
+      "name": "zecalibrator_32x32.png",
+      "canonical_path": "icons/zecalibrator_32x32.png",
+      "packaged_path": "zecalibrator/resources/icons/zecalibrator_32x32.png",
+      "sha256": "2789d59d6cd2157c8f5d00c37fb8ef77cd2742fd2aa4945d6c407145d8be10a6"
+    },
+    {
+      "name": "zecalibrator_48x48.png",
+      "canonical_path": "icons/zecalibrator_48x48.png",
+      "packaged_path": "zecalibrator/resources/icons/zecalibrator_48x48.png",
+      "sha256": "cc66ea671658872b7c521e6bae4a7e8a4566b4b868a41819ee5ef8e98e3a1c87"
+    },
+    {
+      "name": "zecalibrator_512x512.png",
+      "canonical_path": "icons/zecalibrator_512x512.png",
+      "packaged_path": "zecalibrator/resources/icons/zecalibrator_512x512.png",
+      "sha256": "be09aa8b33ca0e17ee1ed269c22e48b3b345b7875edbe0e28e06d789199995d8"
+    },
+    {
+      "name": "zecalibrator_64x64.png",
+      "canonical_path": "icons/zecalibrator_64x64.png",
+      "packaged_path": "zecalibrator/resources/icons/zecalibrator_64x64.png",
+      "sha256": "c5b050eff9b13c254e0901a5eca53fc05ebeb47700091f70acec70e4f3678cd5"
+    },
+    {
+      "name": "zecalibrator_icon.png",
+      "canonical_path": "icons/zecalibrator_icon.png",
+      "packaged_path": "zecalibrator/resources/icons/zecalibrator_icon.png",
+      "sha256": "7ad1589da6dd0d4b16780bd687ff79dec8fc999e4d0cc03431303117357b5ee4"
+    }
+  ]
+}

@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ZeCalibrator"
+dynamic = ["version"]
+description = "ZeCalibrator: raw astronomical sensor FITS calibration engine (bootstrap skeleton)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
+authors = [{ name = "ZeSoftware" }]
+keywords = ["astronomy", "calibration", "fits", "cfa"]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Science/Research",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering :: Astronomy",
+]
+dependencies = [
+  "platformdirs>=4",
+]
+
+[project.optional-dependencies]
+gui = [
+  "PySide6>=6.6",
+]
+
+[project.scripts]
+zecalibrator = "zecalibrator.cli:main"
+
+[project.gui-scripts]
+zecalibrator-gui = "zecalibrator.gui.app:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "zecalibrator._version.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["zecalibrator*"]
+
+[tool.setuptools.package-data]
+zecalibrator = [
+  "resources/icons/*",
+  "resources/icon_manifest.json",
+  "zesoftware_interop.json",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

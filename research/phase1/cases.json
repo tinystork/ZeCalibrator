@@ -1,0 +1,1033 @@
+{
+  "mission_id": "ZC-P1-M1-CONTRACT-DRAFT-20260915",
+  "phase": "owner-reconciliation",
+  "status": "OWNER_DECISIONS_ADOPTED; G1 acceptance recorded only in TODO.md",
+  "schema": "zecalibrator.phase1.cases.v1",
+  "note": "Declarative design-expectation cases for the Phase 1 contract. matching_cases are DECLARATION-ONLY (no matcher implementation exists; a matcher is a Phase 4 deliverable). Every case starts from a fresh deep materialization of hypothetical_synthetic_baseline (no shared mutable objects); overrides/removals/add_candidates target REAL materialized paths and are mechanically applied+validated by contract_witness.py. Fixture content hashes/descriptor/mask identities are syntactically valid 64-hex SYNTHETIC fixture identities (not measured file hashes).",
+  "hypothetical_synthetic_baseline": {
+    "id": "SYNTH-BASE-1",
+    "qualification": "HYPOTHETICAL synthetic reference/test baseline for declarative cases ONLY; NOT a real detector; no real master qualification implied; gain/offset/readout/ADC values are visibly invented for the synthetic fixture only; content/descriptor/mask identities are 64-hex SYNTHETIC fixture identities, not real bytes.",
+    "storage_representation": "signed int16 FITS storage + BSCALE=1 BZERO=32768 -> physical uint16 ADU (storage vs physical distinct, per G0)",
+    "detector": {
+      "detector_instance_id": "SYNTH-DET-0001",
+      "detector_model": "SYNTH-CFA",
+      "serial": null
+    },
+    "geometry": {
+      "sensor_dimensions": [
+        1080,
+        1920
+      ],
+      "shape": [
+        1080,
+        1920
+      ],
+      "binning": [
+        1,
+        1
+      ],
+      "roi_origin": [
+        0,
+        0
+      ],
+      "roi_extent": [
+        1080,
+        1920
+      ],
+      "orientation": "identity",
+      "cfa_phase": "GRBG"
+    },
+    "light": {
+      "acquisition": {
+        "gain": 100,
+        "offset": 50,
+        "readout_mode": "MODE_A",
+        "adc_mode": "MODE_16",
+        "exposure_s": 10.0,
+        "temperature_c": 20.0,
+        "saturation_limit_adu": 60000,
+        "saturation_evidence": "qualified"
+      },
+      "optical": {
+        "optical_train_id": "SYNTH-TRAIN-1",
+        "filter": "NONE"
+      },
+      "domain": {
+        "raw_domain": true,
+        "processed_history": "none"
+      }
+    },
+    "masters": {
+      "bias": {
+        "master_type": "bias",
+        "bias_state": "not_applicable",
+        "pixel_domain": "sensor_adu",
+        "physical_units": "ADU",
+        "flat_form": null,
+        "normalization_algorithm": null,
+        "normalization_scalars": null,
+        "acquisition": {
+          "gain": 100,
+          "offset": 50,
+          "readout_mode": "MODE_A",
+          "adc_mode": "MODE_16",
+          "exposure_s": 0.001,
+          "temperature_c": 20.0,
+          "saturation_limit_adu": 60000,
+          "saturation_evidence": "qualified"
+        },
+        "optical": {
+          "optical_train_id": null,
+          "filter": null
+        },
+        "content_sha256": "0101010101010101010101010101010101010101010101010101010101010101",
+        "descriptor_id": "1111111111111111111111111111111111111111111111111111111111111111",
+        "size_bytes": 4147200,
+        "hdu": 0,
+        "mask_identity": "2121212121212121212121212121212121212121212121212121212121212121",
+        "processing_provenance": {
+          "source": "synthetic_fixture",
+          "additive_correction_history": [],
+          "normalization": null
+        },
+        "validity_evidence": {
+          "saturation_limit_known": true,
+          "valid_normalization_count": null,
+          "quality_policy_state": "qualified"
+        }
+      },
+      "dark_incl": {
+        "master_type": "dark",
+        "bias_state": "included",
+        "pixel_domain": "sensor_adu",
+        "physical_units": "ADU",
+        "flat_form": null,
+        "normalization_algorithm": null,
+        "normalization_scalars": null,
+        "acquisition": {
+          "gain": 100,
+          "offset": 50,
+          "readout_mode": "MODE_A",
+          "adc_mode": "MODE_16",
+          "exposure_s": 10.0,
+          "temperature_c": 20.0,
+          "saturation_limit_adu": 60000,
+          "saturation_evidence": "qualified"
+        },
+        "optical": {
+          "optical_train_id": null,
+          "filter": null
+        },
+        "content_sha256": "0202020202020202020202020202020202020202020202020202020202020202",
+        "descriptor_id": "1212121212121212121212121212121212121212121212121212121212121212",
+        "size_bytes": 4147200,
+        "hdu": 0,
+        "mask_identity": "2222222222222222222222222222222222222222222222222222222222222222",
+        "processing_provenance": {
+          "source": "synthetic_fixture",
+          "additive_correction_history": [],
+          "normalization": null
+        },
+        "validity_evidence": {
+          "saturation_limit_known": true,
+          "valid_normalization_count": null,
+          "quality_policy_state": "qualified"
+        }
+      },
+      "dark_removed": {
+        "master_type": "dark",
+        "bias_state": "removed",
+        "pixel_domain": "sensor_adu",
+        "physical_units": "ADU",
+        "flat_form": null,
+        "normalization_algorithm": null,
+        "normalization_scalars": null,
+        "acquisition": {
+          "gain": 100,
+          "offset": 50,
+          "readout_mode": "MODE_A",
+          "adc_mode": "MODE_16",
+          "exposure_s": 10.0,
+          "temperature_c": 20.0,
+          "saturation_limit_adu": 60000,
+          "saturation_evidence": "qualified"
+        },
+        "optical": {
+          "optical_train_id": null,
+          "filter": null
+        },
+        "content_sha256": "0303030303030303030303030303030303030303030303030303030303030303",
+        "descriptor_id": "1313131313131313131313131313131313131313131313131313131313131313",
+        "size_bytes": 4147200,
+        "hdu": 0,
+        "mask_identity": "2323232323232323232323232323232323232323232323232323232323232323",
+        "processing_provenance": {
+          "source": "synthetic_fixture",
+          "additive_correction_history": [
+            "bias_removed"
+          ],
+          "normalization": null
+        },
+        "validity_evidence": {
+          "saturation_limit_known": true,
+          "valid_normalization_count": null,
+          "quality_policy_state": "qualified"
+        }
+      },
+      "flat": {
+        "master_type": "flat",
+        "bias_state": "not_applicable",
+        "pixel_domain": "sensor_adu",
+        "physical_units": "ADU",
+        "flat_form": "raw_response",
+        "normalization_algorithm": null,
+        "normalization_scalars": null,
+        "acquisition": {
+          "gain": 100,
+          "offset": 50,
+          "readout_mode": "MODE_A",
+          "adc_mode": "MODE_16",
+          "exposure_s": 1.0,
+          "temperature_c": 20.0,
+          "saturation_limit_adu": 60000,
+          "saturation_evidence": "qualified"
+        },
+        "optical": {
+          "optical_train_id": "SYNTH-TRAIN-1",
+          "filter": "NONE"
+        },
+        "content_sha256": "0404040404040404040404040404040404040404040404040404040404040404",
+        "descriptor_id": "1414141414141414141414141414141414141414141414141414141414141414",
+        "size_bytes": 4147200,
+        "hdu": 0,
+        "mask_identity": "2424242424242424242424242424242424242424242424242424242424242424",
+        "processing_provenance": {
+          "source": "synthetic_fixture",
+          "additive_correction_history": [],
+          "normalization": null
+        },
+        "validity_evidence": {
+          "saturation_limit_known": true,
+          "valid_normalization_count": null,
+          "quality_policy_state": "qualified"
+        }
+      },
+      "flat_dark": {
+        "master_type": "flat_dark",
+        "bias_state": "included",
+        "pixel_domain": "sensor_adu",
+        "physical_units": "ADU",
+        "flat_form": null,
+        "normalization_algorithm": null,
+        "normalization_scalars": null,
+        "acquisition": {
+          "gain": 100,
+          "offset": 50,
+          "readout_mode": "MODE_A",
+          "adc_mode": "MODE_16",
+          "exposure_s": 1.0,
+          "temperature_c": 20.0,
+          "saturation_limit_adu": 60000,
+          "saturation_evidence": "qualified"
+        },
+        "optical": {
+          "optical_train_id": "SYNTH-TRAIN-1",
+          "filter": "NONE"
+        },
+        "content_sha256": "0505050505050505050505050505050505050505050505050505050505050505",
+        "descriptor_id": "1515151515151515151515151515151515151515151515151515151515151515",
+        "size_bytes": 4147200,
+        "hdu": 0,
+        "mask_identity": "2525252525252525252525252525252525252525252525252525252525252525",
+        "processing_provenance": {
+          "source": "synthetic_fixture",
+          "additive_correction_history": [],
+          "normalization": null
+        },
+        "validity_evidence": {
+          "saturation_limit_known": true,
+          "valid_normalization_count": null,
+          "quality_policy_state": "qualified"
+        }
+      }
+    },
+    "capability_scope": "signed raw decode; exact-geometry matching; four-plane flat normalization (synthetic fixtures only)",
+    "limitations": "no real detector qualification; no firmware/preprocessing provenance claim"
+  },
+  "equation_dependencies": {
+    "light_control": "A = L",
+    "light_bias_only": "A = L - B",
+    "light_dark_incl_bias": "A = L - Dinc",
+    "light_dark_bias_removed": "A = L - B - D0",
+    "flat_flatdark_incl_bias": "Fcorr = Finc - FDinc",
+    "flat_flatdark_bias_removed": "Fcorr = Finc - Bflat - FD0",
+    "flat_bias_only": "Fcorr = Finc - Bflat",
+    "flat_already_corrected": "consume R directly",
+    "flat_normalize_mono": "s = median(valid Fcorr); R = Fcorr / s",
+    "flat_normalize_cfa": "s[p] per parity plane; R[y,x] = Fcorr[y,x] / s[parity(y,x)]",
+    "final_with_flat": "C = A / R",
+    "final_no_flat": "C = A",
+    "flat_only_partial": "A = L; C = L / R"
+  },
+  "reason_code_registry": {
+    "GEOMETRY_MISMATCH": "shape/ROI/orientation/binning/CFA-phase not exactly equal",
+    "ROI_ORIGIN_MISMATCH": "roi_origin differs even when NAXIS shape is identical",
+    "BINNING_MISMATCH": "bin_x/bin_y differ",
+    "CFA_PHASE_MISMATCH": "CFA parity phase differs (e.g. x-origin shift)",
+    "DETECTOR_MISMATCH": "detector instance/model differ",
+    "GAIN_MISMATCH": "gain differs",
+    "OFFSET_MISMATCH": "offset differs",
+    "READOUT_MISMATCH": "readout mode differs",
+    "ADC_MISMATCH": "ADC/acquisition mode differs",
+    "EXPOSURE_MISMATCH": "exposure outside serialization tolerance",
+    "TEMPERATURE_MISMATCH": "temperature outside zero + parser tolerance",
+    "FILTER_MISMATCH": "flat filter differs (flat only)",
+    "OPTICAL_TRAIN_MISMATCH": "flat optical train differs (flat only)",
+    "MISSING_REQUIRED_FIELD": "required matching field absent and no qualified declaration",
+    "UNKNOWN_EQUALS_UNKNOWN": "two unknown values never match automatically",
+    "ALIAS_CONFLICT": "duplicate/contradictory aliases disagree",
+    "UNDOCUMENTED_PROCESSING": "undocumented master processing or processed history",
+    "SATURATED_FLAT": "flat normalization population empty or below quality gate",
+    "FLAT_UNUSABLE": "flat has zero valid samples in a required plane",
+    "FLAT_ADDITIVE_DEPENDENCY_MISSING": "flat's own flat-dark/bias dependency missing",
+    "ROLE_UNAVAILABLE": "requested role has no compatible candidate",
+    "NORMALIZATION_SCALAR_COUNT_MISMATCH": "normalized CFA flat lacks four labelled scalars (G1/R/B/G2)",
+    "QUALITY_POLICY_PENDING": "flat quality policy unresolved; cannot proceed as if qualified"
+  },
+  "dq_bits": [
+    {
+      "bit": 0,
+      "hex": "0x0001",
+      "name": "INPUT_INVALID",
+      "kind": "invalid",
+      "meaning": "light sample invalid in stored space (BLANK/NaN/Inf) or decode failure"
+    },
+    {
+      "bit": 1,
+      "hex": "0x0002",
+      "name": "ADDITIVE_INVALID",
+      "kind": "invalid",
+      "meaning": "contributing bias/dark master sample invalid"
+    },
+    {
+      "bit": 2,
+      "hex": "0x0004",
+      "name": "FLAT_INVALID",
+      "kind": "invalid",
+      "meaning": "flat response invalid (non-positive, non-finite, or <= floor)"
+    },
+    {
+      "bit": 3,
+      "hex": "0x0008",
+      "name": "SATURATED",
+      "kind": "invalid",
+      "meaning": "sample at/above a qualified saturation limit (evaluated on original acquisition values)"
+    },
+    {
+      "bit": 4,
+      "hex": "0x0010",
+      "name": "ARITH_NONFINITE",
+      "kind": "invalid",
+      "meaning": "arithmetic produced NaN/Inf (Inf canonicalized to NaN + this bit)"
+    }
+  ],
+  "quality_gate_cases": [
+    {
+      "id": "qg_89_of_100",
+      "valid": 89,
+      "total": 100,
+      "threshold_pct": 90,
+      "meets": false,
+      "note": "89/100 = 89.0% < 90% -> below gate"
+    },
+    {
+      "id": "qg_90_of_100",
+      "valid": 90,
+      "total": 100,
+      "threshold_pct": 90,
+      "meets": true,
+      "note": "90/100 = 90.0% >= 90% -> at gate (inclusive)"
+    },
+    {
+      "id": "qg_91_of_100",
+      "valid": 91,
+      "total": 100,
+      "threshold_pct": 90,
+      "meets": true,
+      "note": "91/100 = 91.0% > 90% -> above gate"
+    }
+  ],
+  "alias_conflict_cases": [
+    {
+      "id": "alias_exposure_agree",
+      "stage": "alias_normalization",
+      "field": "exposure_seconds",
+      "cards": [
+        {
+          "EXPTIME": 20.0
+        },
+        {
+          "EXPOSURE": 20.0
+        }
+      ],
+      "expected": "ACCEPTED",
+      "note": "agreeing aliases normalize to one value; duplicate cards preserved in ordered sequence"
+    },
+    {
+      "id": "alias_exposure_conflict",
+      "stage": "alias_normalization",
+      "field": "exposure_seconds",
+      "cards": [
+        {
+          "EXPTIME": 20.0
+        },
+        {
+          "EXPOSURE": 10.0
+        }
+      ],
+      "expected": "REJECTED",
+      "note": "disagreeing aliases are never silently resolved"
+    },
+    {
+      "id": "alias_binning_agree",
+      "stage": "alias_normalization",
+      "field": "bin_x",
+      "cards": [
+        {
+          "XBINNING": 1
+        },
+        {
+          "CCDXBIN": 1
+        }
+      ],
+      "expected": "ACCEPTED"
+    },
+    {
+      "id": "alias_binning_conflict",
+      "stage": "alias_normalization",
+      "field": "bin_x",
+      "cards": [
+        {
+          "XBINNING": 1
+        },
+        {
+          "CCDXBIN": 2
+        }
+      ],
+      "expected": "REJECTED"
+    },
+    {
+      "id": "repeated_identical_keyword_preserved",
+      "stage": "card_record",
+      "field": "EXPTIME",
+      "cards": [
+        {
+          "EXPTIME": 20.0,
+          "index": 0,
+          "source": "primary"
+        },
+        {
+          "EXPTIME": 20.0,
+          "index": 1,
+          "source": "duplicate"
+        }
+      ],
+      "expected": "PRESERVED",
+      "note": "a CardRecord ordered sequence preserves BOTH duplicate cards with their index/source; a Mapping would silently drop one"
+    }
+  ],
+  "matching_cases": [
+    {
+      "id": "dark_ignores_filter",
+      "declaration_only": true,
+      "stage": "matching",
+      "role": "dark vs light",
+      "baseline": "SYNTH-BASE-1",
+      "request": {
+        "additive_mode": "dark_incl_bias",
+        "flat_mode": "none"
+      },
+      "overrides": {
+        "light.optical.filter": "IRCUT"
+      },
+      "removals": [],
+      "add_candidates": [],
+      "expected_outcome": "MATCHED",
+      "reason_codes": [],
+      "note": "filter is not a criterion for dark matching; detector/geometry/gain/offset/readout/ADC/CFA/thermal/exposure govern; dark filter may be null or differ",
+      "equation_dependency": "light_dark_incl_bias"
+    },
+    {
+      "id": "flat_requires_filter_and_optical_train",
+      "declaration_only": true,
+      "stage": "matching",
+      "role": "flat vs light",
+      "baseline": "SYNTH-BASE-1",
+      "request": {
+        "additive_mode": "dark_incl_bias",
+        "flat_mode": "apply"
+      },
+      "overrides": {},
+      "removals": [],
+      "add_candidates": [],
+      "expected_outcome": "MATCHED",
+      "reason_codes": [],
+      "note": "filter and optical train match the baseline; flat has its flat_dark dependency present; full acquisition matches",
+      "equation_dependency": "final_with_flat"
+    },
+    {
+      "id": "flat_filter_mismatch_rejects",
+      "declaration_only": true,
+      "stage": "matching",
+      "role": "flat vs light",
+      "baseline": "SYNTH-BASE-1",
+      "request": {
+        "additive_mode": "dark_incl_bias",
+        "flat_mode": "apply"
+      },
+      "overrides": {
+        "light.optical.filter": "LP"
+      },
+      "removals": [],
+      "add_candidates": [],
+      "expected_outcome": "NO_MATCH",
+      "reason_codes": [
+        "FILTER_MISMATCH"
+      ],
+      "note": "filter is exact for flat; baseline NONE vs LP is a hard rejection",
+      "equation_dependency": "final_with_flat"
+    },
+    {
+      "id": "flatdark_exposure_vs_parent_flat",
+      "declaration_only": true,
+      "stage": "matching",
+      "role": "flat-dark vs parent flat",
+      "baseline": "SYNTH-BASE-1",
+      "request": {
+        "additive_mode": "dark_incl_bias",
+        "flat_mode": "apply"
+      },
+      "overrides": {},
+      "removals": [],
+      "add_candidates": [],
+      "expected_outcome": "MATCHED",
+      "reason_codes": [],
+      "note": "flat and flat_dark both exposure_s=1.0 in baseline; flat-dark exposure compared to parent flat (not the light)",
+      "equation_dependency": "flat_flatdark_incl_bias"
+    },
+    {
+      "id": "flatdark_exposure_mismatch_rejects",
+      "declaration_only": true,
+      "stage": "matching",
+      "role": "flat-dark vs parent flat",
+      "baseline": "SYNTH-BASE-1",
+      "request": {
+        "additive_mode": "dark_incl_bias",
+        "flat_mode": "apply"
+      },
+      "overrides": {
+        "masters.flat_dark.acquisition.exposure_s": 20.0
+      },
+      "removals": [],
+      "add_candidates": [],
+      "expected_outcome": "NO_MATCH",
+      "reason_codes": [
+        "EXPOSURE_MISMATCH"
+      ],
+      "note": "flat-dark must be exposure-matched to its parent flat; tolerance only",
+      "equation_dependency": "flat_flatdark_incl_bias"
+    },
+    {
+      "id": "bias_acquisition_range_not_universal_zero",
+      "declaration_only": true,
+      "stage": "matching",
+      "role": "bias vs light",
+      "baseline": "SYNTH-BASE-1",
+      "request": {
+        "additive_mode": "bias_only",
+        "flat_mode": "none"
+      },
+      "overrides": {},
+      "removals": [],
+      "add_candidates": [],
+      "expected_outcome": "MATCHED",
+      "reason_codes": [],
+      "note": "baseline bias exposure 0.001s satisfies a declared qualified near-zero acquisition range [0,0.01]s; full acquisition (gain/offset/readout/ADC) matches",
+      "equation_dependency": "light_bias_only"
+    },
+    {
+      "id": "geometry_roi_origin_mismatch_rejects",
+      "declaration_only": true,
+      "stage": "matching",
+      "role": "any",
+      "baseline": "SYNTH-BASE-1",
+      "request": {
+        "additive_mode": "dark_incl_bias",
+        "flat_mode": "none"
+      },
+      "overrides": {
+        "masters.dark_incl.geometry.roi_origin": [
+          1,
+          0
+        ]
+      },
+      "removals": [],
+      "add_candidates": [],
+      "expected_outcome": "NO_MATCH",
+      "reason_codes": [
+        "ROI_ORIGIN_MISMATCH",
+        "CFA_PHASE_MISMATCH"
+      ],
+      "note": "same shape but different ROI origin flips CFA phase; exact geometry rejects; no cropping",
+      "equation_dependency": "flat_normalize_cfa"
+    },
+    {
+      "id": "unknown_not_equal_unknown",
+      "declaration_only": true,
+      "stage": "matching",
+      "role": "any",
+      "baseline": "SYNTH-BASE-1",
+      "request": {
+        "additive_mode": "dark_incl_bias",
+        "flat_mode": "none"
+      },
+      "overrides": {
+        "light.detector.detector_instance_id": "unknown",
+        "masters.dark_incl.detector.detector_instance_id": "unknown"
+      },
+      "removals": [],
+      "add_candidates": [],
+      "expected_outcome": "NO_MATCH",
+      "reason_codes": [
+        "UNKNOWN_EQUALS_UNKNOWN",
+        "MISSING_REQUIRED_FIELD"
+      ],
+      "note": "detector_instance_id unknown on light AND master independently (explicit independent overrides, no shared-object aliasing) never matches automatically",
+      "equation_dependency": null
+    },
+    {
+      "id": "duplicate_identical_masters_collapse",
+      "declaration_only": true,
+      "stage": "matching",
+      "role": "library",
+      "baseline": "SYNTH-BASE-1",
+      "request": {
+        "additive_mode": "dark_incl_bias",
+        "flat_mode": "none"
+      },
+      "overrides": {},
+      "removals": [],
+      "add_candidates": [
+        {
+          "clone_from": "masters.dark_incl",
+          "new_key": "dark_incl_dup",
+          "overrides": {}
+        }
+      ],
+      "expected_outcome": "MATCHED",
+      "reason_codes": [],
+      "note": "clone has identical content_sha256 and descriptor_id -> collapses to one content identity, preserving all locations",
+      "equation_dependency": null
+    },
+    {
+      "id": "duplicate_different_hashes_ambiguous",
+      "declaration_only": true,
+      "stage": "matching",
+      "role": "library",
+      "baseline": "SYNTH-BASE-1",
+      "request": {
+        "additive_mode": "dark_incl_bias",
+        "flat_mode": "none"
+      },
+      "overrides": {},
+      "removals": [],
+      "add_candidates": [
+        {
+          "clone_from": "masters.dark_incl",
+          "new_key": "dark_incl_dup",
+          "overrides": {
+            "content_sha256": "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0",
+            "descriptor_id": "a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0"
+          }
+        }
+      ],
+      "expected_outcome": "AMBIGUOUS",
+      "reason_codes": [],
+      "note": "different hashes with valid descriptors remain ambiguous; manual choice may resolve (recorded)",
+      "equation_dependency": null
+    },
+    {
+      "id": "manual_choice_never_bypasses_hard_rejection",
+      "declaration_only": true,
+      "stage": "matching",
+      "role": "library",
+      "baseline": "SYNTH-BASE-1",
+      "request": {
+        "additive_mode": "dark_incl_bias",
+        "flat_mode": "none"
+      },
+      "overrides": {
+        "masters.dark_incl.geometry.binning": [
+          2,
+          2
+        ]
+      },
+      "removals": [],
+      "add_candidates": [],
+      "expected_outcome": "NO_MATCH",
+      "reason_codes": [
+        "GEOMETRY_MISMATCH",
+        "BINNING_MISMATCH"
+      ],
+      "note": "manual choice resolves ambiguity among valid candidates only; it cannot bypass hard science rejections",
+      "equation_dependency": null
+    },
+    {
+      "id": "frozen_request_prevents_implicit_downgrade",
+      "declaration_only": true,
+      "stage": "matching",
+      "role": "request routing",
+      "baseline": "SYNTH-BASE-1",
+      "request": {
+        "additive_mode": "dark_incl_bias",
+        "flat_mode": "apply"
+      },
+      "overrides": {},
+      "removals": [
+        "masters.dark_incl",
+        "masters.dark_removed"
+      ],
+      "add_candidates": [],
+      "expected_outcome": "NO_MATCH",
+      "reason_codes": [
+        "ROLE_UNAVAILABLE"
+      ],
+      "note": "request fixes required roles before matching; removing dark masters never silently downgrades to bias_only",
+      "equation_dependency": "light_dark_incl_bias"
+    },
+    {
+      "id": "complete_set_with_flat_dependencies",
+      "declaration_only": true,
+      "stage": "matching",
+      "role": "selection",
+      "baseline": "SYNTH-BASE-1",
+      "request": {
+        "additive_mode": "dark_incl_bias",
+        "flat_mode": "apply"
+      },
+      "overrides": {},
+      "removals": [],
+      "add_candidates": [],
+      "expected_outcome": "MATCHED",
+      "reason_codes": [],
+      "note": "complete coherent set includes the flat's own flat-dark additive dependency",
+      "equation_dependency": "final_with_flat"
+    },
+    {
+      "id": "incomplete_set_no_flatdark",
+      "declaration_only": true,
+      "stage": "matching",
+      "role": "selection",
+      "baseline": "SYNTH-BASE-1",
+      "request": {
+        "additive_mode": "dark_incl_bias",
+        "flat_mode": "apply"
+      },
+      "overrides": {},
+      "removals": [
+        "masters.flat_dark"
+      ],
+      "add_candidates": [],
+      "expected_outcome": "NO_MATCH",
+      "reason_codes": [
+        "FLAT_ADDITIVE_DEPENDENCY_MISSING"
+      ],
+      "note": "flat requires its additive correction; removing flat_dark makes the set incomplete",
+      "equation_dependency": "flat_flatdark_incl_bias"
+    },
+    {
+      "id": "normalized_flat_four_scalars_matched",
+      "declaration_only": true,
+      "stage": "matching",
+      "role": "flat descriptor semantics",
+      "baseline": "SYNTH-BASE-1",
+      "request": {
+        "additive_mode": "dark_incl_bias",
+        "flat_mode": "apply"
+      },
+      "overrides": {
+        "masters.flat.flat_form": "normalized_response",
+        "masters.flat.pixel_domain": "normalized_response",
+        "masters.flat.physical_units": "dimensionless",
+        "masters.flat.normalization_algorithm": "cfa-median-per-plane",
+        "masters.flat.normalization_scalars": {
+          "g1": 1.0,
+          "r": 1.0,
+          "b": 1.0,
+          "g2": 1.0
+        },
+        "masters.flat.processing_provenance.additive_correction_history": [
+          "flat_dark_subtracted"
+        ],
+        "masters.flat.processing_provenance.normalization": {
+          "algorithm": "cfa-median-per-plane",
+          "population": "cfa-4-plane",
+          "scalars": {
+            "g1": 1.0,
+            "r": 1.0,
+            "b": 1.0,
+            "g2": 1.0
+          }
+        }
+      },
+      "removals": [],
+      "add_candidates": [],
+      "expected_outcome": "MATCHED",
+      "reason_codes": [],
+      "note": "normalized CFA flat consumed directly; FOUR labelled scalars (G1/R/B/G2), dimensionless domain/units, coherent additive+normalization history (no residual raw_response)",
+      "equation_dependency": "flat_already_corrected"
+    },
+    {
+      "id": "normalized_flat_single_scalar_rejected",
+      "declaration_only": true,
+      "stage": "matching",
+      "role": "flat descriptor semantics",
+      "baseline": "SYNTH-BASE-1",
+      "request": {
+        "additive_mode": "dark_incl_bias",
+        "flat_mode": "apply"
+      },
+      "overrides": {
+        "masters.flat.flat_form": "normalized_response",
+        "masters.flat.pixel_domain": "normalized_response",
+        "masters.flat.physical_units": "dimensionless",
+        "masters.flat.normalization_algorithm": "median",
+        "masters.flat.normalization_scalars": [
+          1.0
+        ],
+        "masters.flat.processing_provenance.additive_correction_history": [
+          "flat_dark_subtracted"
+        ],
+        "masters.flat.processing_provenance.normalization": {
+          "algorithm": "median",
+          "population": "mono-valid",
+          "scalars": [
+            1.0
+          ]
+        }
+      },
+      "removals": [],
+      "add_candidates": [],
+      "expected_outcome": "NO_MATCH",
+      "reason_codes": [
+        "NORMALIZATION_SCALAR_COUNT_MISMATCH"
+      ],
+      "note": "negative control: a CFA (GRBG) normalized flat with a single scalar is invalid; must reject, not MATCH",
+      "equation_dependency": "flat_normalize_cfa"
+    },
+    {
+      "id": "flat_corrected_unnormalized_needs_cfa_normalization",
+      "declaration_only": true,
+      "stage": "matching",
+      "role": "flat descriptor semantics",
+      "baseline": "SYNTH-BASE-1",
+      "request": {
+        "additive_mode": "dark_incl_bias",
+        "flat_mode": "apply"
+      },
+      "overrides": {
+        "masters.flat.flat_form": "corrected_unnormalized",
+        "masters.flat.pixel_domain": "sensor_adu",
+        "masters.flat.physical_units": "ADU",
+        "masters.flat.normalization_algorithm": null,
+        "masters.flat.normalization_scalars": null,
+        "masters.flat.processing_provenance.additive_correction_history": [
+          "flat_dark_subtracted"
+        ],
+        "masters.flat.processing_provenance.normalization": null
+      },
+      "removals": [],
+      "add_candidates": [],
+      "expected_outcome": "MATCHED",
+      "reason_codes": [],
+      "note": "corrected-unnormalized (Fcorr) on CFA baseline must be normalized by the engine via four-plane CFA normalization, never consumed directly",
+      "equation_dependency": "flat_normalize_cfa"
+    },
+    {
+      "id": "bias_removed_dark_requires_compatible_bias",
+      "declaration_only": true,
+      "stage": "matching",
+      "role": "dark bias_removed dependency",
+      "baseline": "SYNTH-BASE-1",
+      "request": {
+        "additive_mode": "dark_bias_removed",
+        "flat_mode": "none"
+      },
+      "overrides": {},
+      "removals": [
+        "masters.bias"
+      ],
+      "add_candidates": [],
+      "expected_outcome": "NO_MATCH",
+      "reason_codes": [
+        "ROLE_UNAVAILABLE"
+      ],
+      "note": "bias-removed dark (A=L-B-D0) requires a compatible bias master; removing bias blocks the set",
+      "equation_dependency": "light_dark_bias_removed"
+    },
+    {
+      "id": "missing_required_acquisition_rejected",
+      "declaration_only": true,
+      "stage": "matching",
+      "role": "incomplete metadata",
+      "baseline": "SYNTH-BASE-1",
+      "request": {
+        "additive_mode": "dark_incl_bias",
+        "flat_mode": "none"
+      },
+      "overrides": {},
+      "removals": [
+        "light.acquisition.gain",
+        "light.acquisition.offset"
+      ],
+      "add_candidates": [],
+      "expected_outcome": "NO_MATCH",
+      "reason_codes": [
+        "MISSING_REQUIRED_FIELD"
+      ],
+      "note": "removing required acquisition facts (gain, offset) produces a documented refusal, not an implicit default",
+      "equation_dependency": null
+    },
+    {
+      "id": "normalized_history_contradiction_detected",
+      "declaration_only": true,
+      "stage": "matching",
+      "role": "flat descriptor semantics",
+      "baseline": "SYNTH-BASE-1",
+      "request": {
+        "additive_mode": "dark_incl_bias",
+        "flat_mode": "apply"
+      },
+      "overrides": {
+        "masters.flat.flat_form": "normalized_response",
+        "masters.flat.pixel_domain": "normalized_response",
+        "masters.flat.physical_units": "dimensionless",
+        "masters.flat.normalization_algorithm": "cfa-median-per-plane",
+        "masters.flat.normalization_scalars": {
+          "g1": 1.0,
+          "r": 1.0,
+          "b": 1.0,
+          "g2": 1.0
+        }
+      },
+      "removals": [],
+      "add_candidates": [],
+      "expected_outcome": "NO_MATCH",
+      "reason_codes": [
+        "UNDOCUMENTED_PROCESSING"
+      ],
+      "note": "flat_form normalized_response but processing_provenance still claims raw (additive history empty, normalization null) -> contradictory processing evidence rejected",
+      "equation_dependency": "flat_already_corrected"
+    },
+    {
+      "id": "bias_ignores_filter",
+      "declaration_only": true,
+      "stage": "matching",
+      "role": "bias vs light",
+      "baseline": "SYNTH-BASE-1",
+      "request": {
+        "additive_mode": "bias_only",
+        "flat_mode": "none"
+      },
+      "overrides": {
+        "light.optical.filter": "LP"
+      },
+      "removals": [],
+      "add_candidates": [],
+      "expected_outcome": "MATCHED",
+      "reason_codes": [],
+      "note": "Owner clarification: filter exactness applies to flats; a scientifically irrelevant light/bias filter difference does not reject a compatible bias. Other required facts unchanged.",
+      "equation_dependency": "light_bias_only"
+    }
+  ],
+  "protected_decisions": [
+    {
+      "id": "license",
+      "status": "adopted",
+      "owner": "Tristan",
+      "question": "Project license for ZeCalibrator engine/project",
+      "blocked_scope": "none for this owner choice; later evidence/release gates remain separate",
+      "selected": {
+        "spdx": "GPL-3.0-or-later"
+      },
+      "decision_record": "ZC-G1-OWNER-20260915"
+    },
+    {
+      "id": "first_supported_cohort",
+      "status": "adopted",
+      "owner": "Tristan",
+      "question": "First officially supported acquisition cohort/profile",
+      "blocked_scope": "none for this owner choice; later evidence/release gates remain separate",
+      "selected": {
+        "id": "SYNTH-BASE-1",
+        "qualification": "synthetic-only",
+        "real_camera_qualified": false
+      },
+      "decision_record": "ZC-G1-OWNER-20260915"
+    },
+    {
+      "id": "temperature_tolerance",
+      "status": "adopted",
+      "owner": "Tristan",
+      "question": "Any nonzero scientific temperature tolerance",
+      "blocked_scope": "none for this owner choice; later evidence/release gates remain separate",
+      "selected": {
+        "scientific_celsius": 0.0,
+        "parser_celsius": 1e-06,
+        "nonzero_requires_versioned_camera_master_profile": true,
+        "nonzero_requires_real_witnesses": true,
+        "generic_nonzero_allowed": false
+      },
+      "decision_record": "ZC-G1-OWNER-20260915"
+    },
+    {
+      "id": "flat_quality_gate",
+      "status": "adopted",
+      "owner": "Tristan",
+      "question": "Flat normalization quality gate (A >=90% screening default vs B 100% vs C configured)",
+      "blocked_scope": "none for this owner choice; later evidence/release gates remain separate",
+      "selected": {
+        "threshold_pct": 90.0,
+        "per_cfa_plane": true,
+        "kind": "product_screening_not_physical_law",
+        "override_requires_versioned_profile": true
+      },
+      "decision_record": "ZC-G1-OWNER-20260915"
+    },
+    {
+      "id": "missing_metadata_declaration",
+      "status": "adopted",
+      "owner": "Tristan",
+      "question": "Strict evidence refusal vs versioned evidence-backed import/profile declarations",
+      "blocked_scope": "none for this owner choice; later evidence/release gates remain separate",
+      "selected": {
+        "automatic_default": "strict_refusal",
+        "versioned_evidence_backed_import_allowed": true,
+        "invented_values_allowed": false,
+        "fits_contradiction_override_allowed": false
+      },
+      "decision_record": "ZC-G1-OWNER-20260915"
+    }
+  ],
+  "decision_record": {
+    "id": "ZC-G1-OWNER-20260915",
+    "owner": "Tristan",
+    "date": "2026-09-15",
+    "source": "explicit HUMAN_GATE reply in current direct conversation"
+  },
+  "filter_applicability": {
+    "flat": "exact",
+    "dark": "not_a_matching_criterion_when_scientifically_irrelevant",
+    "bias": "not_a_matching_criterion_when_scientifically_irrelevant"
+  }
+}

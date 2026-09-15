@@ -1,0 +1,567 @@
+{
+  "mission_id": "ZC-P1-M1-CONTRACT-DRAFT-20260915",
+  "phase": "owner-reconciliation",
+  "generated_by": "contract_witness.py",
+  "generated_at": "2026-09-15T21:51:33.936837+00:00",
+  "python": "3.13.5",
+  "numpy": "2.5.2",
+  "astropy": "8.0.1",
+  "source_authority": {
+    "mission_doc_sha256": "dbcf826d52031627fd7c817b2f8e430bdf581ecf9ee36c4ec4061d009762020c",
+    "expected_mission_sha256": "dbcf826d52031627fd7c817b2f8e430bdf581ecf9ee36c4ec4061d009762020c",
+    "mission_guard_asserted": true,
+    "interop_doc_sha256": "88831410559f8201eeddc6722482ebf9ab3495dd10b1ab33adbbef9e3d2595ed",
+    "expected_interop_sha256": "88831410559f8201eeddc6722482ebf9ab3495dd10b1ab33adbbef9e3d2595ed",
+    "interop_guard_asserted": true,
+    "cases_json_sha256": "ae632411a8cd65cead4fe2e074b03c70d997d2e9eaba358006d78797635fac9f",
+    "negative_guard_self_test": false
+  },
+  "equations": [
+    {
+      "id": "light_branches",
+      "C_dark_incl_bias": [
+        [
+          100.0,
+          80.0
+        ],
+        [
+          100.0,
+          -12.0
+        ]
+      ],
+      "C_bias_removed_dark": [
+        [
+          100.0,
+          80.0
+        ],
+        [
+          100.0,
+          -12.0
+        ]
+      ],
+      "C_double_subtraction_negative_control": [
+        [
+          96.0,
+          72.0
+        ],
+        [
+          98.0,
+          -16.0
+        ]
+      ],
+      "coherent_dark_branches_equal": true,
+      "double_subtraction_differs": true
+    },
+    {
+      "id": "flat_only_partial_mode",
+      "C_flat_only": [
+        [
+          110.0,
+          100.0
+        ],
+        [
+          105.0,
+          -2.0
+        ]
+      ]
+    },
+    {
+      "id": "flat_branches_and_pedestal",
+      "F_flatdark_incl_bias": [
+        [
+          90.0,
+          100.0
+        ],
+        [
+          110.0,
+          80.0
+        ]
+      ],
+      "F_flatdark_bias_removed": [
+        [
+          90.0,
+          100.0
+        ],
+        [
+          110.0,
+          80.0
+        ]
+      ],
+      "F_bias_only_flat": [
+        [
+          96.0,
+          106.0
+        ],
+        [
+          116.0,
+          86.0
+        ]
+      ],
+      "normalizing_uncorrected_flat_is_not_correcting_it": true
+    }
+  ],
+  "cfa": [
+    {
+      "id": "cfa_four_parity_planes",
+      "per_plane_medians": {
+        "R": 100.0,
+        "G1": 200.0,
+        "G2": 100.0,
+        "B": 100.0
+      },
+      "global_single_median": 100.0,
+      "R_per_plane_uniform": true,
+      "R_global_over_corrects_G1": true
+    },
+    {
+      "id": "cfa_shifted_origin_grbg",
+      "x_shift_swaps": {
+        "G1": "R",
+        "R": "G1",
+        "B": "G2",
+        "G2": "B"
+      },
+      "y_shift_swaps": {
+        "G1": "B",
+        "R": "G2",
+        "B": "G1",
+        "G2": "R"
+      },
+      "x_shift_does_not_swap_G1_G2": true
+    },
+    {
+      "id": "positive_valid_normalization_population",
+      "zero_valid_unusable": true
+    }
+  ],
+  "dq": [
+    {
+      "id": "dq_bits",
+      "masks": {
+        "INPUT_INVALID": "0x1",
+        "ADDITIVE_INVALID": "0x2",
+        "FLAT_INVALID": "0x4",
+        "SATURATED": "0x8",
+        "ARITH_NONFINITE": "0x10"
+      },
+      "all_five_are_invalid_reason_bits": true
+    },
+    {
+      "id": "dq_reason_or_and_counts",
+      "mask": [
+        [
+          0,
+          1
+        ],
+        [
+          9,
+          0
+        ]
+      ],
+      "stats": {
+        "total": 4,
+        "valid_count": 2,
+        "invalid_count": 2,
+        "per_bit": {
+          "INPUT_INVALID": 2,
+          "ADDITIVE_INVALID": 0,
+          "FLAT_INVALID": 0,
+          "SATURATED": 1,
+          "ARITH_NONFINITE": 0
+        }
+      },
+      "nan_at_nonzero_mask": [
+        [
+          false,
+          true
+        ],
+        [
+          true,
+          false
+        ]
+      ]
+    },
+    {
+      "id": "dq_saturated_only_is_invalid",
+      "mask": [
+        [
+          8,
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ],
+      "stats": {
+        "total": 4,
+        "valid_count": 3,
+        "invalid_count": 1,
+        "per_bit": {
+          "INPUT_INVALID": 0,
+          "ADDITIVE_INVALID": 0,
+          "FLAT_INVALID": 0,
+          "SATURATED": 1,
+          "ARITH_NONFINITE": 0
+        }
+      },
+      "sat_only_pixel_is_nan": true
+    },
+    {
+      "id": "dq_valid_negative_output",
+      "mask_all_zero": true
+    },
+    {
+      "id": "dq_all_invalid_refusal",
+      "stats": {
+        "total": 4,
+        "valid_count": 0,
+        "invalid_count": 4,
+        "per_bit": {
+          "INPUT_INVALID": 4,
+          "ADDITIVE_INVALID": 0,
+          "FLAT_INVALID": 0,
+          "SATURATED": 0,
+          "ARITH_NONFINITE": 0
+        }
+      },
+      "status_is_failed": true
+    },
+    {
+      "id": "dq_contributing_master_invalidity",
+      "mask": [
+        [
+          0,
+          2
+        ],
+        [
+          0,
+          0
+        ]
+      ]
+    }
+  ],
+  "fits_decode": [
+    {
+      "id": "bscale_bzero_exactly_once_uint16",
+      "stored_dtype": ">i2",
+      "BSCALE": 1.0,
+      "BZERO": 32768.0,
+      "exactly_once_holds": true,
+      "endianness_is_storage_not_identity": true
+    },
+    {
+      "id": "scaled_floating_fits_exactly_once",
+      "exactly_once_holds": true
+    },
+    {
+      "id": "integer_blank_in_stored_space",
+      "method": "in-memory reference (not an astropy FITS round-trip)",
+      "invalid_in_stored_space": [
+        [
+          true,
+          false
+        ],
+        [
+          false,
+          false
+        ]
+      ]
+    },
+    {
+      "id": "float32_precision_boundary",
+      "two_pow_24_exact": true,
+      "two_pow_24_plus_1_not_exact": true
+    }
+  ],
+  "digest": [
+    {
+      "id": "digest_pinned_reference",
+      "pinned_matches": true
+    },
+    {
+      "id": "digest_byte_order_equivalence",
+      "equal": true
+    },
+    {
+      "id": "digest_nan_payload_equivalence",
+      "equal": true
+    },
+    {
+      "id": "digest_signed_zero_equivalence",
+      "equal": true
+    },
+    {
+      "id": "digest_dtype_difference",
+      "different": true
+    },
+    {
+      "id": "digest_shape_difference",
+      "different": true
+    },
+    {
+      "id": "digest_data_difference",
+      "different": true
+    },
+    {
+      "id": "digest_dq_difference",
+      "different": true
+    },
+    {
+      "id": "canonical_json_pinned",
+      "matches": true
+    }
+  ],
+  "identity": [
+    {
+      "id": "descriptor_digest_explicit_projection",
+      "content_change_changes": true,
+      "hdu_mask_history_change_changes": true,
+      "incidental_fields_excluded": true
+    },
+    {
+      "id": "plan_digest_explicit_projection",
+      "same_input_same_digest": true,
+      "filter_change_changes": true,
+      "optical_train_change_changes": true,
+      "both_change_changes": true,
+      "policy_param_change_changes": true,
+      "metadata_change_changes": true,
+      "master_content_change_changes": true,
+      "locator_tile_path_imported_planid_excluded": true,
+      "dark_only_unknown_optical_defined": true
+    }
+  ],
+  "declaration": [
+    {
+      "id": "descriptor_snapshot_retention_revalidation",
+      "unchanged_rehashes_same": true,
+      "tampered_rejected": true,
+      "revision_is_new_identity": true
+    },
+    {
+      "id": "mask_payload_identity_revalidation",
+      "unchanged_matches": true,
+      "tampered_mask_rejected": true,
+      "mask_digest_distinct_from_image_sha": true
+    }
+  ],
+  "card_record": [
+    {
+      "id": "ordered_card_record_duplicate_preserved",
+      "records": [
+        {
+          "keyword": "EXPTIME",
+          "value": 20.0,
+          "comment": "",
+          "index": 0,
+          "source": "primary"
+        },
+        {
+          "keyword": "EXPTIME",
+          "value": 20.0,
+          "comment": "",
+          "index": 1,
+          "source": "duplicate"
+        }
+      ],
+      "mapping_would_collapse_to": 1,
+      "agree_detected": true,
+      "conflict_detected": true
+    }
+  ],
+  "quality_gate": [
+    {
+      "id": "quality_gate_boundaries_and_numeric_floor",
+      "cases": [
+        {
+          "valid": 89,
+          "total": 100,
+          "threshold_pct": 90,
+          "pct": 89.0,
+          "meets": false
+        },
+        {
+          "valid": 90,
+          "total": 100,
+          "threshold_pct": 90,
+          "pct": 90.0,
+          "meets": true
+        },
+        {
+          "valid": 91,
+          "total": 100,
+          "threshold_pct": 90,
+          "pct": 91.0,
+          "meets": true
+        }
+      ],
+      "numeric_floor": 1e-06,
+      "at_floor_masked_not_raised": true,
+      "quality_gate_is_product_policy_not_physical_law": true
+    }
+  ],
+  "crosscheck": [
+    {
+      "id": "cases_json_crosscheck",
+      "all_owner_decisions_adopted_and_verified": true,
+      "protected_decision_ids": [
+        "license",
+        "first_supported_cohort",
+        "temperature_tolerance",
+        "flat_quality_gate",
+        "missing_metadata_declaration"
+      ],
+      "dq_bits_consistent_five_invalid": true,
+      "quality_gate_consistent": true,
+      "matching_outcomes_enums_valid": true,
+      "matching_reason_codes_registered": true,
+      "deep_materialization_per_case": true,
+      "overrides_removals_clone_applied_and_validated": true,
+      "structural_audit_matches_declared_outcomes": true,
+      "negative_controls": {
+        "no_shared_mutation": true,
+        "invalid_override_path_fails": true,
+        "clone_does_not_mutate_source": true,
+        "normalized_history_contradiction_detected": true
+      },
+      "audit": [
+        {
+          "id": "dark_ignores_filter",
+          "outcome": "MATCHED",
+          "manifest_reasons": []
+        },
+        {
+          "id": "flat_requires_filter_and_optical_train",
+          "outcome": "MATCHED",
+          "manifest_reasons": []
+        },
+        {
+          "id": "flat_filter_mismatch_rejects",
+          "outcome": "NO_MATCH",
+          "manifest_reasons": [
+            "FILTER_MISMATCH"
+          ]
+        },
+        {
+          "id": "flatdark_exposure_vs_parent_flat",
+          "outcome": "MATCHED",
+          "manifest_reasons": []
+        },
+        {
+          "id": "flatdark_exposure_mismatch_rejects",
+          "outcome": "NO_MATCH",
+          "manifest_reasons": [
+            "EXPOSURE_MISMATCH"
+          ]
+        },
+        {
+          "id": "bias_acquisition_range_not_universal_zero",
+          "outcome": "MATCHED",
+          "manifest_reasons": []
+        },
+        {
+          "id": "geometry_roi_origin_mismatch_rejects",
+          "outcome": "NO_MATCH",
+          "manifest_reasons": [
+            "CFA_PHASE_MISMATCH",
+            "ROI_ORIGIN_MISMATCH"
+          ]
+        },
+        {
+          "id": "unknown_not_equal_unknown",
+          "outcome": "NO_MATCH",
+          "manifest_reasons": [
+            "MISSING_REQUIRED_FIELD",
+            "UNKNOWN_EQUALS_UNKNOWN"
+          ]
+        },
+        {
+          "id": "duplicate_identical_masters_collapse",
+          "outcome": "MATCHED",
+          "manifest_reasons": []
+        },
+        {
+          "id": "duplicate_different_hashes_ambiguous",
+          "outcome": "AMBIGUOUS",
+          "manifest_reasons": []
+        },
+        {
+          "id": "manual_choice_never_bypasses_hard_rejection",
+          "outcome": "NO_MATCH",
+          "manifest_reasons": [
+            "BINNING_MISMATCH",
+            "GEOMETRY_MISMATCH"
+          ]
+        },
+        {
+          "id": "frozen_request_prevents_implicit_downgrade",
+          "outcome": "NO_MATCH",
+          "manifest_reasons": [
+            "ROLE_UNAVAILABLE"
+          ]
+        },
+        {
+          "id": "complete_set_with_flat_dependencies",
+          "outcome": "MATCHED",
+          "manifest_reasons": []
+        },
+        {
+          "id": "incomplete_set_no_flatdark",
+          "outcome": "NO_MATCH",
+          "manifest_reasons": [
+            "FLAT_ADDITIVE_DEPENDENCY_MISSING"
+          ]
+        },
+        {
+          "id": "normalized_flat_four_scalars_matched",
+          "outcome": "MATCHED",
+          "manifest_reasons": []
+        },
+        {
+          "id": "normalized_flat_single_scalar_rejected",
+          "outcome": "NO_MATCH",
+          "manifest_reasons": [
+            "NORMALIZATION_SCALAR_COUNT_MISMATCH"
+          ]
+        },
+        {
+          "id": "flat_corrected_unnormalized_needs_cfa_normalization",
+          "outcome": "MATCHED",
+          "manifest_reasons": []
+        },
+        {
+          "id": "bias_removed_dark_requires_compatible_bias",
+          "outcome": "NO_MATCH",
+          "manifest_reasons": [
+            "ROLE_UNAVAILABLE"
+          ]
+        },
+        {
+          "id": "missing_required_acquisition_rejected",
+          "outcome": "NO_MATCH",
+          "manifest_reasons": [
+            "MISSING_REQUIRED_FIELD"
+          ]
+        },
+        {
+          "id": "normalized_history_contradiction_detected",
+          "outcome": "NO_MATCH",
+          "manifest_reasons": [
+            "UNDOCUMENTED_PROCESSING"
+          ]
+        },
+        {
+          "id": "bias_ignores_filter",
+          "outcome": "MATCHED",
+          "manifest_reasons": []
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "gate_acceptance_authority": "Junior; see TODO.md",
+    "protected_decisions_resolved": true,
+    "note": "mathematical invariants and reference semantics asserted; matching cases are declaration-only (structural audit, NOT a matcher); owner policies adopted 2026-09-15; real qualification remains open"
+  }
+}

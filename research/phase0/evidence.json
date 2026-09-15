@@ -1,0 +1,695 @@
+{
+  "mission_id": "ZC-P0-M1-RAW-BOUNDARY-20260915",
+  "phase": "implementation",
+  "generated_by": "raw_boundary_witness.py",
+  "generated_at": "2026-09-15T14:18:15.018874+00:00",
+  "python": "3.13.5",
+  "numpy": "2.5.2",
+  "astropy": "n/a",
+  "source_authority": {
+    "zsss_loader_source": "/home/tristan/.openclaw/workspace/projects/zeseestarstacker/seestar/core/image_processing.py",
+    "zsss_loader_sha256": "afbeff05794d91cef805ca6fc4a3f380b42555453262c01a9655d224499101d5",
+    "zsss_head_expected": "77c92da0259ef7a41fa37d7aa6f3fab7a840735c",
+    "mission_doc_sha256": "dbcf826d52031627fd7c817b2f8e430bdf581ecf9ee36c4ec4061d009762020c",
+    "loader_extraction_note": "AST-extracted actual bodies of load_and_validate_fits, sanitize_header_for_wcs, debayer_image from the pinned source; executed with injected real numpy + astropy.io.fits + a cv2 stub. NOT an end-to-end application test.",
+    "loader_extracted_source_sha256": "221fbf71d8e6553db17888225c9f4564a8b466a78212def5ab40811a522eed3a"
+  },
+  "ecosystem_baseline": {
+    "ZeAlfie": {
+      "path": "/home/tristan/.openclaw/workspace/projects/ZeAlfie",
+      "toplevel": "/home/tristan/.openclaw/workspace/projects/ZeAlfie",
+      "branch": "chore/za-tmpfs-cleanup-gate",
+      "head": "dd74f8475c8bf8baa35f920b304f58bc6bb3f4e6",
+      "status_short": "M docs/testing.md\n M packaging/macos/gui_smoke_offscreen.py\n M packaging/macos/witnesses.py\n M packaging/windows/gui_smoke_offscreen.py\n M tests/witness/posix_lock_ci_witness.py\n?? docs/tmpfs-cleanup-gate.md\n?? tests/test_tmpfs_cleanup_gate.py"
+    },
+    "zeseestarstacker": {
+      "path": "/home/tristan/.openclaw/workspace/projects/zeseestarstacker",
+      "toplevel": "/home/tristan/.openclaw/workspace/projects/zeseestarstacker",
+      "branch": "main",
+      "head": "77c92da0259ef7a41fa37d7aa6f3fab7a840735c",
+      "status_short": "?? research/drizzle_contract/README.md\n?? research/drizzle_contract/artifacts/\n?? research/drizzle_contract/matrix.py\n?? research/drizzle_contract/probe_engine.py\n?? research/drizzle_contract/probe_high_contrast.py\n?? research/drizzle_contract/reproducer_lanczos.py\n?? research/drizzle_contract/rework1/\n?? research/drizzle_contract/rework2/\n?? research/drizzle_contract/rework3/"
+    },
+    "zemosaic": {
+      "path": "/home/tristan/.openclaw/workspace/projects/zemosaic",
+      "toplevel": "/home/tristan/.openclaw/workspace/projects/zemosaic",
+      "branch": "beta",
+      "head": "c03d0bb965d073b12ad9978094327829f0d0c366",
+      "status_short": ""
+    },
+    "ZeSolver-main": {
+      "path": "/home/tristan/.openclaw/workspace/projects/ZeSolver-main",
+      "toplevel": "/home/tristan/.openclaw/workspace/projects/ZeSolver-main",
+      "branch": "main",
+      "head": "091fbb7a3621a585a45dc110af8a52f870f1fcc9",
+      "status_short": ""
+    },
+    "ZeSolver": {
+      "path": "/home/tristan/.openclaw/workspace/projects/ZeSolver",
+      "toplevel": "/home/tristan/.openclaw/workspace/projects/ZeSolver",
+      "branch": "test",
+      "head": "47bfa4cb7aabbdd0a486099b06557c16dea681ae",
+      "status_short": ""
+    },
+    "zeanalyser": {
+      "path": "/home/tristan/.openclaw/workspace/projects/zeanalyser",
+      "toplevel": "/home/tristan/.openclaw/workspace/projects/zeanalyser",
+      "branch": "za-perf-p2.0-instrumentation",
+      "head": "38184521997b77553fd854c454065c17ed1ead2a",
+      "status_short": ""
+    },
+    "zecalibrator": {
+      "independent_git_repo": false,
+      "git_toplevel": "/home/tristan/.openclaw/workspace",
+      "note": "zecalibrator resolves to the enclosing workspace repo, which itself has no committed HEAD (uncommitted repo)."
+    }
+  },
+  "icons": [
+    {
+      "name": "zecalibrator.icns",
+      "bytes": 660414,
+      "sha256": "a43b9b1c53aaedb98ee33c0591ce376a07947967490c67e7018ded2e2665dda6",
+      "signature": "Mac OS X icon, 660414 bytes, \"is32\" type",
+      "dimensions": null
+    },
+    {
+      "name": "zecalibrator.ico",
+      "bytes": 218054,
+      "sha256": "717a04a871867de4cd32f90c3383d8414edbb2c960290ba346a1514e6bc584ca",
+      "signature": "MS Windows icon resource - 7 icons, 16x16, 32 bits/pixel, 24x24, 32 bits/pixel",
+      "dimensions": null
+    },
+    {
+      "name": "zecalibrator_1024x1024.png",
+      "bytes": 1716483,
+      "sha256": "c3582489faed7dfec694719618fd5661c8da2c9236d05a33edd6e0c1b9b18b51",
+      "signature": "PNG image data, 1024 x 1024, 8-bit/color RGBA, non-interlaced",
+      "dimensions": [
+        1024,
+        1024
+      ]
+    },
+    {
+      "name": "zecalibrator_128x128.png",
+      "bytes": 39782,
+      "sha256": "1be5ea466e395f59f52b445947e24daefcc7c1dea6cf2abaa015b6aba75f79dc",
+      "signature": "PNG image data, 128 x 128, 8-bit/color RGBA, non-interlaced",
+      "dimensions": [
+        128,
+        128
+      ]
+    },
+    {
+      "name": "zecalibrator_16x16.png",
+      "bytes": 1560,
+      "sha256": "7793ee217e847cc5b506f7d5bc56bb7a64bfd42ad309276cb6b0d592d78f8b20",
+      "signature": "PNG image data, 16 x 16, 8-bit colormap, non-interlaced",
+      "dimensions": [
+        16,
+        16
+      ]
+    },
+    {
+      "name": "zecalibrator_24x24.png",
+      "bytes": 2089,
+      "sha256": "04bbb703d545b012bf63513662d1c5bd4197b92113427971e9f6a5fab5c9c8da",
+      "signature": "PNG image data, 24 x 24, 8-bit/color RGBA, non-interlaced",
+      "dimensions": [
+        24,
+        24
+      ]
+    },
+    {
+      "name": "zecalibrator_256x256.png",
+      "bytes": 135324,
+      "sha256": "205e6fb9260d0e19b71e37069aa753d975109cd36412624dae46eef67bdd4ece",
+      "signature": "PNG image data, 256 x 256, 8-bit/color RGBA, non-interlaced",
+      "dimensions": [
+        256,
+        256
+      ]
+    },
+    {
+      "name": "zecalibrator_32x32.png",
+      "bytes": 3465,
+      "sha256": "2789d59d6cd2157c8f5d00c37fb8ef77cd2742fd2aa4945d6c407145d8be10a6",
+      "signature": "PNG image data, 32 x 32, 8-bit/color RGBA, non-interlaced",
+      "dimensions": [
+        32,
+        32
+      ]
+    },
+    {
+      "name": "zecalibrator_48x48.png",
+      "bytes": 7027,
+      "sha256": "cc66ea671658872b7c521e6bae4a7e8a4566b4b868a41819ee5ef8e98e3a1c87",
+      "signature": "PNG image data, 48 x 48, 8-bit/color RGBA, non-interlaced",
+      "dimensions": [
+        48,
+        48
+      ]
+    },
+    {
+      "name": "zecalibrator_512x512.png",
+      "bytes": 471181,
+      "sha256": "be09aa8b33ca0e17ee1ed269c22e48b3b345b7875edbe0e28e06d789199995d8",
+      "signature": "PNG image data, 512 x 512, 8-bit/color RGBA, non-interlaced",
+      "dimensions": [
+        512,
+        512
+      ]
+    },
+    {
+      "name": "zecalibrator_64x64.png",
+      "bytes": 11519,
+      "sha256": "c5b050eff9b13c254e0901a5eca53fc05ebeb47700091f70acec70e4f3678cd5",
+      "signature": "PNG image data, 64 x 64, 8-bit/color RGBA, non-interlaced",
+      "dimensions": [
+        64,
+        64
+      ]
+    },
+    {
+      "name": "zecalibrator_icon.png",
+      "bytes": 2459037,
+      "sha256": "7ad1589da6dd0d4b16780bd687ff79dec8fc999e4d0cc03431303117357b5ee4",
+      "signature": "PNG image data, 1254 x 1254, 8-bit/color RGBA, non-interlaced",
+      "dimensions": [
+        1254,
+        1254
+      ]
+    }
+  ],
+  "fits_witnesses": [
+    {
+      "path": "/home/tristan/near_bench100_input/049_Light_mosaic_M 106_20.0s_IRCUT_20250518-233417.fit",
+      "source_qualification": "real acquisition-origin light: Seestar S50",
+      "sha256": "11c0bcee4bd4445711f1a76ca7ef6519724edb721b216b643d9a9538059b5e00",
+      "bytes": 4155840,
+      "num_hdu": 1,
+      "fields": {
+        "INSTRUME": "Seestar S50",
+        "CREATOR": "ZWO Seestar S50",
+        "NAXIS1": 1080,
+        "NAXIS2": 1920,
+        "XBINNING": 1,
+        "YBINNING": 1,
+        "CCDXBIN": 1,
+        "CCDYBIN": 1,
+        "XORGSUBF": 0,
+        "YORGSUBF": 0,
+        "EXPTIME": 20.0,
+        "EXPOSURE": 20.0,
+        "CCD-TEMP": 30.5625,
+        "GAIN": 80,
+        "FILTER": "IRCUT",
+        "BAYERPAT": "GRBG",
+        "BITPIX": 16,
+        "BSCALE": 1,
+        "BZERO": 32768
+      },
+      "missing": [],
+      "stored_dtype": ">i2",
+      "shape": [
+        1920,
+        1080
+      ]
+    },
+    {
+      "path": "/home/tristan/near_bench100_input/058_Light_mosaic_M 31_10.0s_IRCUT_20250804-004954.fit",
+      "source_qualification": "real acquisition-origin light: Seestar S30",
+      "sha256": "275e7d7ad64effc04ffd11f83d619bee8cbb8f0dbb6a35126529f3d5232d62c3",
+      "bytes": 4155840,
+      "num_hdu": 1,
+      "fields": {
+        "INSTRUME": "Seestar S30",
+        "CREATOR": "ZWO Seestar S30",
+        "NAXIS1": 1080,
+        "NAXIS2": 1920,
+        "XBINNING": 1,
+        "YBINNING": 1,
+        "CCDXBIN": 1,
+        "CCDYBIN": 1,
+        "XORGSUBF": 0,
+        "YORGSUBF": 0,
+        "EXPTIME": 10.0,
+        "EXPOSURE": 10.0,
+        "CCD-TEMP": 28.125,
+        "GAIN": 200,
+        "FILTER": "IRCUT",
+        "BAYERPAT": "GRBG",
+        "BITPIX": 16,
+        "BSCALE": 1,
+        "BZERO": 32768
+      },
+      "missing": [],
+      "stored_dtype": ">i2",
+      "shape": [
+        1920,
+        1080
+      ]
+    },
+    {
+      "path": "/home/tristan/.openclaw/workspace/projects/zeseestarstacker/fixture/master/Light_001.fit",
+      "source_qualification": "synthetic LIGHT fixture (INSTRUME=SYNTH); NOT a calibration master despite 'master' dir name",
+      "sha256": "56c26803748be606cbd56e28a99114bb6fe365dc5a42bcf1eef92df02049ccee",
+      "bytes": 4150080,
+      "num_hdu": 1,
+      "fields": {
+        "INSTRUME": "SYNTH",
+        "NAXIS1": 1920,
+        "NAXIS2": 1080,
+        "EXPTIME": 10.0,
+        "BITPIX": 16,
+        "BSCALE": 1,
+        "BZERO": 32768
+      },
+      "missing": [
+        "CREATOR",
+        "XBINNING",
+        "YBINNING",
+        "CCDXBIN",
+        "CCDYBIN",
+        "XORGSUBF",
+        "YORGSUBF",
+        "EXPOSURE",
+        "CCD-TEMP",
+        "GAIN",
+        "FILTER",
+        "BAYERPAT"
+      ],
+      "stored_dtype": ">i2",
+      "shape": [
+        1080,
+        1920
+      ]
+    }
+  ],
+  "loader_witnesses": [
+    {
+      "id": "uint16_bzero_loader_witness",
+      "input_physical": [
+        [
+          0,
+          100
+        ],
+        [
+          200,
+          65535
+        ]
+      ],
+      "header_bzero": 32768,
+      "astropy_physical_read": [
+        [
+          0,
+          100
+        ],
+        [
+          200,
+          65535
+        ]
+      ],
+      "stored_dtype": ">i2",
+      "zsss_default_loader": [
+        [
+          0.0,
+          0.0015259021893143654
+        ],
+        [
+          0.0030518043786287308,
+          1.0
+        ]
+      ],
+      "zsss_default_loader_dtype": "float32",
+      "zsss_no_normalize_no_fix": [
+        [
+          -32768.0,
+          -32668.0
+        ],
+        [
+          -32568.0,
+          32767.0
+        ]
+      ],
+      "zsss_no_normalize_no_fix_dtype": "float32",
+      "expected_default_float32": [
+        [
+          0.0,
+          0.0015259021893143654
+        ],
+        [
+          0.0030518043786287308,
+          1.0
+        ]
+      ],
+      "expected_no_normalize": [
+        [
+          -32768.0,
+          -32668.0
+        ],
+        [
+          -32568.0,
+          32767.0
+        ]
+      ]
+    },
+    {
+      "id": "signed_nan_loader_witness",
+      "input": [
+        [
+          -2.0,
+          0.0
+        ],
+        [
+          2.0,
+          NaN
+        ]
+      ],
+      "zsss_default_loader": [
+        [
+          0.0,
+          0.5
+        ],
+        [
+          1.0,
+          0.5
+        ]
+      ],
+      "expected": [
+        [
+          0.0,
+          0.5
+        ],
+        [
+          1.0,
+          0.5
+        ]
+      ]
+    }
+  ],
+  "equation_witnesses": [
+    {
+      "id": "equation_main",
+      "L": [
+        [
+          110.0,
+          50.0
+        ],
+        [
+          210.0,
+          -2.0
+        ]
+      ],
+      "Dinc": [
+        [
+          10.0,
+          10.0
+        ],
+        [
+          10.0,
+          10.0
+        ]
+      ],
+      "B": [
+        [
+          4.0,
+          4.0
+        ],
+        [
+          4.0,
+          4.0
+        ]
+      ],
+      "D0": [
+        [
+          6.0,
+          6.0
+        ],
+        [
+          6.0,
+          6.0
+        ]
+      ],
+      "R": [
+        [
+          1.0,
+          0.5
+        ],
+        [
+          2.0,
+          1.0
+        ]
+      ],
+      "C_dark_inc": [
+        [
+          100.0,
+          80.0
+        ],
+        [
+          100.0,
+          -12.0
+        ]
+      ],
+      "C_bias_removed": [
+        [
+          100.0,
+          80.0
+        ],
+        [
+          100.0,
+          -12.0
+        ]
+      ],
+      "C_expected": [
+        [
+          100.0,
+          80.0
+        ],
+        [
+          100.0,
+          -12.0
+        ]
+      ],
+      "coherent_branches_equal": true
+    },
+    {
+      "id": "double_bias_subtraction_negative_control",
+      "C_double_subtraction": [
+        [
+          96.0,
+          72.0
+        ],
+        [
+          98.0,
+          -16.0
+        ]
+      ],
+      "differs_from_expected": true,
+      "note": "subtracting B in addition to Dinc (which already includes bias) changes the answer"
+    },
+    {
+      "id": "flat_pedestal_witness",
+      "Finc": [
+        [
+          100.0,
+          110.0
+        ],
+        [
+          120.0,
+          90.0
+        ]
+      ],
+      "FDinc": [
+        [
+          10.0,
+          10.0
+        ],
+        [
+          10.0,
+          10.0
+        ]
+      ],
+      "Fcorr": [
+        [
+          90.0,
+          100.0
+        ],
+        [
+          110.0,
+          80.0
+        ]
+      ],
+      "s_correct": 95.0,
+      "s_wrong": 105.0,
+      "R_correct": [
+        [
+          0.9473684210526315,
+          1.0526315789473684
+        ],
+        [
+          1.1578947368421053,
+          0.8421052631578947
+        ]
+      ],
+      "R_wrong": [
+        [
+          0.9523809523809523,
+          1.0476190476190477
+        ],
+        [
+          1.1428571428571428,
+          0.8571428571428571
+        ]
+      ],
+      "C_with_corrected_flat": [
+        [
+          100.27777777777779,
+          99.75
+        ],
+        [
+          99.31818181818181,
+          100.9375
+        ]
+      ],
+      "C_with_uncorrected_flat": [
+        [
+          99.75,
+          100.22727272727272
+        ],
+        [
+          100.625,
+          99.16666666666667
+        ]
+      ],
+      "normalizing_uncorrected_flat_is_not_correcting_it": true
+    },
+    {
+      "id": "four_cfa_plane_scale_witness",
+      "pattern": "GRBG",
+      "F_flat": [
+        [
+          200.0,
+          100.0,
+          200.0,
+          100.0
+        ],
+        [
+          100.0,
+          100.0,
+          100.0,
+          100.0
+        ],
+        [
+          200.0,
+          100.0,
+          200.0,
+          100.0
+        ],
+        [
+          100.0,
+          100.0,
+          100.0,
+          100.0
+        ]
+      ],
+      "parity": {
+        "0,0": "G1",
+        "0,1": "R",
+        "0,2": "G1",
+        "0,3": "R",
+        "1,0": "B",
+        "1,1": "G2",
+        "1,2": "B",
+        "1,3": "G2",
+        "2,0": "G1",
+        "2,1": "R",
+        "2,2": "G1",
+        "2,3": "R",
+        "3,0": "B",
+        "3,1": "G2",
+        "3,2": "B",
+        "3,3": "G2"
+      },
+      "per_plane_medians": {
+        "R": 100.0,
+        "G1": 200.0,
+        "G2": 100.0,
+        "B": 100.0
+      },
+      "global_single_median": 100.0,
+      "R_per_plane": [
+        [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "R_global_single_median": [
+        [
+          2.0,
+          1.0,
+          2.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          2.0,
+          1.0,
+          2.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ]
+      ],
+      "G1_plane_differs_under_global_median": true,
+      "note": "G1 plane has scale 200 vs G2/R/B at 100; a single global median over-corrects G1 (2.0 vs 1.0), so four separate parity planes (including separate G1/G2) are required"
+    },
+    {
+      "id": "same_shape_different_roi_design_rejection",
+      "design_case": {
+        "light_A": {
+          "NAXIS1": 1080,
+          "NAXIS2": 1920,
+          "XORGSUBF": 0,
+          "YORGSUBF": 0
+        },
+        "light_B": {
+          "NAXIS1": 1080,
+          "NAXIS2": 1920,
+          "XORGSUBF": 1,
+          "YORGSUBF": 0
+        }
+      },
+      "observation": "Both frames have identical NAXIS shape (1080 x 1920) but different ROI origin. A one-pixel x-origin shift flips the Bayer CFA parity for every row (even<->odd column), changing which plane is G1 vs G2 and R vs B. Same shape does NOT imply same ROI, and translation by even one pixel changes CFA phase.",
+      "required_rejection": "Detector instance/model, sensor dimensions, ROI origin/extent, binning and CFA phase are all exact-match criteria. A matcher MUST reject on ROI-origin mismatch even when NAXIS shape is identical.",
+      "is_code": false
+    }
+  ]
+}
