@@ -30,6 +30,21 @@ jobs:
         shell: bash
         run: python -m pip install dist/*.whl
 
+      - name: Install Qt offscreen system libraries (Linux, Python 3.11)
+        if: matrix.python-version == '3.11' && runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0
+
+      - name: Install PySide6 (Python 3.11 only)
+        if: matrix.python-version == '3.11'
+        run: python -m pip install 'PySide6>=6.6'
+
+      - name: Run Qt native icon-decode witness (Python 3.11 only)
+        if: matrix.python-version == '3.11'
+        run: python -m pytest tests/test_icons_qt.py -ra
+
       - name: Smoke test from unrelated CWD (entry points and package)
         shell: bash
         run: |
