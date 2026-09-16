@@ -2,12 +2,12 @@
 
 ## Current gate / mission
 
-- **Status: G1 ACCEPTED (Phase 1)**; **G2 (Phase 2 / M1) IMPLEMENTED, AWAITING ACCEPTANCE**, accepting architect: Junior.
+- **Status: G2 ACCEPTED (Phase 2 / Mission 1)**, accepting architect: Junior. Phase 3 AUTHORIZED, dispatch pending clean closure commit.
 - Closed mission: **ZC-P1-M1-CONTRACT-DRAFT-20260915** (G1).
 - Previous accepted gate: G0, 2026-09-15 (baseline/raw-boundary witnesses).
-- Active/closed mission: **ZC-P2-M1-BOOTSTRAP-20260915** — independent repository,
-  src-layout package, GPL metadata, entry points, resources, storage adapter,
-  tests and authored CI. Implementation complete; G2 NOT self-accepted.
+- Closed mission: **ZC-P2-M1-BOOTSTRAP-20260915** — independent repository, src-layout
+  package, GPL metadata, entry points, resources, storage adapter, tests and CI.
+  G2 ACCEPTED 2026-09-16 (Nono review-0 ACCEPT + Junior independent verification).
 - Implementation evidence: [Coco r0 report](../../.a2a-reports/ZC-P2-M1-BOOTSTRAP-20260915.coco.r0.md).
   Commit SHA recorded in that report; G2 acceptance is Junior's alone.
 
@@ -21,8 +21,9 @@
 - Git toplevel is now the product root itself, not the enclosing workspace.
 - Source authority: immutable ASTRA_MISSION_ZECALIBRATOR_FOR_JUNIOR.md,
   ZC-ARCH-20260915 rev1; ZeSoftware Interoperability Rules v1.0.
-- Working tree: 25 product files; only the eight allowed Phase1 docs/research/
-  ledger files changed. No production package, GUI, backend, CI or .git created.
+- Tracked bootstrap: 61 files, including the independent repository/package,
+  tests and authored CI. Closure changes are limited to TODO.md and
+  docs/ARCHITECTURE.md; the authorized closure commit provides a clean G3 base.
 - 17 protected baseline files (AGENTS, handoff, icons, Phase0 evidence) unchanged.
   All six ecosystem branch/HEAD/status/diff hashes independently unchanged.
 
@@ -35,7 +36,7 @@
 | ZeSolver | test | 47bfa4cb7aabbdd0a486099b06557c16dea681ae | clean |
 | zeanalyser | za-perf-p2.0-instrumentation | 38184521997b77553fd854c454065c17ed1ead2a | clean |
 
-## Last ACCEPTED gate — G1
+## Previously ACCEPTED gate — G1
 
 - Date / authority: 2026-09-15, Junior.
 - Technical evidence: Coco r4 DONE + **Nono review-4 ACCEPT**, F1/F2 resolved;
@@ -75,6 +76,30 @@ Full contracts: [SCIENCE_CONTRACT](docs/SCIENCE_CONTRACT.md),
 [ARCHITECTURE](docs/ARCHITECTURE.md), [PROVENANCE](docs/PROVENANCE.md).
 These specify future implementation; no executable scientific capability exists yet.
 
+## Last ACCEPTED gate — G2
+
+- Date / authority: 2026-09-16, Junior.
+- Branch: `chore/zc-p2-bootstrap`. Full HEAD: `2270536f8567b6a1d9d99db0acd32ec3a76207f5`,
+  tree `21ee3376a74ded8958bae8f569d3062297da3afd` (implementation revision).
+  A second, explicitly authorized documentation-only closure commit follows; no remote.
+- Evidence: Coco r0 DONE + Nono review-0 ACCEPT + Junior independent verification.
+- **G2 local/bootstrap ACCEPTED under Tristan's explicit platform amendment
+  of 2026-09-16.** This supersedes the earlier overbroad claim that all seven
+  original gate criteria passed. Authored CI is not executed CI.
+- Windows/macOS native execution, Qt native icon decoding, Python 3.11 execution
+  and remote CI remain **NOT_RUN**, never PASS. No Windows/macOS qualification
+  claim is permitted; mandatory witness register below remains open.
+- 29 pytest tests pass against source and installed wheel; sdist → wheel-from-sdist →
+  clean venv install; entry points and `python -m` from unrelated CWD; headless import
+  without Qt/ZeAlfie/ZSSS/CuPy/NumPy/Astropy; 12/12 resource bytes match canonical +
+  manifest; exactly one interop declaration with empty provides; storage adapter
+  overrides + no import-time creation.
+- Protected baseline byte-identical to G1-accepted hashes; only docs/ARCHITECTURE.md
+  (§17) and TODO.md changed. Six ecosystem HEADs unchanged.
+- Non-blocking findings recorded (F-A build-hash reproducibility → Phase 8; F-B gui
+  `-m` guard; N-1..N-5). Acceptance report:
+  [G2 acceptance](../../.a2a-reports/ZC-P2-M1-BOOTSTRAP-20260915.g2-acceptance.md).
+
 ## Implemented / delivered
 
 ### Phase 1 (documentation and research, G1 ACCEPTED)
@@ -85,7 +110,7 @@ These specify future implementation; no executable scientific capability exists 
 - research/phase1/{REPORT.md,cases.json,contract_witness.py,evidence.json}.
 - Owner-policy reconciliation and gate records. No production code.
 
-### Phase 2 / Mission 1 (bootstrap, G2 AWAITING ACCEPTANCE)
+### Phase 2 / Mission 1 (local/bootstrap G2 ACCEPTED; platform witnesses open)
 
 - Independent Git repository (product root), branch `chore/zc-p2-bootstrap`.
 - README.md, LICENSE (GPL-3.0-or-later), pyproject.toml, .gitignore, .gitattributes.
@@ -117,7 +142,8 @@ No-calibration and partial modes are explicit, not silent role downgrades.
   synthetic-only, not qualification of Seestar S50/S30 or other actual cameras.
 - Observed real lights lack qualified detector-instance/offset/readout/ADC facts;
   firmware preprocessing remains uncertain. No defaults inferred from fixture.
-- Phase2 has no implementation/native/CI witnesses yet. No OS qualification claim.
+- Phase2 local/bootstrap witnesses passed; the mandatory platform register below
+  remains NOT_RUN. Local PASS does not establish cross-platform qualification.
 - Nono nonblocking research limitations retained: structural helper is not a
   complete matcher (normalized-flat dependency and None/None acquisition checks);
   unknown nested-schema extension policy to make explicit in implementation.
@@ -129,22 +155,34 @@ No-calibration and partial modes are explicit, not silent role downgrades.
   R↔G2. Immutable Phase0 evidence preserved; SCIENCE §7.5 is authoritative.
 - No current G1 blocker; no unchosen owner policy among the five.
 
-## Next exact mission — G2 acceptance (implementation complete)
+## Mandatory platform witness register — owner amendment 2026-09-16
 
-Implementation for **ZC-P2-M1-BOOTSTRAP-20260915** is complete; G2 acceptance is
-Junior's alone (with Nono review). See
-[ZC-P2-M1-BOOTSTRAP-20260915.coco.r0.md](../../.a2a-reports/ZC-P2-M1-BOOTSTRAP-20260915.coco.r0.md)
-for the full implementation report, exact commands/results, artifact hashes and
-NOT_RUN items.
+| Required witness | Status | Gate before claim |
+| --- | --- | --- |
+| Windows native execution/filesystem behavior | **NOT_RUN** | Mandatory before Windows support/release claim |
+| macOS native execution/filesystem behavior | **NOT_RUN** | Mandatory before macOS support/release claim |
+| Qt native icon decoding | **NOT_RUN** | Mandatory before corresponding GUI/platform support/release claim |
+| Python 3.11 execution | **NOT_RUN** | Mandatory before verified minimum-interpreter support/release claim |
+| Remote CI execution | **NOT_RUN** | Mandatory before corresponding CI-backed platform support/release claim |
 
-Pass conditions (G2, not self-accepted): independent Git toplevel/branch/SHA;
-sdist and wheel-from-sdist built and clean-installed; help/version/CLI from
-unrelated CWD; headless engine/API import without Qt/ZeAlfie/ZSSS/GPU; resource
-bytes match manifest/canonical hashes; storage roots injectable with no import
-writes; three-OS CI authored (native Windows/macOS execution and Qt decode are
-NOT_RUN on this Linux host).
+The amendment permits **local/bootstrap G2 ACCEPTED only** with these witnesses
+outstanding. NOT_RUN is never PASS; no Windows/macOS qualification is claimed.
+No platform obligation is waived or removed, and no G3/G4 requirement is silently
+weakened. No external CI/push/publication was authorized by this amendment.
 
-Next phase (Phase 3) is **not** started; it requires accepted G2.
+## Next exact mission — Phase 3 authorized
+
+**ZC-P3-M1-RAW-CPU-20260916**: launch after the authorized local G2 closure commit
+and clean-tree verification. G3 remains NOT_STARTED until dispatch, not accepted.
+Strict physical FITS decode, immutable metadata/card evidence, uint16 DQ,
+signed raw float32 and CPU primitives with explicitly supplied validated masters;
+minimal cooperative cancellation/progress. Implement frozen G1, do not redesign.
+No library matching/index, GUI, ZSSS/ZeAlfie integration, GPU, master building,
+Phase4 work or public capability promotion. Stop at G3 ACCEPTED/HOLD/BLOCKED;
+never start Phase4 automatically. No Phase3 implementation commit authorized.
+
+Prepared scope: [Phase3 mission](../../.a2a-reports/ZC-P3-M1-RAW-CPU-20260916.prepared.md).
+Activation contract/report baseline will record the actual post-closure full SHA.
 
 ## DEFERRED
 

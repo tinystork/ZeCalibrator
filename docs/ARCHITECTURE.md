@@ -905,3 +905,37 @@ GUI qualification, Qt icon decode (PySide6 absent on this host), Python 3.11
 interpreter execution (only 3.13.5 available here), and any remote CI run.
 The three-OS CI matrix is authored but not executed.
 
+
+### 17.1 G2 acceptance (2026-09-16)
+
+Phase 2 / Mission 1 (`ZC-P2-M1-BOOTSTRAP-20260915`) was accepted by Junior on
+2026-09-16 at branch `chore/zc-p2-bootstrap`, HEAD
+`2270536f8567b6a1d9d99db0acd32ec3a76207f5` (tree `21ee3376`), after Coco r0, Junior
+independent verification, and Nono review-0 ACCEPT. The bootstrap is an
+engineering/package skeleton with no scientific arithmetic; the five G1 owner
+policies and the Phase 1 science contract remain the frozen scientific authority.
+Windows/macOS native filesystem and Qt icon-decode evidence in this environment,
+Python 3.11 execution, and remote CI remain NOT_RUN; they are not claimed as a
+three-OS PASS. No push/merge/tag/release/deploy was performed. Phase 3 is prepared,
+not dispatched.
+
+### 17.2 Owner-approved G2 platform amendment — 2026-09-16
+
+Tristan explicitly permits **local/bootstrap G2 evidence to remain ACCEPTED**.
+This amendment supersedes any earlier interpretation that merely authoring a
+three-OS CI matrix satisfied executed native/CI evidence. It is not retroactive
+validation: NOT_RUN must never be represented as PASS.
+
+Windows/macOS native execution, Qt native icon decoding, Python 3.11 execution
+and remote CI execution remain **NOT_RUN**. No Windows/macOS qualification claim
+is allowed. These witnesses remain mandatory before any corresponding platform
+support/release claim; TODO.md retains their explicit open register. A local
+supplementary offscreen byte decode is not native shell/icon qualification.
+
+The owner authorized a small local commit containing ONLY TODO.md and this
+file's G2 closure/amendment, then Phase3 launch from the clean closure revision.
+No remote/push/merge/tag/release/deploy/external CI is authorized. G3 implements
+the frozen science contract (strict physical raw FITS decode, immutable evidence,
+DQ, signed float32 and CPU primitives), with no matching/UI/integrations/GPU/
+master-building or Phase4 work. Stop at G3 acceptance/HOLD; do not infer this
+G2-only amendment as permission to weaken later gates.
