@@ -2,7 +2,12 @@
 
 ## Current gate / mission
 
-- **Status: G2 ACCEPTED (Phase 2 / Mission 1)**, accepting architect: Junior. Phase 3 AUTHORIZED, dispatch pending clean closure commit.
+- **Status: G3 TECHNICAL ACCEPTED / GATE HOLD (Phase 3 / Mission 1)** — `ZC-P3-M1-RAW-CPU-20260916`,
+  implementation on branch `feat/zc-p3-raw-cpu` (worker DONE, **not** self-accepted).
+  Technical work ACCEPTED by Junior after Nono review-3 ACCEPT; G3 gate is HOLD,
+  not ACCEPTED, because the mandatory three-OS scientific matrix is NOT_RUN.
+  Uncommitted G3 work (no commit authorized); no remote.
+- Previous accepted gate: **G2 ACCEPTED (Phase 2 / Mission 1)**, accepting architect: Junior.
 - Closed mission: **ZC-P1-M1-CONTRACT-DRAFT-20260915** (G1).
 - Previous accepted gate: G0, 2026-09-15 (baseline/raw-boundary witnesses).
 - Closed mission: **ZC-P2-M1-BOOTSTRAP-20260915** — independent repository, src-layout
@@ -170,19 +175,93 @@ outstanding. NOT_RUN is never PASS; no Windows/macOS qualification is claimed.
 No platform obligation is waived or removed, and no G3/G4 requirement is silently
 weakened. No external CI/push/publication was authorized by this amendment.
 
-## Next exact mission — Phase 3 authorized
+## Next exact mission — Phase 3 authorized (now ACTIVE)
 
-**ZC-P3-M1-RAW-CPU-20260916**: launch after the authorized local G2 closure commit
-and clean-tree verification. G3 remains NOT_STARTED until dispatch, not accepted.
+**ZC-P3-M1-RAW-CPU-20260916**: launched from the clean local G2 closure commit
+(`84060e945e3307d1dd7138688f5fa6543385ca0d`, tree `fa0f5ca69594e32df328c7a0db7af7db395c0f62`).
+G3 remains **not accepted**; the worker's implementation/validation record is below,
+never a self-accept. No Phase3 implementation commit is authorized (no commit).
 Strict physical FITS decode, immutable metadata/card evidence, uint16 DQ,
 signed raw float32 and CPU primitives with explicitly supplied validated masters;
 minimal cooperative cancellation/progress. Implement frozen G1, do not redesign.
 No library matching/index, GUI, ZSSS/ZeAlfie integration, GPU, master building,
 Phase4 work or public capability promotion. Stop at G3 ACCEPTED/HOLD/BLOCKED;
-never start Phase4 automatically. No Phase3 implementation commit authorized.
+never start Phase4 automatically.
+
+### Phase 3 implementation/validation (worker evidence, NOT acceptance; rework-3)
+
+Branch `feat/zc-p3-raw-cpu` (created from the clean baseline, no commit).
+Rework-1 resolved Nono M1–M7 / L1–L3; rework-2 resolved Nono/Junior A–G;
+rework-3 (final corrective iteration) resolved R1 (flat bias-range) / M1 (exposure
+domain) / M2 (declaration tuple domain) / S5 (normalization-proof coherence).
+
+- `src/zecalibrator/core/`: `dq.py` (five frozen reason bits + reserved-bit
+  validation + exact counts), `geometry.py` (exact geometry with explicit
+  unknowns, never invented; unknown ≠ unknown; nested tuples frozen),
+  `metadata.py` (deep-immutable CardRecord/SensorMetadata/ImportDeclaration with
+  recursive freeze incl. numpy→tuple; validated source/identity/version + raw/
+  ADU domain; comprehensive alias/duplicate/scaling conflict detection with
+  numeric-aware equality + FITS-vs-declaration contradiction enforcement),
+  `precision.py` (float32 envelope + float64 reference error), `equations.py`
+  (**float32 frame arithmetic** + float64 median + four-plane CFA normalization
+  + ≥90% per-plane quality screen computed from the §7.4 median population, with
+  the R>1e-6 floor as an independent response guard), `calibrate.py` (float32
+  frame pipeline + uint16 DQ + floor on supplied responses + post-arithmetic
+  nonfinite canonicalization).
+- `src/zecalibrator/io/raw_decoder.py`: strict FITS decode requiring an
+  evidence-backed raw-domain declaration (BUNIT=ADU alone is not raw proof);
+  ADU-or-declaration units; Jy/electron/rate/normalized rejected; integer BLANK
+  stored-space + integrality; NaN/Inf; endian→float32; actual-HDU card source;
+  RGB/processed rejection; alias/duplicate/scaling + declaration-contradiction
+  rejection; 2**24 integer + 2**53 int64 + float32-magnitude refusal; decode
+  progress with isolated observer.
+- `src/zecalibrator/application/`: `cancellation.py` (Qt-free cooperative token +
+  isolated progress observer) and `executor.py` (explicit master role/bias_state/
+  flat_form + normalization proof; exact detector/geometry/ROI/binning/orientation/
+  CFA/gain/offset/readout/ADC/units/thermal/exposure validation with NaN/None
+  refusal; bias vs qualified bias range; dark vs light, flat-dark vs parent flat;
+  per-frame saturation from each frame's own qualified evidence; separate light
+  vs flat bias dependencies; already_normalized requires normalization proof;
+  no partial mutation on cancel/failure; FAILED never emits committed 100%).
+- `pyproject.toml`: added already-accepted scientific dependencies
+  `numpy>=1.26` and `astropy>=6` (NumPy/Astropy frozen in G1/G2).
+- `tests/science/` + `tests/contract/`: focused science/contract tests
+  (**146 total tests pass** incl. the 29 bootstrap tests, Linux x86_64,
+  Python 3.13.5, numpy 2.2.4, astropy 7.0.1). Exact commands/results in
+  `ZC-P3-M1-RAW-CPU-20260916.coco.{r0,r1,r2,r3}.md`.
+- Durable implementation/validation records:
+  [Coco r0](../../.a2a-reports/ZC-P3-M1-RAW-CPU-20260916.coco.r0.md) (historical),
+  [Coco r1](../../.a2a-reports/ZC-P3-M1-RAW-CPU-20260916.coco.r1.md) (historical),
+  [Coco r2](../../.a2a-reports/ZC-P3-M1-RAW-CPU-20260916.coco.r2.md) (historical),
+  [Coco r3](../../.a2a-reports/ZC-P3-M1-RAW-CPU-20260916.coco.r3.md) (rework-3, current).
+
+
 
 Prepared scope: [Phase3 mission](../../.a2a-reports/ZC-P3-M1-RAW-CPU-20260916.prepared.md).
-Activation contract/report baseline will record the actual post-closure full SHA.
+Activation contract/report baseline records the actual post-closure full SHA.
+
+## Phase 3 / Mission 1 — G3 HOLD (technical ACCEPTED)
+
+- Date: 2026-09-16. Branch `feat/zc-p3-raw-cpu`, HEAD `84060e945e3307d1dd7138688f5fa6543385ca0d`
+  unchanged; G3 work uncommitted (no commit authorized); no remote.
+- Technical outcome: Nono review-3 **ACCEPT** (no material defect) + Junior independent
+  verification. 146 pytest tests pass (isolated roots, one intentional malformed-BLANK warning);
+  all prior findings (M1-M7, L1-L3, A-G, R1, M1, M2, S5) resolved. Frozen raw FITS decode,
+  explicit-master validation, immutable metadata evidence, uint16 DQ, signed float32 CPU
+  primitives, per-frame saturation, quality screen vs response floor, cancellation/progress
+  implemented per the frozen G1 contract.
+- Gate state: **HOLD**, not ACCEPTED. The mandatory three-OS scientific matrix remains
+  **NOT_RUN**: Windows native, macOS native, Qt native icon decode, Python 3.11, remote CI.
+  The G2-only owner amendment does not waive G3's three-OS requirement. Qualification remains
+  SYNTH-BASE-1 synthetic-only; no real-camera/master claim.
+- Nono non-blocking suggestions recorded (G1-G5): light-bias range helper symmetry; non-negative
+  finite guard for remaining declaration numerics (gain/offset/saturation/limit); a negative
+  test for non-finite qualified saturation limit; optional ARCHITECTURE/PROVENANCE wording for
+  bias-range governing declaration and bias_flat key role; keep bias_flat documented as a lookup
+  key, not a fifth role.
+- Next: provide/execute native Windows/macOS scientific evidence (and Python 3.11 + Qt native
+  icon decode + remote CI) to move G3 from HOLD to ACCEPTED; then Phase 4 only with a separate
+  activation. No Phase 4 was started. No push/merge/tag/release/deploy.
 
 ## DEFERRED
 

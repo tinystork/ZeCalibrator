@@ -25,6 +25,8 @@ classifiers = [
 ]
 dependencies = [
   "platformdirs>=4",
+  "numpy>=1.26",
+  "astropy>=6",
 ]
 
 [project.optional-dependencies]
