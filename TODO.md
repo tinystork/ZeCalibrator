@@ -2,12 +2,13 @@
 
 ## Current gate / mission
 
-- **Status: G6 HOLD (Phase 6 / Mission 1)** — `ZC-P6-M1-BATCH-TRANSACTIONAL-OUTPUTS-20260917`, on
-  branch `feat/zc-p6-batch-transactional` (base `ef2a9f133ee9a957586849da5db7517ddbea5db5` = G5_SHA
-  = beta). Local technical candidate ACCEPT (Nono review-1 ACCEPT + Junior verification, 401/4,
-  batch == unitary G5 science, transactional no-clobber outputs + batch manifest + CLI 0/2/3/130).
-  G6 NOT ACCEPTED: mandatory three-OS filesystem/resource/clean-env witnesses (Linux/Windows/macOS)
-  NOT_RUN. Uncommitted working tree; no commit/push authorized. No Phase 7 activation.
+- **Status: G6 ACCEPTED (Phase 6 / Mission 1)** — `ZC-P6-M1-BATCH-TRANSACTIONAL-OUTPUTS-20260917`,
+  on branch `feat/zc-p6-batch-transactional` (base `ef2a9f133ee9a957586849da5db7517ddbea5db5` = G5_SHA
+  = beta). Technical + evidence + three-OS witness ACCEPTED 2026-09-17 after Nono review-2 ACCEPT
+  (closure) + Junior independent verification; commits 9d210ca + 9066daa; 402 passed/4 skipped local
+  + CI run 35235411591 6/6 PASS (ubuntu/macos/windows); batch == unitary G5 science, transactional
+  no-clobber outputs + batch manifest + CLI 0/2/3/130. G1/G3/G4/G5 unchanged/closed. Pushed branch;
+  beta promotion requires separate authorization. No Phase 7 activation.
 - **Status: G5 ACCEPTED (Phase 5 / Mission 1)** — `ZC-P5-M1-PUBLIC-API-20260917`, on branch
   `feat/zc-p5-public-api` (base `760324b692c98d07f834a2b3b8ad34e4337ca416`).
   Technical + evidence ACCEPTED 2026-09-17 after Nono review-3 ACCEPT + Junior independent
@@ -355,7 +356,7 @@ Activation contract/report baseline records the actual post-closure full SHA.
   [G5 acceptance](../../.a2a-reports/ZC-P5-M1-PUBLIC-API-20260917.g5-acceptance.md).
 - Next: Phase 6 only with a separate activation. NOT started.
 
-## Phase 6 / Mission 1 — G6 HOLD (local technical candidate ACCEPT)
+## Phase 6 / Mission 1 — G6 ACCEPTED
 
 - Mission: `ZC-P6-M1-BATCH-TRANSACTIONAL-OUTPUTS-20260917`, separately authorized by Tristan on
   2026-09-17 (owner option 2: CLI INCLUDED). Branch `feat/zc-p6-batch-transactional`, base
