@@ -2,6 +2,12 @@
 
 ## Current gate / mission
 
+- **Status: G6 HOLD (Phase 6 / Mission 1)** — `ZC-P6-M1-BATCH-TRANSACTIONAL-OUTPUTS-20260917`, on
+  branch `feat/zc-p6-batch-transactional` (base `ef2a9f133ee9a957586849da5db7517ddbea5db5` = G5_SHA
+  = beta). Local technical candidate ACCEPT (Nono review-1 ACCEPT + Junior verification, 401/4,
+  batch == unitary G5 science, transactional no-clobber outputs + batch manifest + CLI 0/2/3/130).
+  G6 NOT ACCEPTED: mandatory three-OS filesystem/resource/clean-env witnesses (Linux/Windows/macOS)
+  NOT_RUN. Uncommitted working tree; no commit/push authorized. No Phase 7 activation.
 - **Status: G5 ACCEPTED (Phase 5 / Mission 1)** — `ZC-P5-M1-PUBLIC-API-20260917`, on branch
   `feat/zc-p5-public-api` (base `760324b692c98d07f834a2b3b8ad34e4337ca416`).
   Technical + evidence ACCEPTED 2026-09-17 after Nono review-3 ACCEPT + Junior independent
@@ -348,6 +354,24 @@ Activation contract/report baseline records the actual post-closure full SHA.
 - Qualification: SYNTH-BASE-1 synthetic-only. Uncommitted; no commit/push authorized.
   [G5 acceptance](../../.a2a-reports/ZC-P5-M1-PUBLIC-API-20260917.g5-acceptance.md).
 - Next: Phase 6 only with a separate activation. NOT started.
+
+## Phase 6 / Mission 1 — G6 HOLD (local technical candidate ACCEPT)
+
+- Mission: `ZC-P6-M1-BATCH-TRANSACTIONAL-OUTPUTS-20260917`, separately authorized by Tristan on
+  2026-09-17 (owner option 2: CLI INCLUDED). Branch `feat/zc-p6-batch-transactional`, base
+  `ef2a9f133ee9a957586849da5db7517ddbea5db5`.
+- Scope: public `calibrate_batch` (bounded iterator, batch science == unitary G5), transactional
+  standalone FITS output (DQ uint16 + CALPROV JSON + no-clobber publication + manifest last),
+  batch manifest/provenance, and complete ASTRA CLI (inspect/index/match/calibrate, exit 0/2/3/130)
+  as a thin facade over `zecalibrator.api.v1`.
+- Cycle: Coco r0 -> Nono review-0 (F-1) -> rework-1 -> Nono review-1 ACCEPT (technical, local Linux).
+- Evidence: 401 passed/4 skipped (full), 50 G6 tests, batch parity verified, F-1 resolved (typed
+  InvalidRequestError/BatchManifestError, CLI 2/3 no traceback), protected baseline unchanged,
+  `calibrate_batch` NOT advertised (still 5 capabilities).
+- Gate: **HOLD** — mandatory three-OS filesystem/resource/clean-env witnesses NOT_RUN. Next:
+  owner-authorized bounded commit + push + G6 CI witness on Windows/macOS/Linux, then Nono closure
+  review if needed -> Junior G6 ACCEPTED/HOLD/BLOCKED.
+- Qualification: SYNTH-BASE-1 synthetic-only. Uncommitted; no commit/push authorized.
 
 ## DEFERRED
 

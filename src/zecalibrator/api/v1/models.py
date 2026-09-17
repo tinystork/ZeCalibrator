@@ -12,6 +12,7 @@ unknown/not-present, never a silent default. Serialization (``to_dict`` /
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from os import PathLike
 from types import MappingProxyType
@@ -589,7 +590,283 @@ class CalibrationResult:
         return cls(_engine=engine, provenance=ProvenanceRecord.from_dict(d["provenance"]))
 
 
+# ---------------------------------------------------------------------------
+# Batch (Phase 6): BatchOptions / BatchOutputRecord / BatchItem / BatchManifest
+# ---------------------------------------------------------------------------
+BATCH_MANIFEST_SCHEMA = "zecalibrator.batch_manifest.v1"
+
+_BATCH_DISPOSITIONS = (
+    "COMPLETED", "COMPLETED_WITH_WARNINGS", "SKIPPED", "FAILED", "CANCELLED",
+)
+_BATCH_COMMIT_STATES = ("COMMITTED", "CANCELLED")
+_BATCH_STATUSES = ("COMPLETED", "PARTIAL", "CANCELLED")
+
+
+@dataclass(frozen=True)
+class BatchOptions:
+    """Batch orchestration options (destination, overwrite policy, batch id).
+
+    ``destination=None`` selects the bounded in-memory path (per-item
+    ``CalibrationResult``). A non-``None`` ``destination`` selects the standalone
+    transactional path (per-item committed FITS output); it must already exist
+    as a directory (never auto-created). Only the no-clobber overwrite policy is
+    supported in v1.
+
+    This is the M1 batch-options surface: ``calibrate_batch`` takes
+    ``BatchOptions`` (per the prepared Phase-6 contract), not the earlier
+    ARCHITECTURE §3.2 ``ExecutionOptions`` sketch.
+    """
+
+    destination: Optional[Union[str, PathLike]] = None
+    overwrite_policy: str = "no_clobber"
+    batch_id: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        if self.destination is not None and (
+            not isinstance(self.destination, (str, PathLike)) or str(self.destination) == ""
+        ):
+            raise InvalidRequestError("BatchOptions.destination must be a non-empty path when set")
+        if self.destination is not None and not os.path.isdir(os.fspath(self.destination)):
+            raise InvalidRequestError(
+                f"BatchOptions.destination must be an existing directory, got {self.destination!r}"
+            )
+        if self.overwrite_policy != "no_clobber":
+            raise InvalidRequestError(
+                f"only overwrite_policy='no_clobber' is supported, got {self.overwrite_policy!r}"
+            )
+        if self.batch_id is not None and (
+            not isinstance(self.batch_id, str) or not self.batch_id.strip()
+        ):
+            raise InvalidRequestError("BatchOptions.batch_id must be a non-empty string")
+
+    @property
+    def standalone(self) -> bool:
+        return self.destination is not None
+
+
+@dataclass(frozen=True)
+class BatchOutputRecord:
+    """A committed standalone output locator + whole-file identity.
+
+    ``science_digest`` is the canonical science digest (§2.3);
+    ``whole_file_sha256`` is the final whole-file SHA-256 computed after output
+    closure (manifest-only, never self-referenced).
+    """
+
+    path: str
+    logical_id: str
+    science_digest: str
+    whole_file_sha256: str
+    size_bytes: int
+    committed: bool = True
+
+    def __post_init__(self) -> None:
+        for name in ("path", "logical_id", "science_digest", "whole_file_sha256"):
+            v = getattr(self, name)
+            if not isinstance(v, str) or not v:
+                raise InvalidRequestError(f"BatchOutputRecord.{name} must be a non-empty string")
+        if isinstance(self.size_bytes, bool) or not isinstance(self.size_bytes, int) or self.size_bytes < 0:
+            raise InvalidRequestError("BatchOutputRecord.size_bytes must be a non-negative int")
+
+    def to_dict(self) -> Mapping[str, object]:
+        return {
+            "path": self.path,
+            "logical_id": self.logical_id,
+            "science_digest": self.science_digest,
+            "whole_file_sha256": self.whole_file_sha256,
+            "size_bytes": self.size_bytes,
+            "committed": self.committed,
+        }
+
+
+@dataclass(frozen=True)
+class BatchItem:
+    """One bounded per-frame batch result (ARCHITECTURE §3.5).
+
+    In-memory path: ``result`` carries the complete ``CalibrationResult``
+    (data + mask + provenance). Standalone path: ``result`` is ``None`` and
+    ``output`` carries the committed locator + commit state. ``disposition`` is
+    one of the five frozen statuses; ``reason_code``/``reason_details`` carry a
+    structured error/cancel reason.
+    """
+
+    index: int
+    disposition: str
+    input_identity: Optional[InputIdentity]
+    plan_id: Optional[str]
+    result: Optional[CalibrationResult] = None
+    output: Optional[BatchOutputRecord] = None
+    reason_code: Optional[str] = None
+    reason_details: str = ""
+    warnings: tuple = ()
+
+    def __post_init__(self) -> None:
+        if isinstance(self.index, bool) or not isinstance(self.index, int) or self.index < 0:
+            raise InvalidRequestError("BatchItem.index must be a non-negative int")
+        if self.disposition not in _BATCH_DISPOSITIONS:
+            raise InvalidRequestError(f"BatchItem.disposition invalid: {self.disposition!r}")
+        object.__setattr__(self, "warnings", tuple(self.warnings))
+        if self.output is not None and not isinstance(self.output, BatchOutputRecord):
+            raise InvalidRequestError("BatchItem.output must be a BatchOutputRecord")
+        if self.result is not None and not isinstance(self.result, CalibrationResult):
+            raise InvalidRequestError("BatchItem.result must be a CalibrationResult")
+
+    def to_dict(self) -> Mapping[str, object]:
+        return {
+            "index": self.index,
+            "disposition": self.disposition,
+            "input_identity": dict(_identity_to_dict(self.input_identity)),
+            "plan_id": self.plan_id,
+            "reason_code": self.reason_code,
+            "reason_details": self.reason_details,
+            "warnings": list(self.warnings),
+            "output": dict(self.output.to_dict()) if self.output is not None else None,
+        }
+
+
+@dataclass(frozen=True)
+class BatchManifest:
+    """The external batch manifest value object (strict versioned serialization).
+
+    ``inputs``/``items`` are ordered tuples of already-validated structured
+    records (JSON-safe). ``from_dict`` performs strict schema validation via the
+    io manifest parser.
+    """
+
+    batch_id: str
+    operation_id: str
+    commit_state: str
+    batch_status: str
+    destination: Optional[str]
+    inputs: Tuple[Mapping[str, object], ...]
+    items: Tuple[Mapping[str, object], ...]
+    api_version: str = "1.0"
+    product_version: str = ""
+    science_contract: str = "1.0"
+    matching_policy: str = "zecalibrator.match.v1"
+    provenance_schema: str = "zecalibrator.provenance.v1"
+    decoder_version: str = "1.0"
+    schema_version: str = BATCH_MANIFEST_SCHEMA
+
+    def __post_init__(self) -> None:
+        if self.commit_state not in _BATCH_COMMIT_STATES:
+            raise InvalidRequestError(f"BatchManifest.commit_state invalid: {self.commit_state!r}")
+        if self.batch_status not in _BATCH_STATUSES:
+            raise InvalidRequestError(f"BatchManifest.batch_status invalid: {self.batch_status!r}")
+        object.__setattr__(self, "inputs", tuple(self.inputs))
+        object.__setattr__(self, "items", tuple(self.items))
+
+    def to_dict(self) -> Mapping[str, object]:
+        return {
+            "schema_version": self.schema_version,
+            "batch_id": self.batch_id,
+            "operation_id": self.operation_id,
+            "api_version": self.api_version,
+            "product_version": self.product_version,
+            "science_contract": self.science_contract,
+            "matching_policy": self.matching_policy,
+            "provenance_schema": self.provenance_schema,
+            "decoder_version": self.decoder_version,
+            "commit_state": self.commit_state,
+            "batch_status": self.batch_status,
+            "destination": self.destination,
+            "inputs": [dict(i) for i in self.inputs],
+            "items": [dict(i) for i in self.items],
+        }
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, object]) -> "BatchManifest":
+        from zecalibrator.io.batch_manifest import parse_batch_manifest
+
+        parsed = parse_batch_manifest(d)
+        return cls(
+            batch_id=parsed["batch_id"],
+            operation_id=parsed["operation_id"],
+            commit_state=parsed["commit_state"],
+            batch_status=parsed["batch_status"],
+            destination=parsed.get("destination"),
+            inputs=tuple(dict(i) for i in parsed.get("inputs", ())),
+            items=tuple(dict(i) for i in parsed.get("items", ())),
+            api_version=parsed["api_version"],
+            product_version=parsed["product_version"],
+            science_contract=parsed["science_contract"],
+            matching_policy=parsed["matching_policy"],
+            provenance_schema=parsed["provenance_schema"],
+            decoder_version=parsed["decoder_version"],
+            schema_version=parsed["schema_version"],
+        )
+
+
+# ---------------------------------------------------------------------------
+# Library indexing (Phase 6): MasterImportSpec / IndexLibraryResult
+# ---------------------------------------------------------------------------
+@dataclass(frozen=True)
+class MasterImportSpec:
+    """An explicit evidence-backed master import for the public library-indexing
+    path. Descriptors are built from FITS headers + this declaration; it is never
+    a header->descriptor inference. ``mask_path`` supplies the external DQ mask
+    payload identity; ``path`` may be absolute or relative to the library root.
+    """
+
+    path: str
+    master_type: str
+    declaration: ImportDeclaration
+    hdu: Union[int, str] = 0
+    mask_path: Optional[str] = None
+    bias_state: Optional[str] = None
+    flat_form: Optional[str] = None
+    normalization_algorithm: Optional[str] = None
+    normalization_scalars: Optional[NormalizationScalars] = None
+    normalization_provenance: Optional[NormalizationProvenance] = None
+    validity_evidence: Optional[ValidityEvidence] = None
+    processing_provenance: Optional[ProcessingProvenance] = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.path, str) or not self.path.strip():
+            raise InvalidRequestError("MasterImportSpec.path must be a non-empty string")
+        if self.master_type not in ("bias", "dark", "flat", "flat_dark"):
+            raise InvalidRequestError(f"MasterImportSpec.master_type invalid: {self.master_type!r}")
+        if not isinstance(self.declaration, ImportDeclaration):
+            raise InvalidRequestError("MasterImportSpec.declaration must be an ImportDeclaration")
+        if isinstance(self.hdu, bool) or not isinstance(self.hdu, (int, str)):
+            raise InvalidRequestError("MasterImportSpec.hdu must be int or str")
+        if isinstance(self.hdu, int) and self.hdu < 0:
+            raise InvalidRequestError("MasterImportSpec.hdu must be a non-negative int or str")
+
+
+@dataclass(frozen=True)
+class IndexLibraryResult:
+    """Structured ``index_library`` outcome envelope."""
+
+    operation_status: str  # "COMPLETED" | "CANCELLED" | "FAILED"
+    revision: Optional[str] = None
+    candidate_count: int = 0
+    diagnostics: tuple = ()
+    reason_code: Optional[str] = None
+    details: str = ""
+
+    def __post_init__(self) -> None:
+        if self.operation_status not in ("COMPLETED", "CANCELLED", "FAILED"):
+            raise InvalidRequestError(
+                f"IndexLibraryResult.operation_status invalid: {self.operation_status!r}"
+            )
+        object.__setattr__(self, "diagnostics", tuple(self.diagnostics))
+
+    def to_dict(self) -> Mapping[str, object]:
+        return {
+            "operation_status": self.operation_status,
+            "revision": self.revision,
+            "candidate_count": self.candidate_count,
+            "diagnostics": [
+                dict(d.to_dict()) if hasattr(d, "to_dict") else d for d in self.diagnostics
+            ],
+            "reason_code": self.reason_code,
+            "details": self.details,
+        }
+
+
 __all__ = [
+    "BATCH_MANIFEST_SCHEMA",
     "CAPABILITIES",
     "PROVENANCE_SCHEMA",
     "Acquisition",
@@ -597,6 +874,10 @@ __all__ = [
     "ApiInfo",
     "ArrayFrameSource",
     "ArrayInputIdentity",
+    "BatchItem",
+    "BatchManifest",
+    "BatchOptions",
+    "BatchOutputRecord",
     "CalibrationPlan",
     "CalibrationRequest",
     "CalibrationResult",
@@ -619,6 +900,7 @@ __all__ = [
     "FrameSource",
     "Geometry",
     "ImportDeclaration",
+    "IndexLibraryResult",
     "InMemorySource",
     "InputIdentity",
     "InspectResult",
@@ -632,6 +914,7 @@ __all__ = [
     "MasterDescriptor",
     "MatchPolicy",
     "MatchResult",
+    "MasterImportSpec",
     "NormalizationProvenance",
     "NormalizationScalars",
     "OpenLibraryResult",
