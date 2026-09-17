@@ -2,11 +2,16 @@
 
 ## Current gate / mission
 
-- **Status: G3 TECHNICAL ACCEPTED / GATE HOLD (Phase 3 / Mission 1)** — `ZC-P3-M1-RAW-CPU-20260916`,
-  implementation on branch `feat/zc-p3-raw-cpu` (worker DONE, **not** self-accepted).
-  Technical work ACCEPTED by Junior after Nono review-3 ACCEPT; G3 gate is HOLD,
-  not ACCEPTED, because the mandatory three-OS scientific matrix is NOT_RUN.
-  Uncommitted G3 work (no commit authorized); no remote.
+- **Status: G4 ACCEPTED (Phase 4 / Mission 1)** — `ZC-P4-M1-LIBRARY-MATCHING-PLAN-20260916`,
+  on branch `feat/zc-p4-library-matching-plan` (base `e22678ceb734052363af79cc0e52e754466ff502`).
+  Technical + evidence ACCEPTED 2026-09-17 after Nono review-2 ACCEPT + Junior independent
+  verification; 289 passed/4 skipped; G1 projection allowlists byte-identical; G3 stays
+  closed/accepted. Uncommitted working tree; no commit/push authorized. No Phase 5 activation.
+- **Status: G3 ACCEPTED (Phase 3 / Mission 1)** — `ZC-P3-M1-RAW-CPU-20260916`,
+  implementation on branch `feat/zc-p3-raw-cpu`.
+  Technical work ACCEPTED (Nono review-3) and platform matrix ACCEPTED (Nono review-0
+  of the Qt CI witness). G3 ACCEPTED 2026-09-16. Commit cd05f64 (implementation) +
+  e22678c (Qt CI witness).
 - Previous accepted gate: **G2 ACCEPTED (Phase 2 / Mission 1)**, accepting architect: Junior.
 - Closed mission: **ZC-P1-M1-CONTRACT-DRAFT-20260915** (G1).
 - Previous accepted gate: G0, 2026-09-15 (baseline/raw-boundary witnesses).
@@ -16,7 +21,10 @@
 - Implementation evidence: [Coco r0 report](../../.a2a-reports/ZC-P2-M1-BOOTSTRAP-20260915.coco.r0.md).
   Commit SHA recorded in that report; G2 acceptance is Junior's alone.
 
-## Baseline
+## Historical baseline — Phase 2 bootstrap
+
+This section preserves the Phase 2 snapshot, including ecosystem states; it is not
+the current branch/HEAD. See the Phase 4 activation record for the live baseline.
 
 - Product root: /home/tristan/.openclaw/workspace/projects/zecalibrator.
 - **Independent Git repository: YES** (initialized during ZC-P2-M1-BOOTSTRAP-20260915;
@@ -79,9 +87,13 @@
 
 Full contracts: [SCIENCE_CONTRACT](docs/SCIENCE_CONTRACT.md),
 [ARCHITECTURE](docs/ARCHITECTURE.md), [PROVENANCE](docs/PROVENANCE.md).
-These specify future implementation; no executable scientific capability exists yet.
+These froze the implementation contracts at G1; the raw decoder/CPU subset is now
+implemented and accepted at G3. Library matching is the separately activated G4 work.
 
-## Last ACCEPTED gate — G2
+## Previously ACCEPTED gate — G2 (historical closure snapshot)
+
+The NOT_RUN statements below describe G2 closure, not current platform evidence;
+all five witnesses were subsequently satisfied at G3 (register below).
 
 - Date / authority: 2026-09-16, Junior.
 - Branch: `chore/zc-p2-bootstrap`. Full HEAD: `2270536f8567b6a1d9d99db0acd32ec3a76207f5`,
@@ -115,7 +127,7 @@ These specify future implementation; no executable scientific capability exists 
 - research/phase1/{REPORT.md,cases.json,contract_witness.py,evidence.json}.
 - Owner-policy reconciliation and gate records. No production code.
 
-### Phase 2 / Mission 1 (local/bootstrap G2 ACCEPTED; platform witnesses open)
+### Phase 2 / Mission 1 (historical: G2 ACCEPTED; platform witnesses then open)
 
 - Independent Git repository (product root), branch `chore/zc-p2-bootstrap`.
 - README.md, LICENSE (GPL-3.0-or-later), pyproject.toml, .gitignore, .gitattributes.
@@ -147,8 +159,8 @@ No-calibration and partial modes are explicit, not silent role downgrades.
   synthetic-only, not qualification of Seestar S50/S30 or other actual cameras.
 - Observed real lights lack qualified detector-instance/offset/readout/ADC facts;
   firmware preprocessing remains uncertain. No defaults inferred from fixture.
-- Phase2 local/bootstrap witnesses passed; the mandatory platform register below
-  remains NOT_RUN. Local PASS does not establish cross-platform qualification.
+- Phase2 local/bootstrap witnesses passed; the mandatory platform witnesses were
+  subsequently SATISFIED at G3 by run 35145764088. This does not qualify real cameras.
 - Nono nonblocking research limitations retained: structural helper is not a
   complete matcher (normalized-flat dependency and None/None acquisition checks);
   unknown nested-schema extension policy to make explicit in implementation.
@@ -164,18 +176,22 @@ No-calibration and partial modes are explicit, not silent role downgrades.
 
 | Required witness | Status | Gate before claim |
 | --- | --- | --- |
-| Windows native execution/filesystem behavior | **NOT_RUN** | Mandatory before Windows support/release claim |
-| macOS native execution/filesystem behavior | **NOT_RUN** | Mandatory before macOS support/release claim |
-| Qt native icon decoding | **NOT_RUN** | Mandatory before corresponding GUI/platform support/release claim |
-| Python 3.11 execution | **NOT_RUN** | Mandatory before verified minimum-interpreter support/release claim |
-| Remote CI execution | **NOT_RUN** | Mandatory before corresponding CI-backed platform support/release claim |
+| Windows native execution/filesystem behavior | **SATISFIED** (GitHub windows-latest, run 35145764088) | Mandatory before Windows support/release claim |
+| macOS native execution/filesystem behavior | **SATISFIED** (GitHub macos-latest, run 35145764088) | Mandatory before macOS support/release claim |
+| Qt native icon decoding | **SATISFIED** (offscreen witness success ubuntu/windows/macos 3.11) | Mandatory before corresponding GUI/platform support/release claim |
+| Python 3.11 execution | **SATISFIED** (3.11 jobs success) | Mandatory before verified minimum-interpreter support/release claim |
+| Remote CI execution | **SATISFIED** (GitHub Actions run 35145764088) | Mandatory before corresponding CI-backed platform support/release claim |
 
-The amendment permits **local/bootstrap G2 ACCEPTED only** with these witnesses
-outstanding. NOT_RUN is never PASS; no Windows/macOS qualification is claimed.
+Historically, the amendment permitted **local/bootstrap G2 ACCEPTED only** while
+these witnesses were outstanding. NOT_RUN was never PASS. Subsequent G3 CI evidence
+satisfies the register above; it does not retroactively change the G2 evidence.
 No platform obligation is waived or removed, and no G3/G4 requirement is silently
 weakened. No external CI/push/publication was authorized by this amendment.
 
-## Next exact mission — Phase 3 authorized (now ACTIVE)
+## Historical activation — Phase 3 (superseded by G3 ACCEPTED below)
+
+The following preserves the original activation constraints and pre-acceptance
+worker state. It is not the current gate, commit authorization, or next mission.
 
 **ZC-P3-M1-RAW-CPU-20260916**: launched from the clean local G2 closure commit
 (`84060e945e3307d1dd7138688f5fa6543385ca0d`, tree `fa0f5ca69594e32df328c7a0db7af7db395c0f62`).
@@ -240,33 +256,78 @@ domain) / M2 (declaration tuple domain) / S5 (normalization-proof coherence).
 Prepared scope: [Phase3 mission](../../.a2a-reports/ZC-P3-M1-RAW-CPU-20260916.prepared.md).
 Activation contract/report baseline records the actual post-closure full SHA.
 
-## Phase 3 / Mission 1 — G3 HOLD (technical ACCEPTED)
+## Phase 3 / Mission 1 — G3 ACCEPTED
 
-- Date: 2026-09-16. Branch `feat/zc-p3-raw-cpu`, HEAD `84060e945e3307d1dd7138688f5fa6543385ca0d`
-  unchanged; G3 work uncommitted (no commit authorized); no remote.
-- Technical outcome: Nono review-3 **ACCEPT** (no material defect) + Junior independent
-  verification. 146 pytest tests pass (isolated roots, one intentional malformed-BLANK warning);
-  all prior findings (M1-M7, L1-L3, A-G, R1, M1, M2, S5) resolved. Frozen raw FITS decode,
-  explicit-master validation, immutable metadata evidence, uint16 DQ, signed float32 CPU
-  primitives, per-frame saturation, quality screen vs response floor, cancellation/progress
-  implemented per the frozen G1 contract.
-- Gate state: **HOLD**, not ACCEPTED. The mandatory three-OS scientific matrix remains
-  **NOT_RUN**: Windows native, macOS native, Qt native icon decode, Python 3.11, remote CI.
-  The G2-only owner amendment does not waive G3's three-OS requirement. Qualification remains
-  SYNTH-BASE-1 synthetic-only; no real-camera/master claim.
-- Nono non-blocking suggestions recorded (G1-G5): light-bias range helper symmetry; non-negative
-  finite guard for remaining declaration numerics (gain/offset/saturation/limit); a negative
-  test for non-finite qualified saturation limit; optional ARCHITECTURE/PROVENANCE wording for
-  bias-range governing declaration and bias_flat key role; keep bias_flat documented as a lookup
-  key, not a fifth role.
-- Next: provide/execute native Windows/macOS scientific evidence (and Python 3.11 + Qt native
-  icon decode + remote CI) to move G3 from HOLD to ACCEPTED; then Phase 4 only with a separate
-  activation. No Phase 4 was started. No push/merge/tag/release/deploy.
+- Date: 2026-09-16. Branch `feat/zc-p3-raw-cpu`.
+  Implementation commit `cd05f64e3cd3a9ebbd15cdce6161a8611c306182`;
+  Qt CI witness commit `e22678ceb734052363af79cc0e52e754466ff502` (pushed, remote==local).
+- Technical: Nono review-3 ACCEPT (no material defect) + Junior independent verification;
+  146 tests pass. Frozen raw FITS decode, explicit-master validation, immutable metadata
+  evidence, uint16 DQ, signed float32 CPU primitives, per-frame saturation, quality screen
+  vs response floor, cancellation/progress per frozen G1.
+- Platform: Nono review-0 ACCEPT of the native Qt icon-decode CI witness; GitHub Actions run
+  35145764088 all 6 jobs success, Qt witness success on ubuntu/windows/macos Python 3.11.
+  All five mandatory platform witnesses SATISFIED (runner-native CI evidence, not Tristan's
+  own machines). Qualification SYNTH-BASE-1 synthetic-only; no real-camera/master claim.
+- Nono non-blocking suggestions recorded (S1-S4 of the Qt-witness review, G1-G5 of the G3
+  science review): ICNS imageCount, document the 3.11-only witness choice, apt-get narrowing,
+  optional PySide6 CI pin, plus earlier helper-symmetry/numeric-guard/negative-test notes.
+- At G3 closure, Phase 4 was not started. The separate owner-authorized activation
+  of 2026-09-16 is recorded below.
+
+
+## Phase 4 / Mission 1 — G4 ACCEPTED
+
+- Mission: `ZC-P4-M1-LIBRARY-MATCHING-PLAN-20260916`, separately authorized by Tristan
+  on 2026-09-16. Junior owns architecture/gate; Coco implementation; Nono read-only review.
+- Branch: `feat/zc-p4-library-matching-plan`; accepted base and origin Phase3 ref both
+  `e22678ceb734052363af79cc0e52e754466ff502`. Only inherited change: this G3-acceptance ledger.
+- Preflight: required contracts and G1/G3 acceptance/review reports read; no material
+  contradiction with G3 acceptance. Historical sections labelled, not rewritten.
+  Original ledger + tracked-file hashes archived under the mission's `.preflight.*` reports.
+- Baseline: `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src /usr/bin/python3 -m pytest
+  tests/contract/test_master_validation.py tests/contract/test_rework3.py
+  tests/contract/test_immutability.py -q -p no:cacheprovider` => **36 passed**.
+- Scope: immutable descriptors, filesystem-independent library snapshots, pure strict
+  coherent-set matching, canonical CalibrationPlan/decision provenance, local versioned
+  SQLite adapter and read-only identity/revalidation boundaries. Implement frozen G1.
+- Qualification: SYNTH-BASE-1 synthetic-only. No new scientific policy or real-camera claim.
+- Design, allowlist, evidence gaps and gates:
+  [prepared mission](../../.a2a-reports/ZC-P4-M1-LIBRARY-MATCHING-PLAN-20260916.prepared.md).
+- Coco implementation-r0 DONE received; 7 new source + 5 new test files, no commit.
+  Junior reproduced all 96 new tests plus targeted G3 regression: **158 passed**.
+  Independent counterexamples confirm blocking strictness/manual-selection/provenance
+  and library lifecycle gaps; **G4 NOT ACCEPTED**.
+  Nono review-0 **FINDINGS** (M1-M10), independently confirmed by Junior on 2026-09-17.
+  **Active: Coco REWORK-1 DONE** (first corrective iteration), 281 passed/4 skipped.
+  Junior independent verification: M1-M10 RESOLVED, one minor residual R1
+  (manual selection to a known wrong-role / non-required role -> unexplained NO_MATCH).
+  [Junior r1 findings](../../.a2a-reports/ZC-P4-M1-LIBRARY-MATCHING-PLAN-20260916.junior.r1.md).
+  Nono review-1 **FINDINGS**: M1-M10 resolved; two new material findings N-A
+  (light acquisition-profile outside plan identity) + N-B (unroutable flat_dark -> empty
+  reason_codes) and confirmed minor R1; all three independently reproduced by Junior.
+  [Nono r1](../../.a2a-reports/ZC-P4-M1-LIBRARY-MATCHING-PLAN-20260916.nono.r1.md).
+  **Active: Coco REWORK-2 DONE** (2nd corrective iteration), 289 passed/4 skipped.
+  Junior independent verification: N-A (light profile in plan identity), N-B (unroutable
+  flat_dark reason), R1 (manual wrong-role reason) all RESOLVED; G1 projection allowlists
+  byte-identical to reference; no new residual defect found.
+  [Junior r2 findings](../../.a2a-reports/ZC-P4-M1-LIBRARY-MATCHING-PLAN-20260916.junior.r2.md).
+  Nono review-2 **ACCEPT** (no material defect); Junior final acceptance checks PASS.
+  **G4 ACCEPTED 2026-09-17.** [G4 acceptance](../../.a2a-reports/ZC-P4-M1-LIBRARY-MATCHING-PLAN-20260916.g4-acceptance.md).
+  [Bounded r2 contract](../../.a2a-reports/ZC-P4-M1-LIBRARY-MATCHING-PLAN-20260916.coco.r2.contract.md).
+  G1 projections stay frozen; G3 unchanged.
+  [Bounded r1 contract](../../.a2a-reports/ZC-P4-M1-LIBRARY-MATCHING-PLAN-20260916.coco.r1.contract.md).
+  Frozen G1 projection/policies and G3 remain unchanged.
+  [Junior r0 findings](../../.a2a-reports/ZC-P4-M1-LIBRARY-MATCHING-PLAN-20260916.junior.r0.md).
+  G3 code/tests/contracts remain byte-identical. No Phase5.
+- Dispatch: Coco implementation-r0 completed; transport recorded in activation report.
+- Next: bounded Coco implementation; independent Junior verification, Nono review,
+  corrections if needed, G4 decision and STOP. No commit/push/merge/tag/release/deploy.
 
 ## DEFERRED
 
-- Raw decoder/CPU primitive G3, matching/library G4, public API G5,
-  batch/transactional outputs G6, GUI G7, native packaging G8.
+- Public API G5, batch/transactional outputs G6, GUI G7, native packaging G8.
+  G3 is ACCEPTED; matching/library G4 is separately active, not deferred.
 - ZSSS signed preparation + adapter / ZeAlfie admission G9.
 - GPU G10; raw reducer/master generation G11; ZeMosaic adapter G12.
 - Shared ZeStackCore (unscheduled); destructive in-place calibration (not v1);
