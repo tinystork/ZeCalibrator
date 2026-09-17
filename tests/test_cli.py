@@ -32,11 +32,13 @@ def test_no_args_prints_help():
     assert "usage" in proc.stdout.lower()
 
 
-def test_help_does_not_claim_implemented_capability():
+def test_help_reflects_current_state_not_bootstrap():
     proc = run_cli("--help")
     out = " ".join((proc.stdout + proc.stderr).lower().split())
-    assert "no calibration" in out
-    assert "bootstrap skeleton" in out
-    # No capability-bearing subcommands are exposed.
+    # The help no longer describes the product as a bootstrap skeleton; the
+    # accepted calibration engine is described. Capability identifier keywords
+    # are not exposed.
+    assert "bootstrap skeleton" not in out
+    assert "calibration" in out
     for keyword in ("calibrate_frame", "calibrate_batch", "gpu", "cuda"):
         assert keyword not in out

@@ -367,6 +367,7 @@ def test_get_api_info_static_surface():
         "master_matching",
         "provenance",
         "cancel",
+        "calibrate_batch",
     )
 
 
@@ -817,7 +818,7 @@ def test_open_library_unsupported_schema_fails(tmp_path):
 # ---------------------------------------------------------------------------
 # Interop declaration
 # ---------------------------------------------------------------------------
-def test_interop_provides_five_implemented_capabilities():
+def test_interop_provides_six_implemented_capabilities():
     pkg = files("zecalibrator")
     data = json.loads((pkg / "zesoftware_interop.json").read_bytes().decode("utf-8"))
     assert data["schema"] == "zesoftware.interop.v1"
@@ -832,6 +833,7 @@ def test_interop_provides_five_implemented_capabilities():
         "master_matching",
         "provenance",
         "cancel",
+        "calibrate_batch",
     ]
     assert get_api_info().capabilities == tuple(entry["capabilities"])
 

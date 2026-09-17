@@ -14,8 +14,8 @@ a versioned index) required by the CLI ``index`` command. Descriptors are built
 from FITS headers + explicit evidence-backed :class:`MasterImportSpec`
 declarations (SYNTH-BASE-1), never a real header->descriptor importer.
 
-The ``calibrate_batch`` capability is **not** advertised in ``CAPABILITIES``
-until acceptance.
+The ``calibrate_batch`` capability is advertised in ``CAPABILITIES`` since its
+G6 acceptance (admitted via ZC-P6-M2-BATCH-CAPABILITY-ADMISSION).
 """
 
 from __future__ import annotations

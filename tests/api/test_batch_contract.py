@@ -483,11 +483,15 @@ def test_batch_local_path_semantics_with_spaces_and_unicode(tmp_path):
     assert m["items"][0]["output"]["path"] == items[0].output.path
 
 
-def test_batch_api_surface_is_public_and_unadvertised():
-    # Batch symbols are public but calibrate_batch is NOT an advertised capability.
+def test_batch_api_surface_is_public_and_advertised():
+    # calibrate_batch is a public symbol and an ADVERTISED capability (P6-M2);
+    # index_library is public but NOT a separate capability (it is an operation of
+    # the calibration_library capability).
     assert "calibrate_batch" in v1.__all__
     assert "index_library" in v1.__all__
-    assert "calibrate_batch" not in v1.get_api_info().capabilities
+    assert "calibrate_batch" in v1.get_api_info().capabilities
+    assert "index_library" not in v1.get_api_info().capabilities
     assert v1.get_api_info().capabilities == (
         "calibrate_frame", "calibration_library", "master_matching", "provenance", "cancel",
+        "calibrate_batch",
     )

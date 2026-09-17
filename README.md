@@ -4,11 +4,11 @@ ZeCalibrator is an independently installable application and reusable scientific
 calibration engine for **raw astronomical sensor FITS frames**. The initial
 useful release applies existing calibration masters; it does not build them.
 
-> **Status — bootstrap skeleton (Phase 2).** This repository currently provides
-> package layout, a literal product version, `--help`/`--version` entry points,
-> package resources and a platform storage-path adapter. **No calibration,
-> matching or other scientific capability is implemented or advertised in this
-> release.** See [`TODO.md`](TODO.md) for the accepted gate ledger.
+> **Status — G6 ACCEPTED.** The public `zecalibrator.api.v1` surface exposes six
+> implemented capabilities: `calibrate_frame`, `calibration_library`,
+> `master_matching`, `provenance`, `cancel`, and `calibrate_batch` (Phase 6
+> batch + transactional FITS outputs + CLI). Qualification remains SYNTH-BASE-1
+> synthetic-only. See [`TODO.md`](TODO.md) for the accepted gate ledger.
 
 ## License
 
@@ -43,10 +43,12 @@ python -m zecalibrator       # routes to the CLI
 zecalibrator-gui             # GUI launcher; emits a precise diagnostic without [gui]
 ```
 
-The CLI exposes only `--help`/`--version`. The GUI is a later-phase deliverable;
-without the optional `[gui]` extra, `zecalibrator-gui` emits a precise
-missing-extra diagnostic and exits non-zero while the engine and CLI remain
-usable.
+The CLI exposes `inspect`, `index`, `match` and `calibrate` (deterministic
+scriptable JSON output, exit codes 0/2/3/130) as a thin facade over
+`zecalibrator.api.v1`, plus `--help`/`--version`. The GUI is a later-phase
+deliverable; without the optional `[gui]` extra, `zecalibrator-gui` emits a
+precise missing-extra diagnostic and exits non-zero while the engine and CLI
+remain usable.
 
 ## Storage paths
 
@@ -93,7 +95,8 @@ python -m venv .venv
 
 ## Disclaimers
 
-- No scientific arithmetic (FITS decode, calibration equations, matching) is
-  implemented in this bootstrap release.
+- Scientific arithmetic (FITS decode, calibration equations, deterministic
+  matching, batch orchestration, transactional FITS output) is implemented and
+  accepted through G6, with SYNTH-BASE-1 synthetic-only qualification.
 - No real-camera or master-building qualification is claimed.
 - No publication, release, signing or deployment is authorized by this source.

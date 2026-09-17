@@ -11,7 +11,8 @@
         "calibration_library",
         "master_matching",
         "provenance",
-        "cancel"
+        "cancel",
+        "calibrate_batch"
       ]
     }
   ],

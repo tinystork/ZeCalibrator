@@ -2,24 +2,26 @@
 
 ## Current gate / mission
 
-- **Status: G6 ACCEPTED (Phase 6 / Mission 1)** — `ZC-P6-M1-BATCH-TRANSACTIONAL-OUTPUTS-20260917`,
-  on branch `feat/zc-p6-batch-transactional` (base `ef2a9f133ee9a957586849da5db7517ddbea5db5` = G5_SHA
-  = beta). Technical + evidence + three-OS witness ACCEPTED 2026-09-17 after Nono review-2 ACCEPT
-  (closure) + Junior independent verification; commits 9d210ca + 9066daa; 402 passed/4 skipped local
-  + CI run 35235411591 6/6 PASS (ubuntu/macos/windows); batch == unitary G5 science, transactional
-  no-clobber outputs + batch manifest + CLI 0/2/3/130. G1/G3/G4/G5 unchanged/closed. Pushed branch;
-  beta promotion requires separate authorization. No Phase 7 activation.
+- **Status: G6 ACCEPTED + COMMITTED + PUSHED (Phase 6 / Mission 1)** — `ZC-P6-M1-BATCH-TRANSACTIONAL-OUTPUTS-20260917`,
+  on branch `feat/zc-p6-batch-transactional` (base `ef2a9f133ee9a957586849da5db7517ddbea5db5` = G5_SHA).
+  Functional G6 SHA `9066daa3b86a727d1a64113316aed3e80e32faaf` (Windows mkstemp-fd fix, Nono review-2
+  ACCEPT) + G6 closure SHA `a4398d1b2043c2c5f8930e0e5ee73236066d2098` (docs: record G6 acceptance, beta tip).
+  402 passed/4 skipped local; three-OS CI run 35235411591 6/6 PASS (ubuntu/macos/windows x 3.11/3.13);
+  batch == unitary G5 science, transactional no-clobber outputs + batch manifest + CLI 0/2/3/130.
+  Pushed; beta promoted (fast-forward) to a4398d1b. calibrate_batch admitted as capability (P6-M2).
+  G1/G3/G4/G5 unchanged/closed. Phase 7 NOT STARTED.
 - **Status: G5 ACCEPTED (Phase 5 / Mission 1)** — `ZC-P5-M1-PUBLIC-API-20260917`, on branch
   `feat/zc-p5-public-api` (base `760324b692c98d07f834a2b3b8ad34e4337ca416`).
   Technical + evidence ACCEPTED 2026-09-17 after Nono review-3 ACCEPT + Junior independent
-  verification; 351 passed/4 skipped; five capabilities exposed via `zecalibrator.api.v1`;
-  G1/G3/G4 unchanged/closed. Uncommitted working tree; no commit/push authorized. No Phase 6
-  activation.
+  verification; 351 passed/4 skipped; five capabilities exposed at G5 (six since P6-M2);
+  G1/G3/G4 unchanged/closed. Committed `ef2a9f133ee9a957586849da5db7517ddbea5db5` + pushed; beta
+  promoted (fast-forward). (Uncommitted only at acceptance time.)
 - **Status: G4 ACCEPTED (Phase 4 / Mission 1)** — `ZC-P4-M1-LIBRARY-MATCHING-PLAN-20260916`,
   on branch `feat/zc-p4-library-matching-plan` (base `e22678ceb734052363af79cc0e52e754466ff502`).
   Technical + evidence ACCEPTED 2026-09-17 after Nono review-2 ACCEPT + Junior independent
   verification; 289 passed/4 skipped; G1 projection allowlists byte-identical; G3 stays
-  closed/accepted. Uncommitted working tree; no commit/push authorized. No Phase 5 activation.
+  closed/accepted. Committed `760324b692c98d07f834a2b3b8ad34e4337ca416` + pushed; beta promoted
+  (fast-forward). (Uncommitted only at acceptance time.)
 - **Status: G3 ACCEPTED (Phase 3 / Mission 1)** — `ZC-P3-M1-RAW-CPU-20260916`,
   implementation on branch `feat/zc-p3-raw-cpu`.
   Technical work ACCEPTED (Nono review-3) and platform matrix ACCEPTED (Nono review-0
@@ -352,9 +354,8 @@ Activation contract/report baseline records the actual post-closure full SHA.
   Nono review-2 M7/M8/D5-D8 -> rework-3 -> Nono review-3 ACCEPT. 3/3 corrective rounds.
 - Evidence: 351 passed/4 skipped (full), 60 API tests, cold import cheap + five caps, protected
   baseline byte-identical, no G1/G3/G4 edit.
-- Qualification: SYNTH-BASE-1 synthetic-only. Uncommitted; no commit/push authorized.
+- Qualification: SYNTH-BASE-1 synthetic-only. Committed `ef2a9f13…` + pushed; beta promoted.
   [G5 acceptance](../../.a2a-reports/ZC-P5-M1-PUBLIC-API-20260917.g5-acceptance.md).
-- Next: Phase 6 only with a separate activation. NOT started.
 
 ## Phase 6 / Mission 1 — G6 ACCEPTED
 
@@ -365,19 +366,21 @@ Activation contract/report baseline records the actual post-closure full SHA.
   standalone FITS output (DQ uint16 + CALPROV JSON + no-clobber publication + manifest last),
   batch manifest/provenance, and complete ASTRA CLI (inspect/index/match/calibrate, exit 0/2/3/130)
   as a thin facade over `zecalibrator.api.v1`.
-- Cycle: Coco r0 -> Nono review-0 (F-1) -> rework-1 -> Nono review-1 ACCEPT (technical, local Linux).
-- Evidence: 401 passed/4 skipped (full), 50 G6 tests, batch parity verified, F-1 resolved (typed
+- Cycle: Coco r0 -> Nono review-0 (F-1) -> rework-1 -> Nono review-1 ACCEPT (technical, local Linux)
+  -> three-OS witness FAIL (Windows mkstemp-fd leak) -> rework-2 (os.close(fd)) -> three-OS witness
+  PASS (run 35235411591 6/6) -> Nono review-2 ACCEPT (closure).
+- Evidence: 402 passed/4 skipped (full), 50+ G6 tests, batch parity verified, F-1 resolved (typed
   InvalidRequestError/BatchManifestError, CLI 2/3 no traceback), protected baseline unchanged,
-  `calibrate_batch` NOT advertised (still 5 capabilities).
-- Gate: **HOLD** — mandatory three-OS filesystem/resource/clean-env witnesses NOT_RUN. Next:
-  owner-authorized bounded commit + push + G6 CI witness on Windows/macOS/Linux, then Nono closure
-  review if needed -> Junior G6 ACCEPTED/HOLD/BLOCKED.
-- Qualification: SYNTH-BASE-1 synthetic-only. Uncommitted; no commit/push authorized.
+  6 capabilities (calibrate_batch advertised since P6-M2).
+- Gate: three-OS filesystem/resource/clean-env witnesses PASS (run 35235411591 6/6). Historical:
+  first witness run 35230700912 FAILED on Windows (mkstemp-fd leak); 9066daa fixed it.
+- Qualification: SYNTH-BASE-1 synthetic-only. Committed + pushed + beta promoted (functional
+  9066daa + closure a4398d1b).
 
 ## DEFERRED
 
-- Batch/transactional outputs G6, GUI G7, native packaging G8.
-  G3/G4/G5 are ACCEPTED.
+- GUI G7, native packaging G8.
+  G3/G4/G5/G6 are ACCEPTED.
 - ZSSS signed preparation + adapter / ZeAlfie admission G9.
 - GPU G10; raw reducer/master generation G11; ZeMosaic adapter G12.
 - Shared ZeStackCore (unscheduled); destructive in-place calibration (not v1);

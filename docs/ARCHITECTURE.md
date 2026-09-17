@@ -66,18 +66,18 @@ Initial capability identifiers to freeze:
 calibrate_frame, calibration_library, master_matching, provenance, cancel
 ```
 
-`calibrate_batch` is added only when implemented (Phase 6). `GPU` and
-`master_building` are **not** advertised. Static wheel capabilities describe
-implemented public behavior, not hardware present; dynamic probe distinguishes
-supported code from currently available resources. **No new public capability
-claim is made in this document** beyond the five identifiers above.
+`calibrate_batch` is added at Phase 6 (implemented and advertised since its G6
+acceptance). `GPU` and `master_building` are **not** advertised. Static wheel
+capabilities describe implemented public behavior, not hardware present; dynamic
+probe distinguishes supported code from currently available resources. The six
+implemented identifiers are the five above plus `calibrate_batch` (Phase 6).
 
 ---
 
 ## 3. Public API v1 — concrete specified model
 
-This is the **design contract** for the future API. No implementation exists. The
-field tables below are sufficient to define behavior without production classes.
+This is the **design contract** for the public API, delivered in G5 (public facade) and G6
+(batch). The field tables below remain the authoritative contract.
 
 ### 3.1 Explicit request/roles routing (specified — resolves sketch gap)
 

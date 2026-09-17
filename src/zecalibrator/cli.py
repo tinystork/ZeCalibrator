@@ -33,7 +33,8 @@ _ADDITIVE_MODES = ("control", "bias_only", "dark_incl_bias", "dark_bias_removed"
 _FLAT_MODES = ("none", "apply")
 
 _DESCRIPTION = (
-    "ZeCalibrator — raw astronomical sensor FITS calibration engine (bootstrap skeleton).\n\n"
+    "ZeCalibrator — raw/CFA FITS calibration with library matching, batch calibration and "
+    "transactional outputs.\n\n"
     "Phase 6: bounded batch orchestration and transactional FITS output. No calibration "
     "science is added or modified beyond the frozen G3/G4/G5 engine; this CLI is a thin "
     "facade over zecalibrator.api.v1."

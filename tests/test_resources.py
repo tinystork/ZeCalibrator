@@ -61,7 +61,7 @@ def test_icon_bytes_rejects_path_traversal():
             raise AssertionError(f"expected ValueError for {bad!r}")
 
 
-def test_exactly_one_interop_declaration_with_five_provides():
+def test_exactly_one_interop_declaration_with_six_provides():
     pkg = files("zecalibrator")
     matches = [p.name for p in pkg.iterdir() if p.name == "zesoftware_interop.json"]
     assert len(matches) == 1
@@ -81,6 +81,7 @@ def test_exactly_one_interop_declaration_with_five_provides():
                     "master_matching",
                     "provenance",
                     "cancel",
+                    "calibrate_batch",
                 ],
             }
         ],

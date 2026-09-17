@@ -227,5 +227,4 @@ def test_cli_help_has_no_capability_keywords(tmp_path):
     out = " ".join((proc.stdout + proc.stderr).lower().split())
     for keyword in ("calibrate_frame", "calibrate_batch", "gpu", "cuda"):
         assert keyword not in out
-    assert "bootstrap skeleton" in out
-    assert "no calibration" in out
+    assert "bootstrap skeleton" not in out

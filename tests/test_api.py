@@ -36,6 +36,7 @@ def test_get_api_info_matches_static_surface():
         "master_matching",
         "provenance",
         "cancel",
+        "calibrate_batch",
     )
 
 
@@ -67,7 +68,7 @@ def test_cold_import_and_get_api_info_are_cheap():
         info = v1.get_api_info()
         assert info.capabilities == (
             "calibrate_frame", "calibration_library", "master_matching",
-            "provenance", "cancel",
+            "provenance", "cancel", "calibrate_batch",
         )
         for mod in ("numpy", "astropy", "sqlite3", "PySide6", "QtWidgets",
                     "QtCore", "zealfie", "seestar", "cupy"):
