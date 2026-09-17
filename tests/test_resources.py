@@ -61,7 +61,7 @@ def test_icon_bytes_rejects_path_traversal():
             raise AssertionError(f"expected ValueError for {bad!r}")
 
 
-def test_exactly_one_interop_declaration_with_empty_provides():
+def test_exactly_one_interop_declaration_with_five_provides():
     pkg = files("zecalibrator")
     matches = [p.name for p in pkg.iterdir() if p.name == "zesoftware_interop.json"]
     assert len(matches) == 1
@@ -71,6 +71,18 @@ def test_exactly_one_interop_declaration_with_empty_provides():
         "schema": "zesoftware.interop.v1",
         "product_id": "zecalibrator",
         "distribution_name": "ZeCalibrator",
-        "provides": [],
+        "provides": [
+            {
+                "api_module": "zecalibrator.api.v1",
+                "api_version": "1.0",
+                "capabilities": [
+                    "calibrate_frame",
+                    "calibration_library",
+                    "master_matching",
+                    "provenance",
+                    "cancel",
+                ],
+            }
+        ],
         "consumes": [],
     }

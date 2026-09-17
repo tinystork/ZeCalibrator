@@ -2,6 +2,12 @@
 
 ## Current gate / mission
 
+- **Status: G5 ACCEPTED (Phase 5 / Mission 1)** — `ZC-P5-M1-PUBLIC-API-20260917`, on branch
+  `feat/zc-p5-public-api` (base `760324b692c98d07f834a2b3b8ad34e4337ca416`).
+  Technical + evidence ACCEPTED 2026-09-17 after Nono review-3 ACCEPT + Junior independent
+  verification; 351 passed/4 skipped; five capabilities exposed via `zecalibrator.api.v1`;
+  G1/G3/G4 unchanged/closed. Uncommitted working tree; no commit/push authorized. No Phase 6
+  activation.
 - **Status: G4 ACCEPTED (Phase 4 / Mission 1)** — `ZC-P4-M1-LIBRARY-MATCHING-PLAN-20260916`,
   on branch `feat/zc-p4-library-matching-plan` (base `e22678ceb734052363af79cc0e52e754466ff502`).
   Technical + evidence ACCEPTED 2026-09-17 after Nono review-2 ACCEPT + Junior independent
@@ -324,10 +330,29 @@ Activation contract/report baseline records the actual post-closure full SHA.
 - Next: bounded Coco implementation; independent Junior verification, Nono review,
   corrections if needed, G4 decision and STOP. No commit/push/merge/tag/release/deploy.
 
+## Phase 5 / Mission 1 — G5 ACCEPTED
+
+- Mission: `ZC-P5-M1-PUBLIC-API-20260917`, separately authorized by Tristan on 2026-09-17.
+  Junior owns architecture/gate; Coco implementation; Nono read-only review.
+- Branch: `feat/zc-p5-public-api`; base `760324b692c98d07f834a2b3b8ad34e4337ca416`
+  (== G4 closure commit == beta). Owner A-D: G4 CalibrationRequest/MasterBinding + LightConstraints
+  public; get_api_info included; probe deferred; FrameSource + inspect_frame public, DecodedFrame private.
+- Scope: public `zecalibrator.api.v1` facade over frozen G3/G4 (models/errors/versioned serialization,
+  FrameSource/inspect_frame, open_library, resolve_calibration MATCHED/NO_MATCH/AMBIGUOUS,
+  CalibrationPlan/validate_plan/validate_binding, calibrate_frame, public cancellation/progress,
+  five interop provides). No SQLite/internal-path contract; core Qt-free; no ZeAlfie/ZSSS/CuPy.
+- Cycle: Coco r0 -> Nono review-0 F1-F7 -> rework-1 -> Nono review-1 M1-M6/D1-D4 -> rework-2 ->
+  Nono review-2 M7/M8/D5-D8 -> rework-3 -> Nono review-3 ACCEPT. 3/3 corrective rounds.
+- Evidence: 351 passed/4 skipped (full), 60 API tests, cold import cheap + five caps, protected
+  baseline byte-identical, no G1/G3/G4 edit.
+- Qualification: SYNTH-BASE-1 synthetic-only. Uncommitted; no commit/push authorized.
+  [G5 acceptance](../../.a2a-reports/ZC-P5-M1-PUBLIC-API-20260917.g5-acceptance.md).
+- Next: Phase 6 only with a separate activation. NOT started.
+
 ## DEFERRED
 
-- Public API G5, batch/transactional outputs G6, GUI G7, native packaging G8.
-  G3 is ACCEPTED; matching/library G4 is separately active, not deferred.
+- Batch/transactional outputs G6, GUI G7, native packaging G8.
+  G3/G4/G5 are ACCEPTED.
 - ZSSS signed preparation + adapter / ZeAlfie admission G9.
 - GPU G10; raw reducer/master generation G11; ZeMosaic adapter G12.
 - Shared ZeStackCore (unscheduled); destructive in-place calibration (not v1);

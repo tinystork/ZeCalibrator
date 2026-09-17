@@ -36,6 +36,8 @@ def test_clean_import_has_no_optional_heavy_dependencies():
         import zecalibrator.storage
         import zecalibrator._resources
         assert zecalibrator.__version__ == "0.1.0"
+        # Cold import of the package + lazy API facade must not pull heavy or
+        # optional modules (NumPy/Astropy are loaded lazily on model use).
         for mod in ("PySide6", "QtWidgets", "QtCore", "QtGui", "zealfie", "seestar", "cupy", "numpy", "astropy"):
             assert mod not in sys.modules, "unexpected import: " + mod
         print("OK")
