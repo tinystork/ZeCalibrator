@@ -286,6 +286,12 @@ def write_standalone_output(
     fd, tmp_path = tempfile.mkstemp(
         prefix=f".zecalibrator-{logical_id[:16]}-", suffix=".fits.tmp", dir=destination
     )
+    # Close the mkstemp descriptor immediately: the empty file is rewritten by
+    # path (astropy opens its own handle), and the descriptor must not remain
+    # open across publication/removal — Windows locks open files, so a leaked fd
+    # would keep the `.tmp` alive (frozen PROVENANCE §5 "close FITS handles
+    # before rename on Windows").
+    os.close(fd)
     try:
         # mkstemp created the empty file; astropy rewrites it in place.
         _write_fits_bytes(tmp_path, data32, mask16, calprov_bytes, header_fields or {})

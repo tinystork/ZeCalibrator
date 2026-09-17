@@ -129,6 +129,29 @@ def test_atomic_promotion_leaves_only_final_file(tmp_path):
     assert not any(".tmp" in f for f in files)
 
 
+def _open_deleted_tmp_fds():
+    fd_dir = "/proc/self/fd"
+    if not os.path.isdir(fd_dir):
+        return []
+    leaked = []
+    for name in os.listdir(fd_dir):
+        try:
+            target = os.readlink(os.path.join(fd_dir, name))
+        except OSError:
+            continue
+        if ".fits.tmp" in target:
+            leaked.append(target)
+    return leaked
+
+
+@pytest.mark.skipif(not os.path.isdir("/proc/self/fd"), reason="requires /proc/self/fd (Linux)")
+def test_write_standalone_output_closes_temp_fd(tmp_path):
+    # Catches the Windows-style fd leak on Linux too: a leaked mkstemp descriptor
+    # keeps the unlinked `.fits.tmp` inode alive, visible via /proc/self/fd.
+    _write(tmp_path)
+    assert _open_deleted_tmp_fds() == []
+
+
 def test_whole_file_sha256_matches_actual_file(tmp_path):
     out = _write(tmp_path)
     actual = hashlib.sha256(open(out.path, "rb").read()).hexdigest()
