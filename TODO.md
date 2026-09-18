@@ -2,6 +2,21 @@
 
 ## Current gate / mission
 
+- **Current: G7 LOCAL TECHNICAL CANDIDATE ACCEPT (technical only)** —
+  `ZC-P7-M1-GUI-20260918`, branch `feat/zc-p7-gui`, base/HEAD
+  `de6daf862fa5c662d6814d5b31dc322ae6605895` (verified beta == origin/beta;
+  P6-M2 closed). G0–G6 remain CLOSED/ACCEPTED. Phase 7 NOT YET ACCEPTED;
+  Phase 8 NOT STARTED. No commit/push/promotion/version bump authorized.
+  [Prepared mission](../../.a2a-reports/ZC-P7-M1-GUI-20260918.prepared.md).
+  Coco implementation complete (rework-3, 3/3 corrective iterations used);
+  Junior independent verification + Nono read-only reviews r0→r3 (final ACCEPT).
+  Full Qt 497 passed/1 skipped, headless 440 passed/13 skipped, teardown 3/3,
+  wheel+source smoke rc 0. Candidate: 27 GUI/tests/docs/CI files, no frozen-layer
+  change, no commit yet. Awaiting owner authorization for bounded commit + feature
+  push + GitHub Actions. New three-OS CI and interactive GUI witnesses NOT_RUN;
+  no platform GUI qualification claimed from old icon/G6 witnesses. G7 final
+  platform gate remains HOLD. Local technical acceptance is not G7 acceptance.
+
 - **Status: G6 ACCEPTED + COMMITTED + PUSHED (Phase 6 / Mission 1)** — `ZC-P6-M1-BATCH-TRANSACTIONAL-OUTPUTS-20260917`,
   on branch `feat/zc-p6-batch-transactional` (base `ef2a9f133ee9a957586849da5db7517ddbea5db5` = G5_SHA).
   Functional G6 SHA `9066daa3b86a727d1a64113316aed3e80e32faaf` (Windows mkstemp-fd fix, Nono review-2
@@ -9,7 +24,7 @@
   402 passed/4 skipped local; three-OS CI run 35235411591 6/6 PASS (ubuntu/macos/windows x 3.11/3.13);
   batch == unitary G5 science, transactional no-clobber outputs + batch manifest + CLI 0/2/3/130.
   Pushed; beta promoted (fast-forward) to a4398d1b. calibrate_batch admitted as capability (P6-M2).
-  G1/G3/G4/G5 unchanged/closed. Phase 7 NOT STARTED.
+  G1/G3/G4/G5 unchanged/closed. Phase 7 was NOT STARTED at G6 closure.
 - **Status: G5 ACCEPTED (Phase 5 / Mission 1)** — `ZC-P5-M1-PUBLIC-API-20260917`, on branch
   `feat/zc-p5-public-api` (base `760324b692c98d07f834a2b3b8ad34e4337ca416`).
   Technical + evidence ACCEPTED 2026-09-17 after Nono review-3 ACCEPT + Junior independent
@@ -379,7 +394,7 @@ Activation contract/report baseline records the actual post-closure full SHA.
 
 ## DEFERRED
 
-- GUI G7, native packaging G8.
+- Native packaging G8 (G7 now separately activated; see current mission).
   G3/G4/G5/G6 are ACCEPTED.
 - ZSSS signed preparation + adapter / ZeAlfie admission G9.
 - GPU G10; raw reducer/master generation G11; ZeMosaic adapter G12.

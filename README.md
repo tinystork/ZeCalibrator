@@ -45,10 +45,17 @@ zecalibrator-gui             # GUI launcher; emits a precise diagnostic without 
 
 The CLI exposes `inspect`, `index`, `match` and `calibrate` (deterministic
 scriptable JSON output, exit codes 0/2/3/130) as a thin facade over
-`zecalibrator.api.v1`, plus `--help`/`--version`. The GUI is a later-phase
-deliverable; without the optional `[gui]` extra, `zecalibrator-gui` emits a
-precise missing-extra diagnostic and exits non-zero while the engine and CLI
-remain usable.
+`zecalibrator.api.v1`, plus `--help`/`--version`.
+
+The GUI is a bounded public-API-only PySide6 client (Phase 7, **G7 NOT YET
+ACCEPTED**). With the optional `[gui]` extra installed, `zecalibrator-gui`
+launches a desktop client for selecting raw FITS lights + evidence/HDU, opening
+or indexing a calibration library, running an off-thread inspection/match
+preflight (MATCHED / NO_MATCH / AMBIGUOUS with structured rejection reasons),
+choosing explicit modes, calibrating in memory or exporting standalone FITS, and
+showing per-file results with progress/cancel and safe close. Without the `[gui]`
+extra, `zecalibrator-gui` emits a precise missing-extra diagnostic and exits
+non-zero while the engine and CLI remain usable.
 
 ## Storage paths
 

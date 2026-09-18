@@ -46,19 +46,21 @@ ALL_ASSETS = frozenset(PNG_DIMENSIONS) | {"zecalibrator.ico", "zecalibrator.icns
 
 
 @pytest.fixture(scope="module")
-def qt():
-    """Return (QtCore, QtGui, QGuiApplication), skipping if PySide6 is absent.
+def qt(qapp):
+    """Return (QtCore, QtGui, QApplication), skipping if PySide6 is absent.
 
     PySide6 is imported lazily here so this module can be collected (and skip)
-    on hosts without the ``[gui]`` extra.
+    on hosts without the ``[gui]`` extra. The shared session ``qapp`` (a
+    ``QApplication``) is used instead of a ``QGuiApplication`` so a later
+    ``QApplication`` is never created after a ``QGuiApplication`` (Qt forbids
+    that ordering).
     """
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     try:
         from PySide6 import QtCore, QtGui
     except ImportError as exc:  # pragma: no cover - exercised without [gui]
         pytest.skip(f"PySide6 ([gui] extra) is not installed: {exc}")
-    app = QtGui.QGuiApplication.instance() or QtGui.QGuiApplication([])
-    return QtCore, QtGui, app
+    return QtCore, QtGui, qapp
 
 
 def _decode(qtcore, qtgui, data: bytes):

@@ -45,6 +45,12 @@ jobs:
         if: matrix.python-version == '3.11'
         run: python -m pytest tests/test_icons_qt.py -ra
 
+      - name: Run GUI offscreen suite (Python 3.11 only)
+        if: matrix.python-version == '3.11'
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest tests/gui tests/test_gui.py tests/test_icons_qt.py -ra
+
       - name: Smoke test from unrelated CWD (entry points and package)
         shell: bash
         run: |

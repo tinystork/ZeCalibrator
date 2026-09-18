@@ -1,0 +1,187 @@
+"""Headless tests for the GUI service layer (no PySide6 required).
+
+Covers request construction, JSON -> public value-object parsing, immutable
+snapshots, operation/batch id generation, JSON-safe rendering, and the static
+private-import boundary (``zecalibrator.gui`` modules never import
+``zecalibrator.core`` / ``zecalibrator.application`` / ``zecalibrator.io`` /
+``zecalibrator.cli``).
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+import zecalibrator.api.v1 as v1
+from zecalibrator.gui import service
+
+
+# ---------------------------------------------------------------------------
+# JSON -> public value objects
+# ---------------------------------------------------------------------------
+def test_parse_hdu_integer_and_name():
+    assert service.parse_hdu("0") == 0
+    assert service.parse_hdu(" 3 ") == 3
+    assert service.parse_hdu("SCI") == "SCI"
+
+
+def test_parse_declaration_builds_public_value():
+    decl = service.parse_declaration({
+        "source": "synthetic_fixture", "identity": "SYNTH-BASE-1", "version": "1.0",
+        "domain": "raw", "units": "ADU", "detector_instance_id": "SYNTH-DET-0001",
+        "detector_model": "SYNTH-CFA", "gain": 100.0, "offset": 50.0,
+        "readout_mode": "MODE_A", "adc_mode": "MODE_16", "binning": [1, 1],
+        "sensor_dimensions": [4, 4], "orientation": "identity", "cfa_phase": "mono",
+        "roi_origin": [0, 0], "exposure_s": 10.0, "temperature_c": 20.0,
+        "filter": "NONE", "optical_train_id": "SYNTH-TRAIN-1",
+        "bias_exposure_max_s": 0.01, "saturation_limit_adu": 60000.0,
+        "saturation_evidence": "qualified",
+    })
+    assert isinstance(decl, v1.ImportDeclaration)
+    assert decl.detector_instance_id == "SYNTH-DET-0001"
+    assert decl.gain == 100.0
+
+
+def test_parse_declaration_rejects_missing_identity():
+    with pytest.raises((ValueError, TypeError)):
+        service.parse_declaration({"source": "synthetic_fixture"})
+
+
+def test_parse_declaration_rejects_contrary_domain():
+    with pytest.raises(ValueError):
+        service.parse_declaration({
+            "source": "s", "identity": "i", "version": "1", "domain": "processed",
+        })
+
+
+def test_parse_roi_builds_public_value():
+    roi = service.parse_roi({
+        "extent": [4, 4], "source": "synthetic_fixture",
+        "identity": "SYNTH-BASE-1", "version": "1.0",
+    })
+    assert isinstance(roi, v1.RoiExtentEvidence)
+    assert roi.extent == (4, 4)
+
+
+def test_parse_imports_builds_master_import_specs(tmp_path):
+    imports = service.parse_imports([{
+        "path": "dark.fits", "master_type": "dark", "hdu": 0,
+        "mask_path": "dark.mask.npy", "bias_state": "included",
+        "declaration": {
+            "source": "synthetic_fixture", "identity": "SYNTH-BASE-1", "version": "1.0",
+            "domain": "raw", "units": "ADU", "detector_instance_id": "SYNTH-DET-0001",
+            "detector_model": "SYNTH-CFA", "gain": 100.0, "offset": 50.0,
+            "readout_mode": "MODE_A", "adc_mode": "MODE_16", "binning": [1, 1],
+            "sensor_dimensions": [4, 4], "orientation": "identity", "cfa_phase": "mono",
+            "roi_origin": [0, 0], "exposure_s": 10.0, "temperature_c": 20.0,
+            "filter": "NONE", "optical_train_id": "SYNTH-TRAIN-1",
+            "bias_exposure_max_s": 0.01, "saturation_limit_adu": 60000.0,
+            "saturation_evidence": "qualified",
+        },
+    }])
+    assert len(imports) == 1
+    assert isinstance(imports[0], v1.MasterImportSpec)
+    assert imports[0].mask_path == "dark.mask.npy"
+    assert imports[0].bias_state == "included"
+
+
+def test_parse_imports_requires_mask_path_preserved():
+    # parse_imports must not silently strip the mask_path (index_library requires it).
+    imports = service.parse_imports([{
+        "path": "dark.fits", "master_type": "dark", "hdu": 0,
+        "mask_path": "dark.mask.npy", "bias_state": "included",
+        "declaration": {
+            "source": "synthetic_fixture", "identity": "SYNTH-BASE-1", "version": "1.0",
+        },
+    }])
+    assert imports[0].mask_path == "dark.mask.npy"
+
+
+def test_load_json_object_and_array(tmp_path):
+    p = tmp_path / "o.json"
+    p.write_text(json.dumps({"a": 1}))
+    assert service.load_json_object(str(p)) == {"a": 1}
+    q = tmp_path / "a.json"
+    q.write_text(json.dumps([1, 2]))
+    assert service.load_json_array(str(q)) == [1, 2]
+    with pytest.raises(ValueError):
+        service.load_json_object(str(q))
+    with pytest.raises(ValueError):
+        service.load_json_array(str(p))
+
+
+# ---------------------------------------------------------------------------
+# Ids / snapshot immutability
+# ---------------------------------------------------------------------------
+def test_operation_and_batch_ids_are_unique():
+    assert service.new_operation_id() != service.new_operation_id()
+    assert service.new_batch_id() != service.new_batch_id()
+
+
+def test_snapshot_is_frozen_and_immutable():
+    light = service.LightInput(
+        path="/tmp/l.fits", hdu=0, declaration=None, roi_extent=None, display_name="l.fits"
+    )
+    snap = service.OperationSnapshot(
+        op_id="op-1", kind="preflight", library_spec=None, request=None, policy=None,
+        lights=(light,),
+    )
+    with pytest.raises(Exception):
+        snap.lights = ()
+    with pytest.raises(Exception):
+        snap.op_id = "other"
+
+
+def test_light_input_requires_path():
+    with pytest.raises(ValueError):
+        service.LightInput(path="", hdu=0, declaration=None, roi_extent=None, display_name="x")
+
+
+def test_light_input_defaults_display_name():
+    light = service.LightInput(path="/tmp/abc.fits", hdu=0, declaration=None, roi_extent=None, display_name="")
+    assert light.display_name == "abc.fits"
+
+
+def test_to_jsonable_handles_public_value_objects(tmp_path):
+    spec = v1.LibrarySpec(root=str(tmp_path), index_path=str(tmp_path / "i.sqlite"))
+    rendered = service.to_jsonable(spec)
+    assert rendered["root"] == str(tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# Static boundary: no private module imports under gui/
+# ---------------------------------------------------------------------------
+def test_gui_modules_never_import_private_paths():
+    gui_dir = Path(__file__).resolve().parents[2] / "src" / "zecalibrator" / "gui"
+    for py in sorted(gui_dir.glob("*.py")):
+        src = py.read_text(encoding="utf-8")
+        for mod in ("zecalibrator.core", "zecalibrator.application", "zecalibrator.io", "zecalibrator.cli"):
+            assert f"import {mod}" not in src, (py.name, mod)
+            assert f"from {mod}" not in src, (py.name, mod)
+
+
+def test_gui_import_is_qt_free():
+    import subprocess
+    import sys
+
+    code = (
+        "import sys\n"
+        "import zecalibrator.gui\n"
+        "import zecalibrator.gui.service\n"
+        "import zecalibrator.gui.settings\n"
+        "import zecalibrator.gui.presentation\n"
+        "import zecalibrator.gui.identity\n"
+        "import zecalibrator.gui.app\n"
+        "assert 'PySide6' not in sys.modules\n"
+        "print('OK')\n"
+    )
+    env = dict(__import__("os").environ)
+    env["PYTHONPATH"] = str(Path(__file__).resolve().parents[2] / "src") + __import__("os").pathsep + env.get("PYTHONPATH", "")
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    proc = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, env=env
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "OK" in proc.stdout

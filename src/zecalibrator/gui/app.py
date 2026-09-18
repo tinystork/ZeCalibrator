@@ -2,9 +2,10 @@
 
 PySide6 is imported lazily inside :func:`main`, so the GUI entry point can be
 installed without the optional ``[gui]`` extra and still emit a precise
-missing-extra diagnostic. The GUI application itself is not implemented in this
-bootstrap phase (it is a Phase 7 deliverable); the headless engine and CLI
-remain usable without PySide6.
+missing-extra diagnostic. The headless engine and CLI remain usable without
+PySide6. The GUI itself (window/worker/service) lives in the sibling modules and
+is imported only after PySide6 is confirmed present, so importing this module is
+Qt-free and cheap.
 """
 
 from __future__ import annotations
@@ -18,10 +19,7 @@ _MISSING_EXTRA_MESSAGE = (
     "The headless engine and CLI remain usable without it."
 )
 
-_NOT_IMPLEMENTED_MESSAGE = (
-    "ZeCalibrator GUI is not implemented in this bootstrap release "
-    "(planned for a later phase)."
-)
+_STARTUP_FAILED_MESSAGE = "ZeCalibrator GUI failed to start: {exc}"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -32,9 +30,13 @@ def main(argv: list[str] | None = None) -> int:
         print(_MISSING_EXTRA_MESSAGE, file=sys.stderr)
         return 1
 
-    # PySide6 is present, but the GUI application is not implemented yet.
-    print(_NOT_IMPLEMENTED_MESSAGE, file=sys.stderr)
-    return 1
+    try:
+        from zecalibrator.gui.window import run_application
+    except Exception as exc:  # noqa: BLE001 - report a clean startup failure
+        print(_STARTUP_FAILED_MESSAGE.format(exc=exc), file=sys.stderr)
+        return 1
+
+    return run_application(argv)
 
 
 __all__ = ["main"]

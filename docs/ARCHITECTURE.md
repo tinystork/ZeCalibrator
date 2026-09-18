@@ -686,6 +686,54 @@ Initial GUI scope: inputs, library roots, matching explanations, explicit mode,
 output destination, preflight summary, progress/cancel, per-file result, audit
 link. Never mask a no-match with a convenient master.
 
+### 7.1 Implementation status (Phase 7 / M1, NOT YET ACCEPTED)
+
+**Status:** implemented as a bounded public-API-only PySide6 client (mission
+`ZC-P7-M1-GUI-20260918`, branch `feat/zc-p7-gui`). G7 is **NOT ACCEPTED**;
+Windows/macOS interactive native witnesses remain NOT_RUN and are a mandatory
+qualification criterion, never a reason to block the technical implementation.
+
+Modules (all under `src/zecalibrator/gui/`):
+
+- `app.py` — isolated launcher; PySide6 imported lazily; precise missing-`[gui]`
+  diagnostic; headless import stays Qt-free.
+- `service.py` — pure, Qt-free API client: request construction, JSON -> public
+  value-object parsing, immutable `OperationSnapshot`/`LightInput`.
+- `settings.py` — versioned atomic injected GUI settings under
+  `StoragePaths.user_config_path` (single storage adapter, no second
+  `QStandardPaths` owner).
+- `presentation.py` — pure formatting of public summaries (stdlib only).
+- `identity.py` — Windows AppUserModelID / Linux desktop id / packaged icon
+  (lazy Qt).
+- `worker.py` — one `QObject` worker on a dedicated `QThread`; queued immutable
+  events; bounded/coalesced progress; shared `CancellationToken`; no terminate.
+- `window.py` — main window (lights/evidence/HDU, library open/index, explicit
+  modes, preflight, in-memory + standalone batch export, progress/cancel,
+  per-file audit, safe close).
+
+Boundaries enforced: widgets assemble presentation requests only; all
+science/inspection/library/matching/calibration/indexing/output I/O run on the
+worker thread through `zecalibrator.api.v1`; no `zecalibrator.core` /
+`zecalibrator.application` / `zecalibrator.io` / `zecalibrator.cli` imports
+under `gui/`. `index_library` requires explicit `MasterImportSpec` + `mask_path`;
+`calibrate_batch` has no `manual_selection`, so the GUI exposes ambiguity and
+refuses ambiguous execution (no manual-pick that exports would ignore).
+
+Witness procedure (ASTRA §§17 G7 / 18):
+
+1. Offscreen Qt CI step (authored, not executed here) runs `tests/gui` +
+   `tests/test_gui.py` + `tests/test_icons_qt.py` on the Python 3.11 three-OS
+   matrix; the 3.13 headless job retains the non-Qt regression suite (GUI tests
+   skip cleanly without PySide6).
+2. Interactive native Linux/Windows/macOS worker/event-loop/dialog witnesses
+   (launch from unrelated CWD, native dialogs, selected-input/preflight/export
+   flow, progress/cancel, safe close while active, scaling and app identity)
+   are **NOT_RUN** until provided by Tristan/Junior; local offscreen Linux PASS
+   is not native GUI qualification and says nothing about Windows/macOS.
+
+G7 full cross-platform ACCEPT remains HOLD pending those witnesses plus Nono
+review. G8 packaging stays deferred.
+
 ---
 
 ## 8. Storage and portability (design only, §12)

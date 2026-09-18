@@ -64,3 +64,24 @@ def make_frame_fixture():
 @pytest.fixture
 def make_declaration_fixture():
     return make_declaration
+
+
+@pytest.fixture(scope="session")
+def qapp():
+    """Session-scoped QApplication for Qt tests (offscreen; skips without PySide6).
+
+    Using a single QApplication everywhere avoids the Qt constraint that a
+    QGuiApplication cannot later become a QApplication (test_icons_qt previously
+    created a QGuiApplication; it now shares this QApplication).
+    """
+    import os
+
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    try:
+        from PySide6 import QtWidgets
+    except ImportError as exc:  # pragma: no cover - exercised without [gui]
+        pytest.skip(f"PySide6 ([gui] extra) is not installed: {exc}")
+    app = QtWidgets.QApplication.instance()
+    if app is None:
+        app = QtWidgets.QApplication([])
+    return app
