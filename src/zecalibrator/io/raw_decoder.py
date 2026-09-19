@@ -39,7 +39,7 @@ from zecalibrator.core.metadata import (
     ImportDeclaration,
     build_sensor_metadata,
     collect_cards,
-    resolve_aliases,
+    resolve_aliases_with_provenance,
 )
 from zecalibrator.core.precision import (
     PrecisionInfo,
@@ -390,7 +390,7 @@ def decode_fits(
         else:
             _check_processed(cards)
 
-        normalized, conflicts, malformed = resolve_aliases(cards)
+        normalized, conflicts, malformed, provenance = resolve_aliases_with_provenance(cards)
         if conflicts:
             first = conflicts[0]
             raise DecodeError(
@@ -479,6 +479,7 @@ def decode_fits(
             cards=cards,
             declaration=declaration,
             units=units,
+            provenance=provenance,
         )
         if metadata.conflicts:
             first = metadata.conflicts[0]

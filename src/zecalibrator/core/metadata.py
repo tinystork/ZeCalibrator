@@ -25,6 +25,12 @@ from zecalibrator.core.geometry import CFA_PHASES, Geometry
 # Confirmed v1 keyword -> normalized field map. This single map drives both
 # alias-group resolution (EXPTIME/EXPOSURE -> exposure_seconds) and duplicate
 # singleton/scaling conflict detection (BSCALE/BZERO/BLANK/GAIN/CFA/units, …).
+#
+# R3A: the mapping is now owned by a named :class:`FitsStandardAdapter` behind a
+# small adapter registry (TASK-3). ``FIELD_BY_KEYWORD`` is retained as a
+# read-only alias so existing consumers are unchanged. Later Siril/ZWO/NINA/
+# SharpCap/PixInsight/Seestar/INDI/ASCOM adapters extend the *registry* without
+# touching alias resolution or matching.
 FIELD_BY_KEYWORD: Mapping[str, str] = MappingProxyType(
     {
         "EXPTIME": "exposure_seconds",
@@ -47,7 +53,9 @@ FIELD_BY_KEYWORD: Mapping[str, str] = MappingProxyType(
     }
 )
 
-NUMERIC_KEYWORDS: tuple[str, ...] = (
+# The historical numeric-keyword set (shared by the standard adapter and the
+# retained NUMERIC_KEYWORDS alias).
+_STANDARD_NUMERIC_KEYWORDS: tuple[str, ...] = (
     "BSCALE",
     "BZERO",
     "BLANK",
@@ -62,6 +70,77 @@ NUMERIC_KEYWORDS: tuple[str, ...] = (
     "GAIN",
     "CCD-TEMP",
 )
+
+
+@dataclass(frozen=True)
+class FitsStandardAdapter:
+    """The current (standard FITS) keyword→canonical adapter (TASK-3).
+
+    A named adapter holding the existing keyword→canonical mappings plus the
+    numeric-keyword set. It sits behind the module-level ``_ADAPTER_REGISTRY``;
+    ``resolve_aliases`` consults the registry rather than ``FIELD_BY_KEYWORD``
+    directly, so future vendor adapters (Siril/ZWO/NINA/SharpCap/PixInsight/
+    Seestar/INDI/ASCOM) can be registered without touching matching.
+    """
+
+    name: str = "fits_standard"
+    field_by_keyword: Mapping[str, str] = FIELD_BY_KEYWORD
+    numeric_keywords: tuple[str, ...] = _STANDARD_NUMERIC_KEYWORDS
+
+    def canonical(self, keyword: str) -> Optional[str]:
+        """Return the canonical field for a keyword, or ``None`` (unmapped)."""
+        return self.field_by_keyword.get(keyword)
+
+    def is_numeric(self, keyword: str) -> bool:
+        """Return whether ``keyword`` is a numeric card subject to malformed checks."""
+        return keyword in self.numeric_keywords
+
+
+_FITS_STANDARD_ADAPTER = FitsStandardAdapter()
+
+# R3A extensible adapter registry (TASK-3). Only the standard adapter ships now.
+_ADAPTER_REGISTRY: tuple[FitsStandardAdapter, ...] = (_FITS_STANDARD_ADAPTER,)
+
+_HIERARCH_PREFIX = "HIERARCH "
+
+
+def _strip_hierarch(keyword: str) -> str:
+    """Return ``keyword`` with a leading ``HIERARCH `` prefix removed.
+
+    HIERARCH-encoded standard keywords must normalize EXACTLY like their plain
+    counterparts (REWORK-1 F1): the audit keeps the prefix, the adapter lookup
+    ignores it.
+    """
+    if keyword.startswith(_HIERARCH_PREFIX):
+        return keyword[len(_HIERARCH_PREFIX):]
+    return keyword
+
+
+def resolve_keyword(keyword: str) -> Optional[str]:
+    """Consult the adapter registry for ``keyword``'s canonical field.
+
+    Later adapters are consulted in registration order; the first mapping wins.
+    A leading ``HIERARCH `` prefix is ignored for the lookup so HIERARCH-encoded
+    standard keywords map like their plain counterparts (REWORK-1).
+    """
+    stripped = _strip_hierarch(keyword)
+    for adapter in _ADAPTER_REGISTRY:
+        field = adapter.canonical(stripped)
+        if field is not None:
+            return field
+    return None
+
+
+def numeric_keyword(keyword: str) -> bool:
+    """Return whether ``keyword`` is a numeric card per the adapter registry.
+
+    A leading ``HIERARCH `` prefix is ignored for the lookup (REWORK-1).
+    """
+    stripped = _strip_hierarch(keyword)
+    return any(adapter.is_numeric(stripped) for adapter in _ADAPTER_REGISTRY)
+
+
+NUMERIC_KEYWORDS: tuple[str, ...] = _STANDARD_NUMERIC_KEYWORDS
 
 
 def _validate_int_tuple(value, name: str, min_value: int) -> None:
@@ -130,6 +209,29 @@ class ConflictDiagnostic:
         object.__setattr__(self, "field", _freeze(self.field))
         object.__setattr__(self, "keywords", _freeze(self.keywords))
         object.__setattr__(self, "values", _freeze(self.values))
+
+
+@dataclass(frozen=True)
+class FactProvenance:
+    """Provenance of one canonical fact: ``(value, source, confidence)`` (TASK-1).
+
+    ``source`` is the originating FITS card keyword(s) or ``"structural"`` for
+    NAXIS-derived facts; ``confidence`` is ``"explicit"`` for a recognized card
+    mapping or ``"structural"`` for NAXIS-derived plane shape.
+    """
+
+    value: object
+    source: object  # str (single keyword) or tuple[str, ...] (alias group)
+    confidence: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "value", _freeze(self.value))
+        object.__setattr__(self, "source", _freeze(self.source))
+        if self.confidence not in ("explicit", "structural"):
+            raise ValueError(
+                f"FactProvenance.confidence must be 'explicit' or 'structural', "
+                f"got {self.confidence!r}"
+            )
 
 
 @dataclass(frozen=True)
@@ -228,12 +330,14 @@ class SensorMetadata:
     saturation_limit_adu: Optional[float] = None
     saturation_evidence: str = "unknown"
     warnings: tuple[str, ...] = ()
+    provenance: Mapping[str, FactProvenance] = MappingProxyType({})
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "original_cards", _freeze(self.original_cards))
         object.__setattr__(self, "normalized", _freeze(self.normalized))
         object.__setattr__(self, "conflicts", _freeze(self.conflicts))
         object.__setattr__(self, "warnings", _freeze(self.warnings))
+        object.__setattr__(self, "provenance", _freeze(self.provenance))
 
     @property
     def cfa_phase(self) -> Optional[str]:
@@ -280,9 +384,16 @@ def collect_cards(header, source: str = "primary") -> tuple[CardRecord, ...]:
     records: list[CardRecord] = []
     for index, card in enumerate(header.cards):
         raw = getattr(card, "rawvalue", None)
+        # Preserve the full HIERARCH prefix so the collected audit keeps
+        # unknown/vendor/HIERARCH evidence intact (R3A TASK-4a). astropy's
+        # ``card.keyword`` strips the ``HIERARCH `` prefix; the card image
+        # (or the ``_hierarch`` flag) is the only carrier of that prefix.
+        keyword = card.keyword
+        if getattr(card, "_hierarch", False):
+            keyword = f"HIERARCH {keyword}"
         records.append(
             CardRecord(
-                keyword=card.keyword,
+                keyword=keyword,
                 value=card.value,
                 comment=getattr(card, "comment", "") or "",
                 index=index,
@@ -293,18 +404,31 @@ def collect_cards(header, source: str = "primary") -> tuple[CardRecord, ...]:
     return tuple(records)
 
 
-def resolve_aliases(
+def resolve_aliases_with_provenance(
     cards: tuple[CardRecord, ...],
-) -> tuple[Mapping[str, object], tuple[ConflictDiagnostic, ...], tuple[str, ...]]:
-    """Resolve all critical keyword/alias groups, detecting conflicts."""
+) -> tuple[
+    Mapping[str, object],
+    tuple[ConflictDiagnostic, ...],
+    tuple[str, ...],
+    Mapping[str, FactProvenance],
+]:
+    """Resolve keyword/alias groups and carry per-fact provenance (TASK-1).
+
+    Returns ``(normalized, conflicts, malformed, provenance)``. ``normalized``
+    is byte-for-byte the historical flat mapping (unchanged values);
+    ``provenance`` is the additive parallel structure mapping each *agreed*
+    canonical field to a :class:`FactProvenance` ``(value, source, confidence)``.
+    Conflicted fields are absent from both ``normalized`` and ``provenance``.
+    """
     by_field: dict[str, list[tuple[str, object]]] = {}
     for c in cards:
-        f = FIELD_BY_KEYWORD.get(c.keyword)
+        f = resolve_keyword(c.keyword)
         if f is None:
             continue
         by_field.setdefault(f, []).append((c.keyword, c.value))
 
     normalized: dict[str, object] = {}
+    provenance: dict[str, FactProvenance] = {}
     conflicts: list[ConflictDiagnostic] = []
     for fld, present in by_field.items():
         canon = [_canonical(v) for _, v in present]
@@ -318,15 +442,35 @@ def resolve_aliases(
                 )
             )
         else:
-            normalized[fld] = _parse_number(present[0][1])
+            value = _parse_number(present[0][1])
+            normalized[fld] = value
+            keywords = tuple(kw for kw, _ in present)
+            provenance[fld] = FactProvenance(
+                value=value,
+                source=keywords[0] if len(keywords) == 1 else keywords,
+                confidence="explicit",
+            )
 
     malformed: list[str] = []
     for c in cards:
-        if c.keyword in NUMERIC_KEYWORDS and isinstance(c.value, str) and c.value.strip():
+        kw = _strip_hierarch(c.keyword)
+        if numeric_keyword(kw) and isinstance(c.value, str) and c.value.strip():
             if isinstance(_parse_number(c.value), str):
-                malformed.append(c.keyword)
+                malformed.append(kw)
 
-    return MappingProxyType(normalized), tuple(conflicts), tuple(malformed)
+    return MappingProxyType(normalized), tuple(conflicts), tuple(malformed), MappingProxyType(provenance)
+
+
+def resolve_aliases(
+    cards: tuple[CardRecord, ...],
+) -> tuple[Mapping[str, object], tuple[ConflictDiagnostic, ...], tuple[str, ...]]:
+    """Resolve all critical keyword/alias groups, detecting conflicts.
+
+    Backward-compatible wrapper over :func:`resolve_aliases_with_provenance`;
+    provenance is discarded to preserve the historical 3-tuple contract.
+    """
+    normalized, conflicts, malformed, _ = resolve_aliases_with_provenance(cards)
+    return normalized, conflicts, malformed
 
 
 def _float_or_none(value) -> Optional[float]:
@@ -398,14 +542,30 @@ def build_sensor_metadata(
     cards: tuple[CardRecord, ...],
     declaration: Optional[ImportDeclaration] = None,
     units: str = "ADU",
+    provenance: Optional[Mapping[str, FactProvenance]] = None,
 ) -> SensorMetadata:
     """Merge FITS-derived facts and an import declaration into immutable metadata.
 
     FITS-vs-declaration contradictions (exposure/temperature/gain/filter/
     detector/CFA/binning/ROI) append to ``conflicts`` — never silently resolved.
     Geometry is resolved with no invented defaults (unknown stays ``None``).
+
+    ``provenance`` is the additive parallel provenance mapping (TASK-1); the
+    decoded plane is always recorded as ``actual_plane_shape`` with
+    ``source="structural"`` / ``confidence="structural"`` (TASK-2), distinct
+    from ``sensor_dimensions`` which remains declaration-only.
     """
     extra: list[ConflictDiagnostic] = list(conflicts)
+
+    merged_provenance: dict[str, FactProvenance] = dict(provenance or {})
+    merged_provenance.setdefault(
+        "actual_plane_shape",
+        FactProvenance(
+            value=tuple(int(v) for v in shape),
+            source="structural",
+            confidence="structural",
+        ),
+    )
 
     def resolve(fits_field, decl_field, coerce=_float_or_none):
         return _resolve_fact(normalized, fits_field, declaration, decl_field, extra, coerce)
@@ -497,11 +657,14 @@ def build_sensor_metadata(
         optical_train_id=optical_train_id,
         saturation_limit_adu=saturation_limit_adu,
         saturation_evidence=saturation_evidence,
+        provenance=merged_provenance,
     )
 
 
 __all__ = [
     "FIELD_BY_KEYWORD",
+    "FactProvenance",
+    "FitsStandardAdapter",
     "CardRecord",
     "ConflictDiagnostic",
     "ImportDeclaration",
@@ -510,4 +673,5 @@ __all__ = [
     "build_sensor_metadata",
     "collect_cards",
     "resolve_aliases",
+    "resolve_aliases_with_provenance",
 ]
