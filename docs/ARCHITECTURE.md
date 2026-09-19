@@ -743,9 +743,9 @@ refuses ambiguous execution (no manual-pick that exports would ignore).
 Witness procedure (ASTRA §§17 G7 / 18):
 
 1. Offscreen Qt CI step (authored, not executed here) runs `tests/gui` +
-   `tests/test_gui.py` + `tests/test_icons_qt.py` on the Python 3.11 three-OS
-   matrix; the 3.13 headless job retains the non-Qt regression suite (GUI tests
-   skip cleanly without PySide6).
+   `tests/test_gui.py` + `tests/test_icons_qt.py` on Python 3.13 on all three OS
+   (ubuntu-latest, windows-latest, macos-latest); the full Qt offscreen GUI suite
+   now runs on Python 3.13.
 2. Interactive native Linux/Windows/macOS worker/event-loop/dialog witnesses
    (launch from unrelated CWD, native dialogs, selected-input/preflight/export
    flow, progress/cancel, safe close while active, scaling and app identity)
@@ -759,7 +759,7 @@ review. G8 packaging stays deferred.
 
 ## 8. Storage and portability (design only, §12)
 
-- Baseline Python `>=3.11`; qualify NumPy/Astropy/PySide6 wheels before freezing
+- Supported Python `3.13.x`; qualify NumPy/Astropy/PySide6 wheels before freezing
   minimum/upper. Platform-neutral `pathlib`/`os.fspath`/package resources; no
   CWD/checkout-layout/fixed-drive/GNU-tool/shell dependency for ordinary
   behavior.
@@ -938,7 +938,7 @@ Created (all under the product root, none in the parent workspace):
 
 - `README.md`, `LICENSE` (GPL-3.0 text + `GPL-3.0-or-later` SPDX grant,
   neutral owner-confirmed copyright placeholder), `pyproject.toml`
-  (setuptools, `src` layout, `requires-python >=3.11`, `license =
+  (setuptools, `src` layout, `requires-python >=3.13,<3.14`, `license =
   "GPL-3.0-or-later"`), `.gitignore`, `.gitattributes`.
 - `src/zecalibrator/` package: `__init__.py` (version only), `_version.py`
   (literal `0.1.0`), `__main__.py` (CLI only), `cli.py` (`--help`/`--version`

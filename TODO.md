@@ -209,8 +209,14 @@ No-calibration and partial modes are explicit, not silent role downgrades.
 | Windows native execution/filesystem behavior | **SATISFIED** (GitHub windows-latest, run 35145764088) | Mandatory before Windows support/release claim |
 | macOS native execution/filesystem behavior | **SATISFIED** (GitHub macos-latest, run 35145764088) | Mandatory before macOS support/release claim |
 | Qt native icon decoding | **SATISFIED** (offscreen witness success ubuntu/windows/macos 3.11) | Mandatory before corresponding GUI/platform support/release claim |
-| Python 3.11 execution | **SATISFIED** (3.11 jobs success) | Mandatory before verified minimum-interpreter support/release claim |
+| Supported Python runtime | CPython 3.13.x only (owner decision 2026-09-19) | Python 3.11 unsupported due to reproducible native instability in the Qt-worker/Astropy workload |
 | Remote CI execution | **SATISFIED** (GitHub Actions run 35145764088) | Mandatory before corresponding CI-backed platform support/release claim |
+
+Runtime-boundary decision 2026-09-19: ZeCalibrator now supports CPython 3.13.x
+only. The former "Python 3.11 execution" witness row is retired; Python 3.11 is
+unsupported due to reproducible native instability in the Qt-worker/Astropy
+workload. This is not a new "Python 3.13 execution SATISFIED" witness: the
+three-OS Python 3.13 Qt offscreen GUI suite has not yet passed in CI.
 
 Historically, the amendment permitted **local/bootstrap G2 ACCEPTED only** while
 these witnesses were outstanding. NOT_RUN was never PASS. Subsequent G3 CI evidence

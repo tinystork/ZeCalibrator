@@ -7,7 +7,7 @@ name = "ZeCalibrator"
 dynamic = ["version"]
 description = "ZeCalibrator: raw astronomical sensor FITS calibration engine (bootstrap skeleton)"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.13,<3.14"
 license = "GPL-3.0-or-later"
 license-files = ["LICENSE"]
 authors = [{ name = "ZeSoftware" }]
@@ -18,8 +18,6 @@ classifiers = [
   "Intended Audience :: Science/Research",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.11",
-  "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Topic :: Scientific/Engineering :: Astronomy",
 ]
