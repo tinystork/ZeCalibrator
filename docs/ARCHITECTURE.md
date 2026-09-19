@@ -594,6 +594,16 @@ ArrayFrameSource(data: ArrayLike, metadata: SensorMetadata,
 - No unbounded producer queues. GUI owns a worker `QObject`/`QThread` (or
   bounded pool) with queued signals; widgets accessed only on the Qt main
   thread.
+
+**Worker↔GUI transport boundary (deliberate, tested invariant).** Python
+payloads travel across the worker↔GUI thread boundary through shared
+thread-safe `queue.Queue` objects (plain Python references); Qt signals carry
+only no-payload wakeups (`start_op`, `relay`, `ended`) or typed scalar
+notifications (`started(str)`, `failed(str, str, str)`). No `object` payload
+ever crosses the thread boundary through Qt `Signal(object)` marshalling. This
+boundary is a regression-tested architectural invariant
+(`tests/gui/test_worker_transport.py`), validated by repeated green three-OS CI
+runs at commit `c5def10` (run `35460748357` and its re-runs, all jobs green).
 - Cancellation surface is present on **expensive** operations: `open_library`
   (indexing), `inspect_frame`, `resolve_calibration`, `calibrate_frame`,
   `calibrate_batch`. `get_api_info`/`probe` are cheap and have no cancellation
