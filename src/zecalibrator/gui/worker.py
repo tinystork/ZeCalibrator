@@ -42,6 +42,7 @@ Threading/lifetime invariants (ARCHITECTURE §3.7, ASTRA §11, prepared §5-§8)
 from __future__ import annotations
 
 import atexit
+import gc
 import json
 import os
 import queue
@@ -785,6 +786,15 @@ class WorkerController(QtCore.QObject):
     and the thread/worker delete themselves on ``thread.finished`` (the canonical
     Qt worker pattern), so no live QThread is ever destroyed and no GUI-thread
     ``wait()`` is performed.
+
+    GC boundary (diagnostic): automatic cyclic GC is paused ONLY while an
+    operation is active and restored to the exact prior state when the worker is
+    fully idle (see ``start``/``_restore_gc_state``). This protection assumes a
+    SINGLE ``WorkerController`` per process: with multiple controllers, the
+    active windows interleave and one controller's idle restore can re-enable GC
+    while another controller's operation is still active — making the protection
+    ineffective (but never unsafe; the state is always restored to the recorded
+    prior value).
     """
 
     operation_started = QtCore.Signal(str)
@@ -846,6 +856,7 @@ class WorkerController(QtCore.QObject):
         self._finished = False
         self._mailbox = None
         self._active_op_id = None
+        self._gc_was_enabled = None
         self._thread.start()
         _register_thread(self._thread)
 
@@ -862,6 +873,12 @@ class WorkerController(QtCore.QObject):
             raise RuntimeError("an operation is already active")
         if self._shutting_down:
             raise RuntimeError("controller is shutting down")
+        # "GC only while idle" boundary: pause automatic cyclic GC ONLY while a
+        # worker operation is active (process-global; prevents the main thread
+        # from running cyclic GC during the worker's lifetime). The exact prior
+        # state is recorded so it is restored — never a permanent gc.disable().
+        self._gc_was_enabled = gc.isenabled()
+        gc.disable()
         self._active = True
         self._active_op_id = snapshot.op_id
         self._mailbox = ProgressMailbox()
@@ -894,6 +911,25 @@ class WorkerController(QtCore.QObject):
         if event is not None:
             self.progress.emit(self._active_op_id, event)
 
+    def _restore_gc_state(self) -> None:
+        """Restore the exact pre-operation cyclic-GC state (if one was recorded).
+
+        ``_gc_was_enabled`` is tri-state: True/False only while an operation is
+        active (recorded in ``start()``) and None once restored. GC is touched
+        ONLY when a state was actually recorded, so a late ``_on_worker_ended``
+        (or a ``finalize`` that already drained the flag) can never call
+        ``gc.disable()`` on an unrecorded state and leave cyclic GC disabled
+        process-wide. A single compensating ``gc.collect()`` runs only on the
+        restore path (while the worker is idle).
+        """
+        if self._gc_was_enabled is not None:
+            if self._gc_was_enabled:
+                gc.enable()
+            else:
+                gc.disable()
+            self._gc_was_enabled = None
+            gc.collect()
+
     @QtCore.Slot()
     def _on_worker_ended(self) -> None:
         self._drain_timer.stop()
@@ -901,6 +937,10 @@ class WorkerController(QtCore.QObject):
         self._active = False
         self._active_op_id = None
         self._mailbox = None
+        # Worker is now fully idle: restore the exact previous GC state (only if
+        # one was recorded) and drain one compensating collect() while no
+        # operation is running.
+        self._restore_gc_state()
         self.worker_ended.emit()
 
     @QtCore.Slot()
@@ -954,7 +994,14 @@ class WorkerController(QtCore.QObject):
         performs a bounded join and logs once, but a still-running Python-owned
         QThread must never be destroyed here (native abort: "QThread: Destroyed
         while thread is still running"). No ``QThread.terminate`` anywhere.
+
+        Includes a GC safety net: if an operation ended without
+        ``_on_worker_ended`` running (so GC was disabled but never restored),
+        restore the recorded state, clear it, and drain one ``gc.collect()``.
+        This guarantees cyclic GC is never left disabled at teardown.
         """
+        self._restore_gc_state()
+
         thread = self._thread
         if thread is None:
             return
