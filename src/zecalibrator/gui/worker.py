@@ -766,8 +766,8 @@ class WorkerController(QtCore.QObject):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._thread = QtCore.QThread()  # no parent: Python-owned, deleteLater on finish
-        self._worker = _OperationWorker()  # no parent
+        self._thread = QtCore.QThread()  # no parent: Python-owned; released on main thread after the thread stops
+        self._worker = _OperationWorker()  # no parent: Python-owned; released after the thread stops
         self._worker.moveToThread(self._thread)
 
         self._worker.started.connect(self.operation_started)
@@ -777,11 +777,26 @@ class WorkerController(QtCore.QObject):
         self._worker.failed.connect(self.operation_failed)
         self._worker.ended.connect(self._on_worker_ended)
 
-        # Finished-driven cleanup: retain strong references to the thread and
-        # worker until ``thread.finished`` fires (the thread's event loop has
-        # fully exited by then), then release them. This is rigorously equivalent
-        # ownership to ``deleteLater``, without the deferred-delete race, and it
-        # performs no GUI-thread blocking wait and no thread termination.
+        # Worker/thread lifetime (PySide6-safe; see ``_on_thread_finished`` and
+        # ``finalize``). The worker C++ QObject is thread-affine to the worker
+        # thread; the QThread object is affine to the creating/main thread and
+        # must never be destroyed while running. Both Python references are kept
+        # on the controller and released ONLY after the worker thread has fully
+        # stopped (in ``finalize``, or when the controller is collected after
+        # ``shutdown``) — never from ``_on_thread_finished``, which runs while
+        # ``QThreadPrivate::finish`` has not yet cleared ``running``.
+        #
+        # The canonical Qt cleanup (Qt 6 QThread class reference, Detailed
+        # Description — the ``worker->moveToThread`` example — connects
+        # ``thread.finished`` to ``worker.deleteLater``) was considered but NOT
+        # used here. Under this PySide6 6.11.2 build we observed an occasional
+        # native crash (double-free) when a Python-owned ``moveToThread``-ed
+        # QObject is ``deleteLater``-ed during shutdown; that instability has not
+        # been isolated to a stable in-repo reproducer, so it is treated as
+        # uncertain rather than a proven Shiboken defect. Retaining the
+        # references until the thread has stopped, then dropping them on the main
+        # thread, is the safer ownership pattern for Python-owned workers and is
+        # what this implementation uses.
         self._thread.finished.connect(self._on_thread_finished)
 
         self._drain_timer = QtCore.QTimer(self)
@@ -815,6 +830,7 @@ class WorkerController(QtCore.QObject):
         self._worker.start_op.emit(snapshot, token, self._mailbox)
         self._drain_timer.start()
 
+    @QtCore.Slot()
     def _drain_progress(self) -> None:
         if self._mailbox is None:
             return
@@ -822,6 +838,7 @@ class WorkerController(QtCore.QObject):
         if event is not None:
             self.progress.emit(self._active_op_id, event)
 
+    @QtCore.Slot()
     def _on_worker_ended(self) -> None:
         self._drain_timer.stop()
         self._drain_progress()  # mailbox is empty on terminal paths (no-op)
@@ -830,15 +847,26 @@ class WorkerController(QtCore.QObject):
         self._mailbox = None
         self.worker_ended.emit()
 
+    @QtCore.Slot()
     def _on_thread_finished(self) -> None:
         self._finished = True
         self.shutdown_finished.emit()
-        # Release the Python references now that the thread has finished; the
-        # C++ QThread/worker are then destroyed safely (isRunning() is false).
+        # Unregister the thread from the atexit safety net. Deliberately do NOT
+        # drop the ``self._worker`` / ``self._thread`` Python references here:
+        #
+        # * ``QThread::finished`` is emitted from the worker thread *before*
+        #   ``QThreadPrivate::finish`` clears ``running``, so dropping the QThread
+        #   reference here could destroy a still-running thread (a native abort:
+        #   "QThread: Destroyed while thread is still running").
+        # * the worker C++ QObject is thread-affine to the worker thread; it must
+        #   not be destroyed on the main thread while that thread is still
+        #   finishing.
+        #
+        # Both references are released later, only after the thread has fully
+        # stopped (``finalize`` after ``wait()``, or controller collection after
+        # ``shutdown``).
         if self._thread is not None:
             _unregister_thread(self._thread)
-        self._worker = None
-        self._thread = None
 
     def shutdown(self) -> None:
         """Finished-driven, non-blocking shutdown (no GUI-thread wait).
@@ -862,17 +890,29 @@ class WorkerController(QtCore.QObject):
         stopped, or from an atexit/teardown handler. Idempotent; captures a LOCAL
         strong reference to the thread before joining; requests a non-blocking
         quit if not already; waits up to ``timeout_ms`` (a wedged thread is not
-        waited on indefinitely); releases the local reference afterwards. No
-        ``QThread.terminate`` anywhere.
+        waited on indefinitely).
+
+        The worker/thread references are released ONLY if the thread has actually
+        stopped. If ``wait()`` times out (a wedged thread), the references are
+        deliberately retained (leak-not-crash): the atexit ``_LIVE_THREADS`` net
+        performs a bounded join and logs once, but a still-running Python-owned
+        QThread must never be destroyed here (native abort: "QThread: Destroyed
+        while thread is still running"). No ``QThread.terminate`` anywhere.
         """
         thread = self._thread
         if thread is None:
             return
         if not self._shutting_down:
             self.shutdown()
+        stopped = True
         if thread.isRunning():
-            thread.wait(timeout_ms)
-        _unregister_thread(thread)
+            stopped = thread.wait(timeout_ms)  # False on timeout
+        if stopped and not thread.isRunning():
+            _unregister_thread(thread)
+            self._worker = None
+            self._thread = None
+        # else: keep both references (the thread is still running); do not drop
+        # them here.
 
 
 __all__ = ["ProgressMailbox", "WorkerController"]

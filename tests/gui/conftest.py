@@ -142,41 +142,89 @@ def controller(qapp):
     ctl.shutdown_finished.connect(loop.quit)
     if not ctl.is_finished:
         loop.exec()
+    # Bounded post-loop join: once the thread has stopped, finalize() releases the
+    # worker/thread references deterministically (instead of relying on controller
+    # collection while the thread may still be winding down).
+    ctl.finalize()
 
 
 def run_operation(controller, snapshot, token, timeout_ms=20000) -> RunResult:
-    """Start one operation and block (nested event loop) until it ends."""
+    """Start one operation and block (nested event loop) until it ends.
+
+    Collects events through a small QObject ``RunCollector`` whose handlers are
+    plain bound methods — no transient lambda/free-function receivers (a
+    documented PySide6 GC-segfault pattern). The collector owns the
+    ``QEventLoop`` and the timeout ``QTimer`` for the whole operation; the timer
+    is stopped and exactly the connections made here are disconnected before the
+    collector is released.
+
+    The handlers are deliberately NOT decorated with ``@QtCore.Slot``: in
+    PySide6 6.11.2, ``@Slot`` handlers that take ``object`` arguments (e.g.
+    ``@Slot(str, object, object)``) corrupt the refcounts of those objects when
+    invoked against signals whose values cross the worker→GUI thread boundary —
+    a native double-free that surfaces as "Fatal Python error: Aborted" during
+    the next GC pass. Plain bound methods on the collector take the same
+    arguments with the same whole-operation lifetime but without that
+    marshalling path.
+    """
     from PySide6 import QtCore
+
+    class RunCollector(QtCore.QObject):
+        """QObject result collector with an explicit, whole-operation lifetime."""
+
+        def __init__(self, result, loop, timer):
+            super().__init__()
+            self.result = result
+            self.loop = loop
+            self.timer = timer
+
+        def on_finished(self, op_id, summary):
+            self.result.finished.append((op_id, summary))
+
+        def on_failed(self, op_id, reason_code, details):
+            self.result.failed.append((op_id, reason_code, details))
+
+        def on_progress(self, op_id, event):
+            self.result.progress.append((op_id, event))
+
+        def on_preflight(self, op_id, summary, plan):
+            self.result.preflight.append((op_id, summary, plan))
+
+        def on_batch_item(self, op_id, item):
+            self.result.batch_items.append((op_id, item))
+
+        def on_worker_ended(self):
+            self.result.ended = True
+            self.loop.quit()
 
     result = RunResult()
     loop = QtCore.QEventLoop()
     timer = QtCore.QTimer()
     timer.setSingleShot(True)
     timer.timeout.connect(loop.quit)
-    timer.start(timeout_ms)
-
-    def on_ended():
-        result.ended = True
-        loop.quit()
+    collector = RunCollector(result, loop, timer)
 
     connections = [
         (controller.operation_finished,
-         controller.operation_finished.connect(lambda op, s: result.finished.append((op, s)))),
+         controller.operation_finished.connect(collector.on_finished)),
         (controller.operation_failed,
-         controller.operation_failed.connect(lambda op, rc, d: result.failed.append((op, rc, d)))),
+         controller.operation_failed.connect(collector.on_failed)),
         (controller.progress,
-         controller.progress.connect(lambda op, e: result.progress.append((op, e)))),
+         controller.progress.connect(collector.on_progress)),
         (controller.preflight_light,
-         controller.preflight_light.connect(lambda op, s, p: result.preflight.append((op, s, p)))),
+         controller.preflight_light.connect(collector.on_preflight)),
         (controller.batch_item,
-         controller.batch_item.connect(lambda op, it: result.batch_items.append((op, it)))),
-        (controller.worker_ended, controller.worker_ended.connect(on_ended)),
+         controller.batch_item.connect(collector.on_batch_item)),
+        (controller.worker_ended,
+         controller.worker_ended.connect(collector.on_worker_ended)),
     ]
 
+    timer.start(timeout_ms)
     controller.start(snapshot, token)
     loop.exec()
 
     result.timed_out = not result.ended
+    timer.stop()
     for sig, handle in connections:
         sig.disconnect(handle)
     return result
