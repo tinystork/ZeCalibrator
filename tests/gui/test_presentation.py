@@ -170,6 +170,14 @@ def test_human_reason_text_never_leaks_raw_details():
     assert "missing.fits" not in text
 
 
+def test_format_folder_add_feedback_truthful_plural():
+    assert presentation.format_folder_add_feedback(1, 0) == "1 image added"
+    assert presentation.format_folder_add_feedback(2, 0) == "2 images added"
+    assert presentation.format_folder_add_feedback(3, 1) == "3 images added (1 unsupported file ignored)"
+    assert presentation.format_folder_add_feedback(0, 2) == "0 images added (2 unsupported files ignored)"
+    assert presentation.format_folder_add_feedback(0, 0) == "0 images added"
+
+
 def test_summarize_and_format_outcomes_truthful():
     summaries = [
         {"outcome": "MATCHED"}, {"outcome": "MATCHED"}, {"outcome": "MATCHED"},

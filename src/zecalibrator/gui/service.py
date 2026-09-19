@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import os
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -43,6 +44,83 @@ def parse_hdu(value: str) -> Union[int, str]:
         return int(s)
     except ValueError:
         return s
+
+
+# ---------------------------------------------------------------------------
+# Supported input file extensions + folder scan (single shared definition)
+# ---------------------------------------------------------------------------
+# The one authoritative set of raw-FITS input suffixes. Both the Add-files
+# dialog filter and the Add-folder scan derive from this tuple so the two can
+# never diverge. No new formats are invented here.
+SUPPORTED_INPUT_EXTENSIONS: Tuple[str, ...] = (".fits", ".fit", ".fts")
+
+
+def input_dialog_filter() -> str:
+    """Return the shared FITS input file dialog filter string.
+
+    Built from :data:`SUPPORTED_INPUT_EXTENSIONS` (never a second hard-coded
+    list). ``All files (*)`` remains available so the user can override the
+    extension hint; the folder scan still only ever admits supported input
+    files.
+    """
+    patterns = " ".join(f"*{ext}" for ext in SUPPORTED_INPUT_EXTENSIONS)
+    return f"FITS files ({patterns});;All files (*)"
+
+
+def is_supported_input_file(name: str) -> bool:
+    """True when ``name`` has a supported input-file suffix (case-insensitive).
+
+    Suffix matching is deterministic and identical for the dialog filter and the
+    folder scan: a path/name is accepted iff its lower-cased suffix is in
+    :data:`SUPPORTED_INPUT_EXTENSIONS`.
+    """
+    return Path(name).suffix.lower() in SUPPORTED_INPUT_EXTENSIONS
+
+
+def path_identity(path: str) -> str:
+    """Deterministic dedup identity for a light path (normcase + abspath)."""
+    return os.path.normcase(os.path.abspath(path))
+
+
+def dedup_input_paths(paths, existing_paths=()) -> list:
+    """Return ``paths`` with duplicates removed by :func:`path_identity`.
+
+    Order is preserved (first occurrence wins); any path already present in
+    ``existing_paths`` (compared by the same identity) is skipped.
+    """
+    seen = {path_identity(p) for p in existing_paths}
+    result: list = []
+    for p in paths:
+        ident = path_identity(p)
+        if ident not in seen:
+            seen.add(ident)
+            result.append(p)
+    return result
+
+
+def scan_folder_inputs(folder: str) -> Tuple[list, int]:
+    """Scan ``folder`` top-level only and return ``(input_paths, unsupported)``.
+
+    - **Top-level only**: subdirectories are never recursed into, and are not
+      counted as unsupported (they are not files).
+    - ``input_paths`` are the top-level files whose suffix matches the shared
+      supported input extension set (case-insensitive), returned in sorted
+      order for determinism.
+    - ``unsupported`` counts top-level *files* whose suffix does not match the
+      supported set (a genuine candidate FITS is never silently dropped).
+    """
+    folder_path = Path(folder)
+    if not folder_path.is_dir():
+        raise ValueError(f"not a directory: {folder!r}")
+    inputs: list = []
+    unsupported = 0
+    for entry in sorted(folder_path.iterdir()):
+        if entry.is_file():
+            if is_supported_input_file(entry.name):
+                inputs.append(str(entry))
+            else:
+                unsupported += 1
+    return inputs, unsupported
 
 
 # ---------------------------------------------------------------------------
@@ -270,8 +348,12 @@ def to_jsonable(value):
 
 
 __all__ = [
+    "SUPPORTED_INPUT_EXTENSIONS",
     "LightInput",
     "OperationSnapshot",
+    "dedup_input_paths",
+    "input_dialog_filter",
+    "is_supported_input_file",
     "load_json_array",
     "load_json_object",
     "new_batch_id",
@@ -280,5 +362,7 @@ __all__ = [
     "parse_hdu",
     "parse_imports",
     "parse_roi",
+    "path_identity",
+    "scan_folder_inputs",
     "to_jsonable",
 ]

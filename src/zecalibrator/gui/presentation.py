@@ -215,6 +215,18 @@ def _plural(count: int, singular: str, plural: str) -> str:
     return singular if count == 1 else plural
 
 
+def format_folder_add_feedback(added: int, unsupported: int) -> str:
+    """Truthful feedback after a folder add (presentation only).
+
+    Always reports how many images were added; when non-input files were skipped
+    it appends the ignored count so the user knows nothing was silently dropped.
+    """
+    text = f"{added} {_plural(added, 'image', 'images')} added"
+    if unsupported:
+        text += f" ({unsupported} {_plural(unsupported, 'unsupported file', 'unsupported files')} ignored)"
+    return text
+
+
 def additive_modes() -> tuple:
     return _ADDITIVE_MODES
 
@@ -313,6 +325,7 @@ __all__ = [
     "format_metadata",
     "format_outcome_summary",
     "format_rejection_table",
+    "format_folder_add_feedback",
     "human_outcome_label",
     "human_reason_text",
     "is_partial_mode",

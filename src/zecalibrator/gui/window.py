@@ -142,7 +142,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._connect_signals()
 
         self._config_widgets = [
-            self.add_btn, self.remove_btn, self.choose_library_btn,
+            self.add_btn, self.add_folder_btn, self.remove_btn, self.clear_btn,
+            self.choose_library_btn,
             self.apply_hdu_btn, self.hdu_edit,
             self.load_decl_btn, self.load_roi_btn,
             self.library_index_edit, self.open_library_btn,
@@ -165,10 +166,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.lights_list.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.ExtendedSelection)
         inputs_layout.addWidget(self.lights_list)
         light_btn_row = QtWidgets.QHBoxLayout()
-        self.add_btn = QtWidgets.QPushButton("Add images…")
+        self.add_btn = QtWidgets.QPushButton("Add files…")
+        self.add_folder_btn = QtWidgets.QPushButton("Add folder…")
         self.remove_btn = QtWidgets.QPushButton("Remove selected")
-        light_btn_row.addWidget(self.add_btn)
-        light_btn_row.addWidget(self.remove_btn)
+        self.clear_btn = QtWidgets.QPushButton("Clear")
+        for b in (self.add_btn, self.add_folder_btn, self.remove_btn, self.clear_btn):
+            light_btn_row.addWidget(b)
         light_btn_row.addStretch(1)
         inputs_layout.addLayout(light_btn_row)
         self.lights_count_label = QtWidgets.QLabel("0 images selected")
@@ -397,7 +400,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _connect_signals(self) -> None:
         self.add_btn.clicked.connect(self._on_add_lights)
+        self.add_folder_btn.clicked.connect(self._on_add_folder)
         self.remove_btn.clicked.connect(self._on_remove_lights)
+        self.clear_btn.clicked.connect(self._on_clear_lights)
         self.choose_library_btn.clicked.connect(self._on_choose_library)
         self.apply_hdu_btn.clicked.connect(self._on_apply_hdu)
         self.load_decl_btn.clicked.connect(self._on_load_declaration)
@@ -703,7 +708,7 @@ class MainWindow(QtWidgets.QMainWindow):
         start_dir = self._settings.last_input_dir or ""
         paths, _ = QtWidgets.QFileDialog.getOpenFileNames(
             self, "Select FITS light frames", start_dir,
-            "FITS files (*.fits *.fit *.fts);;All files (*)",
+            service.input_dialog_filter(),
         )
         if not paths:
             return
@@ -719,10 +724,47 @@ class MainWindow(QtWidgets.QMainWindow):
         self._bump_generation()
         self._update_scope_label()
 
+    def _on_add_folder(self) -> None:
+        start_dir = self._settings.last_input_dir or ""
+        folder = QtWidgets.QFileDialog.getExistingDirectory(
+            self, "Select a folder of light frames", start_dir
+        )
+        if not folder:
+            return
+        try:
+            paths, unsupported = service.scan_folder_inputs(folder)
+        except ValueError as exc:
+            QtWidgets.QMessageBox.warning(self, "Invalid folder", str(exc))
+            return
+        hdu = service.parse_hdu(self.hdu_edit.text())
+        # Additive append with deterministic dedup (never replace existing rows).
+        new_paths = service.dedup_input_paths(paths, [e.path for e in self._lights])
+        for path in new_paths:
+            self._lights.append(_LightEntry(path, hdu=hdu))
+        self._settings = dataclasses.replace(
+            self._settings,
+            last_input_dir=folder,
+            window_width=self.width(), window_height=self.height(),
+        )
+        self._refresh_lights_list()
+        self._bump_generation()
+        self._update_scope_label()
+        self.status_label.setText(
+            presentation.format_folder_add_feedback(len(new_paths), unsupported)
+        )
+
     def _on_remove_lights(self) -> None:
         for index in sorted(self._selected_rows(), reverse=True):
             if index < len(self._lights):
                 del self._lights[index]
+        self._refresh_lights_list()
+        self._bump_generation()
+        self._update_scope_label()
+
+    def _on_clear_lights(self) -> None:
+        if not self._lights:
+            return
+        self._lights.clear()
         self._refresh_lights_list()
         self._bump_generation()
         self._update_scope_label()

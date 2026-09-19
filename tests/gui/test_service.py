@@ -10,6 +10,7 @@ private-import boundary (``zecalibrator.gui`` modules never import
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -148,6 +149,83 @@ def test_to_jsonable_handles_public_value_objects(tmp_path):
     spec = v1.LibrarySpec(root=str(tmp_path), index_path=str(tmp_path / "i.sqlite"))
     rendered = service.to_jsonable(spec)
     assert rendered["root"] == str(tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# Shared supported-input extension set + folder scan + dedup (LIGHTS)
+# ---------------------------------------------------------------------------
+def test_supported_input_extensions_are_the_known_fits_suffixes():
+    assert service.SUPPORTED_INPUT_EXTENSIONS == (".fits", ".fit", ".fts")
+
+
+def test_input_dialog_filter_derives_from_shared_set():
+    f = service.input_dialog_filter()
+    for ext in service.SUPPORTED_INPUT_EXTENSIONS:
+        assert f"*{ext}" in f
+    assert f.endswith(";;All files (*)")
+
+
+def test_is_supported_input_file_case_insensitive_and_deterministic():
+    assert service.is_supported_input_file("light.fits")
+    assert service.is_supported_input_file("light.fit")
+    assert service.is_supported_input_file("light.fts")
+    # Case handled identically (deterministic lower-case suffix match).
+    assert service.is_supported_input_file("light.FITS")
+    assert service.is_supported_input_file("light.Fit")
+    assert service.is_supported_input_file("light.FTS")
+    assert not service.is_supported_input_file("light.fits.gz")
+    assert not service.is_supported_input_file("light.txt")
+    assert not service.is_supported_input_file("light")
+    assert not service.is_supported_input_file("light.jpg")
+
+
+def test_path_identity_normcase_and_abspath():
+    base = os.path.abspath("/tmp")
+    assert service.path_identity("/tmp/x.fits") == os.path.normcase(os.path.abspath("/tmp/x.fits"))
+    # Relative and absolute spellings of the same file collapse to one identity.
+    assert service.path_identity("x.fits") == service.path_identity(os.path.join(os.getcwd(), "x.fits"))
+
+
+def test_dedup_input_paths_preserves_order_and_skips_existing(tmp_path):
+    a = str(tmp_path / "a.fits")
+    b = str(tmp_path / "b.fit")
+    (tmp_path / "a.fits").write_bytes(b"")
+    (tmp_path / "b.fit").write_bytes(b"")
+    out = service.dedup_input_paths([a, b, a, a], existing_paths=[b])
+    assert out == [a]
+    out2 = service.dedup_input_paths([a, b], existing_paths=[])
+    assert out2 == [a, b]
+
+
+def test_scan_folder_inputs_top_level_only_and_sorted(tmp_path):
+    (tmp_path / "b.fit").write_bytes(b"")
+    (tmp_path / "a.FITS").write_bytes(b"")
+    (tmp_path / "c.fts").write_bytes(b"")
+    (tmp_path / "notes.txt").write_text("x")
+    (tmp_path / "image.jpg").write_bytes(b"")
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    (sub / "nested.fits").write_bytes(b"")  # must NOT be added (non-recursive)
+    paths, unsupported = service.scan_folder_inputs(str(tmp_path))
+    assert paths == [
+        str(tmp_path / "a.FITS"),
+        str(tmp_path / "b.fit"),
+        str(tmp_path / "c.fts"),
+    ]
+    assert unsupported == 2  # notes.txt + image.jpg (subdir is not a file)
+
+
+def test_scan_folder_inputs_empty_folder_clean(tmp_path):
+    paths, unsupported = service.scan_folder_inputs(str(tmp_path))
+    assert paths == []
+    assert unsupported == 0
+
+
+def test_scan_folder_inputs_rejects_non_directory(tmp_path):
+    f = tmp_path / "afile.txt"
+    f.write_text("x")
+    with pytest.raises(ValueError):
+        service.scan_folder_inputs(str(f))
 
 
 # ---------------------------------------------------------------------------

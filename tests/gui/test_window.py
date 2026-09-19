@@ -367,8 +367,10 @@ def test_top_level_tabs_exact_order_and_standard_default(qapp, paths):
 
 def test_standard_exposes_human_workflow(qapp, paths):
     w = MainWindow(paths)
-    assert w.add_btn.text() == "Add images…"
+    assert w.add_btn.text() == "Add files…"
+    assert w.add_folder_btn.text() == "Add folder…"
     assert w.remove_btn.text() == "Remove selected"
+    assert w.clear_btn.text() == "Clear"
     assert w.choose_library_btn.text() == "Choose library…"
     assert w.preflight_btn.text() == "Verify calibration"
     assert w.export_btn.text() == "Calibrate / Export…"
@@ -801,4 +803,126 @@ def test_cancel_requested_status_stable_against_later_progress(qapp, paths):
 
     w._on_progress("op-1", Evt())
     assert w.status_label.text() == "Cancellation requested…"
+    _close(w)
+
+
+# ---------------------------------------------------------------------------
+# P7-M3A LIGHTS: Add files / Add folder / Clear (Standard tab).
+# ---------------------------------------------------------------------------
+def _mock_get_open_file_names(paths, filt="FITS files (*.fits *.fit *.fts);;All files (*)"):
+    from PySide6 import QtWidgets as qw
+
+    qw.QFileDialog.getOpenFileNames = staticmethod(lambda *a, **k: (list(paths), filt))
+
+
+def _mock_get_existing_directory(folder):
+    from PySide6 import QtWidgets as qw
+
+    qw.QFileDialog.getExistingDirectory = staticmethod(lambda *a, **k: str(folder))
+
+
+def test_add_files_keeps_multi_file_behavior(qapp, paths, tmp_path):
+    w = MainWindow(paths)
+    f1 = tmp_path / "one.fits"
+    f2 = tmp_path / "two.fit"
+    f1.write_bytes(b"")
+    f2.write_bytes(b"")
+    _mock_get_open_file_names([str(f1), str(f2)])
+    w.hdu_edit.setText("1")
+    w._on_add_lights()
+    assert [e.path for e in w._lights] == [str(f1), str(f2)]
+    assert all(e.hdu == 1 for e in w._lights)
+    assert w.lights_count_label.text() == "2 images selected"
+    _close(w)
+
+
+def test_add_folder_adds_supported_top_level_and_ignores_unsupported(qapp, paths, tmp_path):
+    w = MainWindow(paths)
+    folder = tmp_path / "lights"
+    folder.mkdir()
+    (folder / "a.FITS").write_bytes(b"")
+    (folder / "b.fit").write_bytes(b"")
+    (folder / "notes.txt").write_text("x")
+    sub = folder / "sub"
+    sub.mkdir()
+    (sub / "nested.fits").write_bytes(b"")  # must NOT be added (non-recursive)
+    _mock_get_existing_directory(folder)
+    w.hdu_edit.setText("0")
+    w._on_add_folder()
+    assert [e.path for e in w._lights] == [str(folder / "a.FITS"), str(folder / "b.fit")]
+    assert w.lights_count_label.text() == "2 images selected"
+    assert w.status_label.text() == "2 images added (1 unsupported file ignored)"
+    _close(w)
+
+
+def test_add_folder_is_additive_and_dedups_existing(qapp, paths, tmp_path):
+    w = MainWindow(paths)
+    folder = tmp_path / "lights"
+    folder.mkdir()
+    existing = folder / "one.fits"
+    existing.write_bytes(b"")
+    newfit = folder / "two.fts"
+    newfit.write_bytes(b"")
+    # First add one file through the multi-file dialog.
+    _mock_get_open_file_names([str(existing)])
+    w._on_add_lights()
+    assert len(w._lights) == 1
+    # Then add the whole folder: the existing path must not be duplicated.
+    _mock_get_existing_directory(folder)
+    w._on_add_folder()
+    assert [e.path for e in w._lights] == [str(existing), str(newfit)]
+    assert w.lights_count_label.text() == "2 images selected"
+    assert w.status_label.text() == "1 image added"
+    _close(w)
+
+
+def test_add_folder_empty_folder_is_clean(qapp, paths, tmp_path):
+    w = MainWindow(paths)
+    folder = tmp_path / "empty"
+    folder.mkdir()
+    _mock_get_existing_directory(folder)
+    w._on_add_folder()
+    assert w._lights == []
+    assert w.lights_count_label.text() == "0 images selected"
+    assert w.status_label.text() == "0 images added"
+    _close(w)
+
+
+def test_remove_selected_and_clear_keep_truthful_count(qapp, paths, tmp_path):
+    w = MainWindow(paths)
+    folder = tmp_path / "lights"
+    folder.mkdir()
+    (folder / "a.fits").write_bytes(b"")
+    (folder / "b.fits").write_bytes(b"")
+    (folder / "c.fits").write_bytes(b"")
+    _mock_get_existing_directory(folder)
+    w._on_add_folder()
+    assert len(w._lights) == 3
+    assert w.lights_count_label.text() == "3 images selected"
+
+    w.lights_list.item(0).setSelected(True)
+    w.lights_list.item(2).setSelected(True)
+    w._on_remove_lights()
+    assert [e.path for e in w._lights] == [str(folder / "b.fits")]
+    assert w.lights_count_label.text() == "1 image selected"
+
+    w._on_clear_lights()
+    assert w._lights == []
+    assert w.lights_count_label.text() == "0 images selected"
+    _close(w)
+
+
+def test_folder_add_bumps_generation_once_and_clears_cached_plans(qapp, paths, tmp_path):
+    """Folder add is an input change: it must invalidate cached plans exactly like
+    the multi-file add (no shared-state divergence)."""
+    w = MainWindow(paths)
+    folder = tmp_path / "lights"
+    folder.mkdir()
+    (folder / "a.fits").write_bytes(b"")
+    w._plans["stale"] = object()
+    before = w._generation
+    _mock_get_existing_directory(folder)
+    w._on_add_folder()
+    assert w._generation == before + 1
+    assert w._plans == {}
     _close(w)
