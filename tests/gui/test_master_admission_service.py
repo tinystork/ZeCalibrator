@@ -170,3 +170,75 @@ def test_mixed_folder_scanned_once_single_role_per_file(tmp_path):
         roles.append(entry["detected_role"])
     # Each file yields exactly one role; no file is triple-indexed.
     assert sorted(roles) == ["dark", "flat", "flat_dark"]
+
+
+# ---------------------------------------------------------------------------
+# F2: explicit normalization/calibration negation semantics (Siril HISTORY)
+# ---------------------------------------------------------------------------
+def test_unnormalized_input_and_output_are_admissible(tmp_path):
+    for hist in ("unnormalized input", "unnormalized output"):
+        p = _write(tmp_path / "u.fits", imagetyp="DARK", history=hist)
+        cards = _cards(p)
+        assert service.master_incompatibility(cards, role="dark") == ()
+
+
+def test_multiplicative_normalized_input_unnormalized_output_admissible(tmp_path):
+    # Real Siril flat HISTORY: not a normalized output -> admissible.
+    p = _write(
+        tmp_path / "siril.fits", imagetyp="FLAT",
+        history="multiplicative normalized input, unnormalized output",
+    )
+    cards = _cards(p)
+    assert service.master_incompatibility(cards, role="flat", flat_form="raw_response") == ()
+
+
+def test_uncalibrated_is_admissible(tmp_path):
+    p = _write(tmp_path / "uc.fits", imagetyp="DARK", history="uncalibrated dark")
+    cards = _cards(p)
+    assert service.master_incompatibility(cards, role="dark") == ()
+
+
+def test_normalized_output_still_signals_normalized(tmp_path):
+    p = _write(tmp_path / "n.fits", imagetyp="DARK", history="normalized output")
+    cards = _cards(p)
+    reasons = service.master_incompatibility(cards, role="dark")
+    assert reasons and any("normalized" in r for r in reasons)
+
+
+# ---------------------------------------------------------------------------
+# Three real-Siril-equivalent 2-D CFA headers + role detection
+# ---------------------------------------------------------------------------
+def test_three_siril_equivalent_cfa_headers_and_roles(tmp_path):
+    def _mk(name, **header):
+        hdu = fits.PrimaryHDU(np.zeros((2, 2), dtype=np.int16))
+        hdu.header["BUNIT"] = "ADU"
+        for k, v in header.items():
+            hdu.header[k] = v
+        p = tmp_path / name
+        hdu.writeto(p, overwrite=True)
+        return str(p)
+
+    # dark: NAXIS=2 / IMAGETYP=DARK / EXPTIME / BAYERPAT=RGGB.
+    dark = _mk("dark.fits", IMAGETYP="DARK", EXPTIME=300.0, BAYERPAT="RGGB")
+    # bias-as-DARKFLAT: NAXIS=2 / IMAGETYP=DARKFLAT / CCD-TEMP / GAIN / OFFSET / BAYERPAT.
+    fd = _mk(
+        "fd.fits", IMAGETYP="DARKFLAT",
+        **{"CCD-TEMP": 20.0, "GAIN": 100.0, "OFFSET": 50.0, "BAYERPAT": "RGGB"},
+    )
+    # flat: NAXIS=2 / IMAGETYP=FLAT / FILTER / BAYERPAT.
+    flat = _mk("flat.fits", IMAGETYP="FLAT", FILTER="L", BAYERPAT="RGGB")
+
+    # DARK/DARKFLAT/FLAT role detection (exactly one role each).
+    assert service.detect_imagetyp_role(_cards(dark)) == "dark"
+    assert service.detect_imagetyp_role(_cards(fd)) == "flat_dark"
+    assert service.detect_imagetyp_role(_cards(flat)) == "flat"
+
+    # CFA evidence is detected from BAYERPAT (never a role candidate).
+    c, _ = service.detect_header_candidates(_cards(dark))
+    assert c["cfa_phase"].value == "RGGB"
+    assert c["exposure_s"].value == 300.0
+
+    # All three are admissible raw 2-D CFA masters (no processed markers).
+    assert service.master_incompatibility(_cards(dark), role="dark") == ()
+    assert service.master_incompatibility(_cards(fd), role="flat_dark") == ()
+    assert service.master_incompatibility(_cards(flat), role="flat") == ()

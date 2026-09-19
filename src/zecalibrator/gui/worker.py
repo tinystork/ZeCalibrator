@@ -570,9 +570,12 @@ class _OperationWorker(QtCore.QObject):
     # -- managed master ingestion (P7-M3B) ----------------------------------
     def _scan_masters(self, snap) -> dict:
         masters = []
-        for path in snap.master_paths:
+        targets = list(snap.master_targets)
+        if not targets:
+            targets = [(p, snap.master_type) for p in snap.master_paths]
+        for path, role in targets:
             try:
-                entry = dict(service.scan_master_header(path, selected_role=snap.master_type))
+                entry = dict(service.scan_master_header(path, selected_role=role))
                 # Keep the legacy ``master_type`` key for the presentation path;
                 # the effective role is also exposed as ``role``.
                 entry["master_type"] = entry.get("role")
@@ -580,7 +583,7 @@ class _OperationWorker(QtCore.QObject):
             except Exception as exc:  # noqa: BLE001 - per-master scan failure
                 masters.append({
                     "path": path,
-                    "master_type": snap.master_type,
+                    "master_type": role,
                     "status": "FAILED",
                     "reason": str(exc),
                     "candidates": {},
@@ -655,6 +658,7 @@ class _OperationWorker(QtCore.QObject):
                 "state": loaded.state,
                 "details": "existing managed ledger preserved (not overwritten)",
             }
+        status, missing = service.master_evidence_status(role, declaration)
         # Reuse known master: an unchanged record (same content identity + role +
         # evidence + declaration) is reused without re-asking; never duplicated.
         for existing in loaded.records:
@@ -671,6 +675,8 @@ class _OperationWorker(QtCore.QObject):
                     "record": existing.to_dict(),
                     "count": len(loaded.records),
                     "path": path,
+                    "evidence_status": status,
+                    "missing": list(missing),
                 }
         # Content identity + role is authoritative over path (same bytes+role =
         # same record; same path+new bytes = new record).
@@ -680,7 +686,6 @@ class _OperationWorker(QtCore.QObject):
         ]
         records.append(record)
         v1.save_managed_ledger(ledger_path, records)
-        status, missing = service.master_evidence_status(role, declaration)
         return {
             "kind": "confirm_evidence",
             "status": "COMPLETED",
@@ -699,9 +704,17 @@ class _OperationWorker(QtCore.QObject):
                 "state": result.state,
                 "details": "existing managed ledger preserved (not overwritten)",
             }
+        # F3: build the derived session index ONLY from the current session
+        # selection (content identity + role), reusing evidence from the ledger
+        # by content identity. ``None`` = no filter (legacy full-ledger build);
+        # ``()`` = explicit empty selection (build nothing).
+        records = list(result.records)
+        if snap.session_selection is not None:
+            keys = set(snap.session_selection)
+            records = [r for r in records if (r.content_sha256, r.role) in keys]
         ready = []
         attention = []
-        for r in result.records:
+        for r in records:
             status, missing = service.master_evidence_status(r.role, r.declaration)
             if status == "ready":
                 ready.append(r)

@@ -112,10 +112,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self._managed_scan: list[dict] = []
         self._managed_pending: list[dict] = []
         self._active_source: str | None = None  # "managed" | "explicit" | None
-        self._scan_targets: list = []
-        self._scan_index = 0
-        self._scan_results: list[dict] = []
-        self._confirm_index = 0
+        self._managed_spec: v1.LibrarySpec | None = None
+        self._confirm_queue: list[dict] = []
+        self._confirm_batch_active: bool = False
+        self._session_selection: list[tuple[str, str]] = []
+        self._confirmed_ready: list[bool] = []
+        self._auto_flow_active: bool = False
 
         self._build_ui()
         self._wire_controller()
@@ -1007,6 +1009,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.status_label.setText(
             presentation.format_folder_add_feedback(len(new_paths), unsupported)
         )
+        if new_paths:
+            self._invalidate_managed_source()
+            self._auto_detect_masters()
 
     def _on_add_masters_file(self) -> None:
         paths, _ = QtWidgets.QFileDialog.getOpenFileNames(
@@ -1020,6 +1025,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.status_label.setText(
             presentation.format_folder_add_feedback(len(new_paths), 0)
         )
+        if new_paths:
+            self._invalidate_managed_source()
+            self._auto_detect_masters()
 
     def _on_remove_masters(self) -> None:
         rows = sorted({i.row() for i in self.masters_files_list.selectedIndexes()}, reverse=True)
@@ -1027,6 +1035,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if index < len(self._master_files):
                 del self._master_files[index]
         self._refresh_masters_list()
+        self._invalidate_managed_source()
 
     def _on_clear_masters(self) -> None:
         if not self._master_files:
@@ -1036,6 +1045,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._managed_pending.clear()
         self.managed_status_label.setText("No managed masters detected.")
         self._refresh_masters_list()
+        self._invalidate_managed_source()
 
     def _refresh_masters_list(self) -> None:
         self.masters_files_list.clear()
@@ -1045,6 +1055,27 @@ class MainWindow(QtWidgets.QMainWindow):
             item.setToolTip(path)
             self.masters_files_list.addItem(item)
 
+    def _invalidate_managed_source(self) -> None:
+        """Reset managed-source state whenever the master set changes."""
+        if self._active_source == "managed":
+            self._active_source = None
+            self._library_spec = None
+            self.active_source_label.setText("Active calibration source: none")
+            self._set_library_human_status("unavailable")
+        self._managed_spec = None
+        self._session_selection.clear()
+        self._confirm_queue.clear()
+        self._confirm_batch_active = False
+        self._auto_flow_active = False
+
+    def _auto_detect_masters(self) -> None:
+        """F6: adding masters auto-detects (one scan) then auto-confirms/builds."""
+        self._auto_flow_active = True
+        self._start_scan_all()
+
+    def _auto_confirm(self) -> None:
+        self._collect_and_dispatch_confirms()
+
     def _on_scan_masters(self) -> None:
         if not self._master_files:
             QtWidgets.QMessageBox.information(
@@ -1052,24 +1083,20 @@ class MainWindow(QtWidgets.QMainWindow):
                 "Add a masters folder or master files first.",
             )
             return
+        self._auto_flow_active = False
+        self._start_scan_all()
+
+    def _start_scan_all(self) -> None:
+        """Detect the complete master set in ONE worker op (no GUI-side chaining)."""
         self._managed_scan.clear()
         self._managed_pending.clear()
-        self._scan_targets = list(self._master_files)
-        self._scan_index = 0
-        self._scan_results: list[dict] = []
-        self._start_scan_next()
-
-    def _start_scan_next(self) -> None:
-        if self._scan_index >= len(self._scan_targets):
-            self._managed_scan = list(self._scan_results)
-            self._present_managed_scan()
-            return
-        path = self._scan_targets[self._scan_index]
-        self._scan_index += 1
+        self._confirm_queue.clear()
+        self._confirm_batch_active = False
+        self._session_selection.clear()
         snapshot = service.OperationSnapshot(
             op_id=service.new_operation_id(), kind="scan_masters",
             library_spec=None, request=None, policy=None, lights=(),
-            master_paths=(path,), master_type=None,
+            master_targets=tuple((p, None) for p in self._master_files),
         )
         self._start_operation(snapshot)
 
@@ -1169,10 +1196,16 @@ class MainWindow(QtWidgets.QMainWindow):
         return chosen if ok else None
 
     def _on_confirm_masters(self) -> None:
+        self._auto_flow_active = False
+        self._collect_and_dispatch_confirms()
+
+    def _collect_and_dispatch_confirms(self) -> None:
         if not self._managed_scan:
-            QtWidgets.QMessageBox.information(self, "Nothing to confirm", "Detect masters first.")
+            if not self._auto_flow_active:
+                QtWidgets.QMessageBox.information(self, "Nothing to confirm", "Detect masters first.")
             return
         self._managed_pending.clear()
+        self._confirmed_ready.clear()
         for m in self._managed_scan:
             if m.get("status") != "COMPLETED":
                 continue
@@ -1216,40 +1249,71 @@ class MainWindow(QtWidgets.QMainWindow):
                 "declaration_version": "1",
             })
         if not self._managed_pending:
-            QtWidgets.QMessageBox.information(
-                self, "Nothing to confirm",
-                "No admissible detected masters to confirm (incompatible/conflicts are not auto-resolved).",
-            )
+            if self._auto_flow_active:
+                self.managed_status_label.setText(
+                    "No admissible detected masters to confirm "
+                    "(incompatible/conflicts are not auto-resolved)."
+                )
+            else:
+                QtWidgets.QMessageBox.information(
+                    self, "Nothing to confirm",
+                    "No admissible detected masters to confirm (incompatible/conflicts are not auto-resolved).",
+                )
             return
-        self._confirm_index = 0
-        self._start_confirm_next()
+        self._confirm_queue = list(self._managed_pending)
+        self._confirm_batch_active = True
+        self._dispatch_next_confirm()
 
-    def _start_confirm_next(self) -> None:
-        if self._confirm_index >= len(self._managed_pending):
+    def _dispatch_next_confirm(self) -> None:
+        """Dispatch the next queued confirm; the queue is drained on ``worker_ended``
+        (never re-entrantly from ``operation_finished`` while ``is_active`` is true)."""
+        if self._confirm_queue:
+            if self._controller.is_active:
+                return  # drained from _on_worker_ended
+            payload = self._confirm_queue.pop(0)
+            snapshot = service.OperationSnapshot(
+                op_id=service.new_operation_id(), kind="confirm_evidence",
+                library_spec=None, request=None, policy=None, lights=(),
+                ledger_dir=str(self._storage.user_data_path),
+                confirm_payload=payload,
+            )
+            self._start_operation(snapshot)
+            return
+        if self._confirm_batch_active:
+            self._confirm_batch_active = False
             self.managed_status_label.setText(
                 f"Confirmed {len(self._managed_pending)} master(s)."
             )
-            return
-        payload = self._managed_pending[self._confirm_index]
-        self._confirm_index += 1
-        snapshot = service.OperationSnapshot(
-            op_id=service.new_operation_id(), kind="confirm_evidence",
-            library_spec=None, request=None, policy=None, lights=(),
-            ledger_dir=str(self._storage.user_data_path),
-            confirm_payload=payload,
-        )
-        self._start_operation(snapshot)
+            self._finish_confirm_flow()
+
+    def _finish_confirm_flow(self) -> None:
+        """After the confirm queue drains, auto-prepare the managed library when the
+        confirmed set is fully admissible (F6); otherwise report attention."""
+        if self._auto_flow_active and self._managed_pending:
+            if all(self._confirmed_ready):
+                self._on_build_managed()
+            else:
+                self.managed_status_label.setText(
+                    f"Confirmed {len(self._managed_pending)} master(s); "
+                    "auto-prepare skipped (incomplete evidence)."
+                )
+                self._set_library_human_status(
+                    "attention", "some masters need evidence before the library can be prepared"
+                )
+        self._auto_flow_active = False
 
     def _on_build_managed(self) -> None:
         index_path = str(self._storage.user_cache_path / "zecalibrator.managed.sqlite")
         spec = v1.LibrarySpec(root=str(self._storage.user_cache_path), index_path=index_path)
         self._set_active_source("managed")
+        self._managed_spec = spec
         self._bump_generation()
         snapshot = service.OperationSnapshot(
             op_id=service.new_operation_id(), kind="build_managed_library",
             library_spec=None, request=None, policy=None, lights=(),
             ledger_dir=str(self._storage.user_data_path),
             managed_spec=spec,
+            session_selection=tuple(self._session_selection),
         )
         self._start_operation(snapshot)
 
@@ -1540,24 +1604,35 @@ class MainWindow(QtWidgets.QMainWindow):
         self.status_label.setText("ROI evidence loaded.")
 
     def _handle_scan_masters(self, summary: dict) -> None:
-        for m in summary.get("masters", []):
-            self._scan_results.append(m)
         if summary.get("status") == "FAILED":
             self.status_label.setText("Master detection failed.")
+            self._auto_flow_active = False
             return
-        self._start_scan_next()
+        self._managed_scan = list(summary.get("masters", []))
+        self._present_managed_scan()
+        if self._auto_flow_active:
+            self._auto_confirm()
 
     def _handle_confirm_evidence(self, summary: dict) -> None:
         if summary.get("status") == "PRESERVED":
             self._log(f"[managed] ledger preserved ({summary.get('state')}); not overwritten.")
             self.status_label.setText("Managed ledger preserved (not overwritten).")
+            self._confirm_queue.clear()
+            self._confirm_batch_active = False
             return
+        record = summary.get("record") or {}
+        sha = record.get("content_sha256")
+        role = record.get("role")
+        if sha and role:
+            key = (sha, role)
+            if key not in self._session_selection:
+                self._session_selection.append(key)
+        ev_status = summary.get("evidence_status")
         if summary.get("status") == "REUSED":
             self._log(f"[managed] known master reused (unchanged): {summary.get('path')}")
             self.status_label.setText("Master reused (unchanged).")
-            self._start_confirm_next()
+            self._confirmed_ready.append(ev_status == "ready")
             return
-        ev_status = summary.get("evidence_status")
         missing = summary.get("missing", [])
         if ev_status == "needs_attention":
             self._log(
@@ -1565,9 +1640,12 @@ class MainWindow(QtWidgets.QMainWindow):
                 f"{', '.join(missing) or '(none)'}"
             )
             self.status_label.setText("Master confirmed (needs attention — insufficient evidence).")
+            self._confirmed_ready.append(False)
         else:
             self.status_label.setText("Master evidence confirmed.")
-        self._start_confirm_next()
+            self._confirmed_ready.append(True)
+        # No dispatch here: the pending confirm queue is drained in _on_worker_ended
+        # (after the controller clears is_active), never re-entrantly while active.
 
     def _handle_build_managed(self, summary: dict) -> None:
         if summary.get("status") == "PRESERVED":
@@ -1575,23 +1653,43 @@ class MainWindow(QtWidgets.QMainWindow):
             self._log(f"[managed] ledger preserved ({summary.get('state')}).")
             return
         attention = summary.get("needs_attention", [])
-        if summary.get("status") in ("REUSED", "COMPLETED"):
-            self.managed_status_label.setText(
-                f"Managed library {summary.get('status')}: revision={summary.get('revision')!r} "
-                f"candidates={summary.get('candidate_count')}"
-            )
-            if attention:
-                self._set_library_human_status("attention", f"{len(attention)} master(s) insufficient evidence")
+        candidate_count = summary.get("candidate_count", 0)
+        status = summary.get("status")
+        if status in ("REUSED", "COMPLETED"):
+            if candidate_count == 0:
+                # F4: an empty managed library is never Ready; refuse Verify/export.
+                self._library_spec = None
+                self.managed_status_label.setText(
+                    f"Managed library {status}: no usable masters (needs attention — not prepared)."
+                )
+                self._set_library_human_status("attention", "no usable masters — not prepared")
                 for a in attention:
                     self._log(
                         f"[managed] needs attention — {a.get('role')} {a.get('path')}: "
                         f"insufficient evidence ({', '.join(a.get('missing', ())) or '(none)'})"
                     )
             else:
-                self._set_library_human_status("ready", "managed")
+                # F5: wire the exact managed LibrarySpec so _ensure_library()/Verify/
+                # export use it; a ready managed state never coexists with a
+                # _ensure_library() failure.
+                self._library_spec = self._managed_spec
+                self.managed_status_label.setText(
+                    f"Managed library {status}: revision={summary.get('revision')!r} "
+                    f"candidates={candidate_count}"
+                )
+                if attention:
+                    self._set_library_human_status("attention", f"{len(attention)} master(s) insufficient evidence")
+                    for a in attention:
+                        self._log(
+                            f"[managed] needs attention — {a.get('role')} {a.get('path')}: "
+                            f"insufficient evidence ({', '.join(a.get('missing', ())) or '(none)'})"
+                        )
+                else:
+                    self._set_library_human_status("ready", "managed")
         else:
+            self._library_spec = None
             self.managed_status_label.setText(
-                f"Managed library {summary.get('status')}: {summary.get('reason_code')} {summary.get('details')}"
+                f"Managed library {status}: {summary.get('reason_code')} {summary.get('details')}"
             )
             self._set_library_human_status("unavailable", summary.get('reason_code') or "managed build failed")
 
@@ -1608,6 +1706,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._set_active(False)
         if self._close_requested:
             self.close()
+            return
+        if self._confirm_batch_active:
+            self._dispatch_next_confirm()
 
     # ------------------------------------------------- detail rendering
     def _on_preflight_selection_changed(self, current_row: int, *_args) -> None:

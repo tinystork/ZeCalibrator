@@ -17,6 +17,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import os
+import re
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -319,8 +320,44 @@ _MASTER_INCOMPATIBLE_TOKENS = (
 )
 _MASTER_CALIBRATED_KEYWORDS = ("CALIBRAT",)
 _MASTER_NORMALIZED_KEYWORDS = ("NORMALIZE", "NORMALIZED")
-_MASTER_CALIBRATED_TOKENS = ("calibrat",)
-_MASTER_NORMALIZED_TOKENS = ("normaliz",)
+
+# HISTORY/COMMENT marker vocabulary. Only an un-negated marker signals processed
+# history: "uncalibrated"/"unnormalized" are admissible (the "un-" prefix negates
+# the marker), and "normalized input" (stacking input normalization) is admissible
+# because it is not a normalized *output*.
+_MARKER_RE = re.compile(
+    r"(?P<neg>un)?(?P<kind>calibrat|normaliz)[A-Za-z]*", re.IGNORECASE
+)
+
+
+def _next_word_after(text: str, pos: int) -> str:
+    m = re.match(r"[^A-Za-z]*([A-Za-z]+)", text[pos:])
+    return m.group(1).lower() if m else ""
+
+
+def _master_normalization_signals(text: str) -> Tuple[bool, bool]:
+    """Return ``(calibrated, normalized_output)`` signals for a HISTORY/COMMENT.
+
+    * ``uncalibrated`` / ``unnormalized`` are admissible (negated by ``un-``).
+    * ``normalized input`` (stacking input normalization) is admissible, not a
+      normalized output.
+    * ``calibrated`` signals a calibrated history; any other un-negated
+      ``normalized …`` (``normalized output`` / ``normalized response`` / bare
+      ``normalized``) signals a normalized output.
+    """
+    calibrated = False
+    normalized_output = False
+    for m in _MARKER_RE.finditer(text):
+        if m.group("neg") is not None:
+            continue
+        kind = m.group("kind").lower()
+        if kind == "calibrat":
+            calibrated = True
+        else:
+            if _next_word_after(text, m.end()) == "input":
+                continue
+            normalized_output = True
+    return calibrated, normalized_output
 
 
 def _iter_keyword_values(cards):
@@ -410,11 +447,12 @@ def master_incompatibility(cards, *, role=None, flat_form=None) -> Tuple[str, ..
                 if token in s:
                     reasons.append(f"processed marker {token!r}")
                     break
-            if any(t in s for t in _MASTER_CALIBRATED_TOKENS):
+            calibrated, normalized_output = _master_normalization_signals(s)
+            if calibrated:
                 reason = _master_calibrated_reason(role, flat_form, "HISTORY 'calibrat'")
                 if reason:
                     reasons.append(reason)
-            if any(t in s for t in _MASTER_NORMALIZED_TOKENS):
+            if normalized_output:
                 reason = _master_normalized_reason(role, flat_form, "HISTORY 'normaliz'")
                 if reason:
                     reasons.append(reason)
@@ -722,6 +760,13 @@ class OperationSnapshot:
     # managed master ingestion (P7-M3B)
     master_paths: Tuple[str, ...] = ()
     master_type: Optional[str] = None
+    # Per-file scan targets ``(path, role)``; role is None to auto-detect from
+    # IMAGETYP. When empty, the worker falls back to ``master_paths``/``master_type``.
+    master_targets: Tuple[Tuple[str, Optional[str]], ...] = ()
+    # Session selection ``(content_sha256, role)`` pairs for the derived index.
+    # None = no session filter (legacy full-ledger build); () = explicit empty
+    # selection (build nothing).
+    session_selection: Optional[Tuple[Tuple[str, str], ...]] = None
     ledger_dir: Optional[str] = None  # data root for the managed ledger
     managed_spec: Optional["v1.LibrarySpec"] = None  # managed library index spec
     confirm_payload: Optional[dict] = None  # confirm_evidence inputs
@@ -731,6 +776,9 @@ class OperationSnapshot:
         object.__setattr__(self, "index_imports", tuple(self.index_imports))
         object.__setattr__(self, "target_indices", tuple(self.target_indices))
         object.__setattr__(self, "master_paths", tuple(self.master_paths))
+        object.__setattr__(self, "master_targets", tuple(self.master_targets))
+        if self.session_selection is not None:
+            object.__setattr__(self, "session_selection", tuple(self.session_selection))
 
 
 # ---------------------------------------------------------------------------

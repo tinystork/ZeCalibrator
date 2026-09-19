@@ -25,6 +25,7 @@ This module imports ``astropy.io.fits`` only; it never imports ZSSS/ZeAlfie.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from os import PathLike
 from typing import Optional, Union
@@ -199,8 +200,44 @@ _MASTER_INCOMPATIBLE_TOKENS = (
 
 _MASTER_CALIBRATED_KEYWORDS = ("CALIBRAT",)
 _MASTER_NORMALIZED_KEYWORDS = ("NORMALIZE", "NORMALIZED")
-_MASTER_CALIBRATED_TOKENS = ("calibrat",)
-_MASTER_NORMALIZED_TOKENS = ("normaliz",)
+
+# HISTORY/COMMENT marker vocabulary. Only an un-negated marker signals processed
+# history: "uncalibrated"/"unnormalized" are admissible (the "un-" prefix negates
+# the marker), and "normalized input" (stacking input normalization) is admissible
+# because it is not a normalized *output*.
+_MARKER_RE = re.compile(
+    r"(?P<neg>un)?(?P<kind>calibrat|normaliz)[A-Za-z]*", re.IGNORECASE
+)
+
+
+def _next_word_after(text: str, pos: int) -> str:
+    m = re.match(r"[^A-Za-z]*([A-Za-z]+)", text[pos:])
+    return m.group(1).lower() if m else ""
+
+
+def _master_normalization_signals(text: str) -> tuple:
+    """Return ``(calibrated, normalized_output)`` signals for a HISTORY/COMMENT.
+
+    * ``uncalibrated`` / ``unnormalized`` are admissible (negated by ``un-``).
+    * ``normalized input`` (stacking input normalization) is admissible, not a
+      normalized output.
+    * ``calibrated`` signals a calibrated history; any other un-negated
+      ``normalized …`` (``normalized output`` / ``normalized response`` / bare
+      ``normalized``) signals a normalized output.
+    """
+    calibrated = False
+    normalized_output = False
+    for m in _MARKER_RE.finditer(text):
+        if m.group("neg") is not None:
+            continue
+        kind = m.group("kind").lower()
+        if kind == "calibrat":
+            calibrated = True
+        else:
+            if _next_word_after(text, m.end()) == "input":
+                continue
+            normalized_output = True
+    return calibrated, normalized_output
 
 
 def _reject_master_calibrated(role: Optional[str], flat_form: Optional[str], origin: str) -> None:
@@ -257,9 +294,10 @@ def _check_processed_master(cards: tuple, *, role: Optional[str], flat_form: Opt
             for token in _MASTER_INCOMPATIBLE_TOKENS:
                 if token in s:
                     raise DecodeError("MASTER_INCOMPATIBLE", f"{kw} token {token!r}")
-            if any(t in s for t in _MASTER_CALIBRATED_TOKENS):
+            calibrated, normalized_output = _master_normalization_signals(s)
+            if calibrated:
                 _reject_master_calibrated(role, flat_form, f"{kw} token 'calibrat'")
-            if any(t in s for t in _MASTER_NORMALIZED_TOKENS):
+            if normalized_output:
                 _reject_master_normalized(role, flat_form, f"{kw} token 'normaliz'")
 
 

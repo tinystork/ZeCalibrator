@@ -174,3 +174,42 @@ def test_flat_normalized_rejected_with_corrected_form(tmp_path):
     with pytest.raises(DecodeError) as exc:
         _decode(p, role="flat", flat_form="corrected_unnormalized")
     assert exc.value.reason_code == "MASTER_PROCESSED"
+
+
+# ---------------------------------------------------------------------------
+# F2: explicit normalization/calibration negation semantics (Siril HISTORY)
+# ---------------------------------------------------------------------------
+def test_unnormalized_input_is_admissible(tmp_path):
+    p = _write_with_history(tmp_path, "un_norm_in.fits", ["unnormalized input"])
+    f = _decode(p, role="dark")
+    assert f.metadata.units == "ADU"
+
+
+def test_unnormalized_output_is_admissible(tmp_path):
+    p = _write_with_history(tmp_path, "un_norm_out.fits", ["unnormalized output"])
+    f = _decode(p, role="dark")
+    assert f.metadata.units == "ADU"
+
+
+def test_multiplicative_normalized_input_unnormalized_output_admissible(tmp_path):
+    # Real Siril flat HISTORY: stacking input normalization + unnormalized output
+    # is neither a normalized output nor a calibrated master -> admissible.
+    p = _write_with_history(
+        tmp_path, "siril_flat.fits",
+        ["multiplicative normalized input, unnormalized output"],
+    )
+    f = _decode(p, role="flat", flat_form="raw_response")
+    assert f.metadata.units == "ADU"
+
+
+def test_uncalibrated_is_admissible(tmp_path):
+    p = _write_with_history(tmp_path, "uncal.fits", ["uncalibrated master"])
+    f = _decode(p, role="dark")
+    assert f.metadata.units == "ADU"
+
+
+def test_normalized_output_still_signals_normalized(tmp_path):
+    p = _write_with_history(tmp_path, "norm_out.fits", ["normalized output"])
+    with pytest.raises(DecodeError) as exc:
+        _decode(p, role="dark")
+    assert exc.value.reason_code == "MASTER_PROCESSED"

@@ -291,6 +291,76 @@ def test_worker_build_excludes_insufficient_evidence_master(controller, tmp_path
     assert "detector_instance_id" in s2["needs_attention"][0]["missing"]
 
 
+def test_worker_build_filters_by_session_selection(controller, tmp_path):
+    """F3: the derived index is built ONLY from the current session selection,
+    reusing evidence from the persistent ledger by content identity."""
+    from .conftest import run_operation
+
+    dark = _write_dark_with_cards(tmp_path / "dark.fits")
+    bias = _write_dark_with_cards(tmp_path / "bias.fits")
+    ledger_dir = str(tmp_path / "data")
+
+    common = {
+        "detector_instance_id": "SYNTH-DET-0001", "detector_model": "SYNTH-CFA",
+        "gain": 100.0, "offset": 50.0, "readout_mode": "MODE_A", "adc_mode": "MODE_16",
+        "binning": (1, 1), "sensor_dimensions": SHAPE, "orientation": "identity",
+        "cfa_phase": "mono", "roi_origin": (0, 0), "temperature_c": 20.0,
+    }
+    dark_extra = dict(common, exposure_s=300.0)
+    bias_extra = dict(common, bias_exposure_max_s=0.01)
+
+    def confirm(path, role, extra):
+        payload = {
+            "role": role, "path": path, "hdu": 0,
+            "evidence": {
+                "exposure_s": {"value": 300.0, "origin_type": "fits_header", "origin_field": "EXPTIME"},
+            },
+            "extra": extra, "dq_state": "no_source_dq", "mask_path": None,
+            "bias_state": "included",
+            "declaration_source": "user", "declaration_identity": "managed-import",
+            "declaration_version": "1",
+        }
+        snap = _snapshot("confirm_evidence", ledger_dir=ledger_dir, confirm_payload=payload)
+        r = run_operation(controller, snap, v1.CancellationToken())
+        assert r.finished_summary()["status"] == "COMPLETED"
+
+    confirm(dark, "dark", dark_extra)
+    confirm(bias, "bias", bias_extra)
+
+    sha_dark, _ = v1.content_identity(dark, hdu=0)
+    spec = v1.LibrarySpec(
+        root=str(tmp_path / "cache"), index_path=str(tmp_path / "cache" / "managed.sqlite")
+    )
+
+    # No session filter -> both roles built from the full ledger.
+    r1 = run_operation(
+        controller, _snapshot("build_managed_library", ledger_dir=ledger_dir, managed_spec=spec),
+        v1.CancellationToken(),
+    )
+    assert r1.finished_summary()["candidate_count"] == 2
+
+    # Session filter (only the dark) -> only the dark is in the derived index.
+    r2 = run_operation(
+        controller,
+        _snapshot(
+            "build_managed_library", ledger_dir=ledger_dir, managed_spec=spec,
+            session_selection=((sha_dark, "dark"),),
+        ),
+        v1.CancellationToken(),
+    )
+    s2 = r2.finished_summary()
+    assert s2["candidate_count"] == 1
+
+    opened = v1.open_library(spec)
+    handle = opened.handle
+    try:
+        roles = handle.snapshot.roles()
+        assert "dark" in roles
+        assert "bias" not in roles
+    finally:
+        handle.close()
+
+
 def test_window_exactly_one_active_source(qapp, tmp_path):
     from zecalibrator.gui.window import MainWindow
     from zecalibrator.storage import resolve_paths
