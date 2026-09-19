@@ -11,9 +11,12 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from astropy.io import fits
+
+from .conftest import write_fits_array
 
 from zecalibrator.gui import service
+
+SHAPE = (4, 4)
 
 
 def _write(path, *, imagetyp=None, history=None, naxis=2, extra=()):
@@ -21,24 +24,22 @@ def _write(path, *, imagetyp=None, history=None, naxis=2, extra=()):
         data = np.zeros((3, 2, 2), dtype=np.int16)
     else:
         data = np.zeros((2, 2), dtype=np.int16)
-    hdu = fits.PrimaryHDU(data)
-    hdu.header["BUNIT"] = "ADU"
-    hdu.header["EXPTIME"] = 300.0
-    hdu.header["CCD-TEMP"] = 20.0
-    hdu.header["GAIN"] = 100.0
-    hdu.header["OFFSET"] = 50.0
-    hdu.header["INSTRUME"] = "SYNTH-CFA"
-    hdu.header["FILTER"] = "L"
-    hdu.header["XBINNING"] = 1
-    hdu.header["YBINNING"] = 1
+    cards = [
+        ("EXPTIME", 300.0),
+        ("CCD-TEMP", 20.0),
+        ("GAIN", 100.0),
+        ("OFFSET", 50.0),
+        ("INSTRUME", "SYNTH-CFA"),
+        ("FILTER", "L"),
+        ("XBINNING", 1),
+        ("YBINNING", 1),
+    ]
     if imagetyp is not None:
-        hdu.header["IMAGETYP"] = imagetyp
+        cards.append(("IMAGETYP", imagetyp))
     if history is not None:
-        hdu.header["HISTORY"] = history
-    for key, val in extra:
-        hdu.header[key] = val
-    hdu.writeto(path, overwrite=True)
-    return str(path)
+        cards.append(("HISTORY", history))
+    cards.extend(extra)
+    return write_fits_array(path, data, header_cards=cards, bunit="ADU")
 
 
 def _cards(path):
@@ -210,12 +211,9 @@ def test_normalized_output_still_signals_normalized(tmp_path):
 # ---------------------------------------------------------------------------
 def test_three_siril_equivalent_cfa_headers_and_roles(tmp_path):
     def _mk(name, **header):
-        hdu = fits.PrimaryHDU(np.zeros((2, 2), dtype=np.int16))
-        hdu.header["BUNIT"] = "ADU"
-        for k, v in header.items():
-            hdu.header[k] = v
+        data = np.zeros((2, 2), dtype=np.int16)
         p = tmp_path / name
-        hdu.writeto(p, overwrite=True)
+        write_fits_array(p, data, header_cards=list(header.items()), bunit="ADU")
         return str(p)
 
     # dark: NAXIS=2 / IMAGETYP=DARK / EXPTIME / BAYERPAT=RGGB.

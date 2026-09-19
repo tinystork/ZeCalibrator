@@ -35,6 +35,67 @@ def _env():
     return env
 
 
+# Reads back a committed multi-extension GUI export FITS in a SUBPROCESS (the
+# FITS library runs in the child, never on the GUI main thread). The child
+# returns the primary float32 science plane, the DQ uint16 extension, or the
+# CALPROV uint8 extension bytes, base64-encoded to preserve exact bits.
+_OUTPUT_READER_SCRIPT = r'''
+import sys, json, base64
+import numpy as np
+from astropy.io import fits
+
+path = sys.argv[1]
+mode = sys.argv[2]  # "science" or "calprov"
+
+with fits.open(path, memmap=False) as hdul:
+    primary = np.ascontiguousarray(hdul[0].data, dtype=np.float32)
+    if mode == "science":
+        mask = None
+        for hdu in hdul[1:]:
+            if hdu.header.get("EXTNAME") == "DQ":
+                mask = np.ascontiguousarray(hdu.data, dtype=np.uint16)
+        out = {
+            "data_b64": base64.b64encode(primary.tobytes()).decode("ascii"),
+            "data_shape": list(primary.shape),
+            "mask_b64": base64.b64encode(mask.tobytes()).decode("ascii") if mask is not None else None,
+            "mask_shape": list(mask.shape) if mask is not None else None,
+        }
+    else:
+        calprov = None
+        for hdu in hdul[1:]:
+            if hdu.header.get("EXTNAME") == "CALPROV":
+                calprov = np.ascontiguousarray(hdu.data, dtype=np.uint8).tobytes()
+        out = {
+            "calprov_b64": base64.b64encode(calprov).decode("ascii") if calprov is not None else None,
+        }
+print(json.dumps(out))
+'''
+
+
+def _read_committed_output(path, mode):
+    """Run the FITS read-back in a subprocess and return the decoded fields."""
+    import base64
+
+    proc = subprocess.run(
+        [sys.executable, "-c", _OUTPUT_READER_SCRIPT, str(path), mode],
+        capture_output=True, text=True, env=_env(),
+    )
+    assert proc.returncode == 0, proc.stderr
+    out = json.loads(proc.stdout)
+    if mode == "science":
+        data = np.frombuffer(
+            base64.b64decode(out["data_b64"]), dtype=np.float32
+        ).reshape(out["data_shape"])
+        if out["mask_b64"] is None:
+            return data, None
+        mask = np.frombuffer(
+            base64.b64decode(out["mask_b64"]), dtype=np.uint16
+        ).reshape(out["mask_shape"])
+        return data, mask
+    calprov_b64 = out["calprov_b64"]
+    return base64.b64decode(calprov_b64) if calprov_b64 is not None else None
+
+
 def _light_source(fixture):
     from .conftest import DECL, ROI
 
@@ -177,10 +238,6 @@ def test_cli_manifest_science_digest_matches_api(tmp_path):
 def test_gui_export_payload_matches_api_and_cli(qapp, controller, tmp_path):
     """G1/T4: the GUI's standalone export science/DQ (with negatives and nonzero DQ)
     matches API and CLI on the same fixture, including full semantic provenance."""
-    from astropy.io import fits as astropy_fits
-
-    import numpy as np
-
     from zecalibrator.core.digests import science_digest
 
     # dark=100, light=90 -> calibrated output is negative (-10); dark mask has
@@ -221,13 +278,9 @@ def test_gui_export_payload_matches_api_and_cli(qapp, controller, tmp_path):
     gui_output = summary["items"][0]["output"]
     gui_fits = gui_output["path"]
 
-    # Read the committed GUI FITS: primary float32 science + DQ extension.
-    with astropy_fits.open(gui_fits, memmap=False) as hdul:
-        gui_data = np.ascontiguousarray(hdul[0].data, dtype=np.float32)
-        gui_mask = None
-        for hdu in hdul[1:]:
-            if hdu.header.get("EXTNAME") == "DQ":
-                gui_mask = np.ascontiguousarray(hdu.data, dtype=np.uint16)
+    # Read the committed GUI FITS (primary float32 science + DQ extension) in a
+    # SUBPROCESS — no FITS library on the GUI main thread.
+    gui_data, gui_mask = _read_committed_output(gui_fits, "science")
     assert gui_mask is not None
 
     # Full scientific parity: float32 data (incl. negatives) and uint16 DQ.
@@ -246,10 +299,6 @@ def test_gui_export_calprov_provenance_matches_api(tmp_path, qapp, controller):
     """T4: the GUI's exported CALPROV carries the full semantic public provenance,
     equal to the direct API provenance on the identical fixture (normalizing only
     output-logical-id/path nondeterminism)."""
-    import json
-
-    from astropy.io import fits as astropy_fits
-
     from zecalibrator.io.output_writer import parse_calprov
 
     mask = np.zeros(SHAPE, dtype=np.uint16)
@@ -278,11 +327,9 @@ def test_gui_export_calprov_provenance_matches_api(tmp_path, qapp, controller):
     assert not res.timed_out
     gui_fits = res.finished_summary()["items"][0]["output"]["path"]
 
-    with astropy_fits.open(gui_fits, memmap=False) as hdul:
-        calprov_bytes = None
-        for hdu in hdul[1:]:
-            if hdu.header.get("EXTNAME") == "CALPROV":
-                calprov_bytes = np.ascontiguousarray(hdu.data, dtype=np.uint8).tobytes()
+    # Read the committed CALPROV extension in a SUBPROCESS (no FITS library on
+    # the GUI main thread), then parse the returned bytes.
+    calprov_bytes = _read_committed_output(gui_fits, "calprov")
     assert calprov_bytes is not None
     calprov = dict(parse_calprov(calprov_bytes))
 

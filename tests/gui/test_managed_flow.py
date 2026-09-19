@@ -14,7 +14,6 @@ import time
 
 import numpy as np
 import pytest
-from astropy.io import fits
 
 pytest.importorskip("PySide6")
 
@@ -23,6 +22,8 @@ from PySide6 import QtWidgets
 import zecalibrator.api.v1 as v1
 from zecalibrator.gui.window import MainWindow
 from zecalibrator.storage import resolve_paths
+
+from .conftest import write_fits_array
 
 SHAPE = (4, 4)
 
@@ -45,19 +46,19 @@ def _pump(cond, timeout_ms=20000):
 
 
 def _write_dark(path, *, imagetyp="DARK", value=10.0):
-    hdu = fits.PrimaryHDU(np.full(SHAPE, value, dtype=np.float32))
-    hdu.header["BUNIT"] = "ADU"
-    hdu.header["IMAGETYP"] = imagetyp
-    hdu.header["EXPTIME"] = 300.0
-    hdu.header["CCD-TEMP"] = 20.0
-    hdu.header["GAIN"] = 100.0
-    hdu.header["OFFSET"] = 50.0
-    hdu.header["INSTRUME"] = "SYNTH-CFA"
-    hdu.header["BAYERPAT"] = "RGGB"
-    hdu.header["XBINNING"] = 1
-    hdu.header["YBINNING"] = 1
-    hdu.writeto(path, overwrite=True)
-    return str(path)
+    data = np.full(SHAPE, value, dtype=np.float32)
+    cards = [
+        ("IMAGETYP", imagetyp),
+        ("EXPTIME", 300.0),
+        ("CCD-TEMP", 20.0),
+        ("GAIN", 100.0),
+        ("OFFSET", 50.0),
+        ("INSTRUME", "SYNTH-CFA"),
+        ("BAYERPAT", "RGGB"),
+        ("XBINNING", 1),
+        ("YBINNING", 1),
+    ]
+    return write_fits_array(path, data, header_cards=cards, bunit="ADU")
 
 
 _FULL_EXTRA = {

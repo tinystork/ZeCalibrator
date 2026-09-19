@@ -54,56 +54,113 @@ DECL = dict(
 ROI = dict(extent=[4, 4], source="synthetic_fixture", identity="SYNTH-BASE-1", version="1.0")
 
 
-def _fits_card(keyword, value) -> str:
-    """Format one 80-byte FITS header card (SIMPLE/BITPIX/NAXIS*/BUNIT/END).
+_FITS_BLOCK = 2880
+_FITS_VALUE_FIELD = 20
 
-    Booleans and integers are right-justified in the 20-char value field;
-    strings are single-quoted and left-justified (FITS standard).
+
+def _fits_card(keyword, value) -> str:
+    """Format one 80-byte FITS header card.
+
+    Booleans and integers/floats are right-justified in the 20-char value field;
+    strings are single-quoted and left-justified (FITS standard). ``HISTORY`` /
+    ``COMMENT`` cards are commentary cards (keyword + free text, no ``=``
+    separator). ``value is None`` emits an ``END`` card.
     """
     kw = str(keyword).upper()[:8].ljust(8)
     if value is None:  # END card
         return kw.ljust(80)
+    if kw.strip() in ("HISTORY", "COMMENT"):
+        # Commentary card: text begins at column 9 (after the 8-char keyword).
+        return (kw + str(value)).ljust(80)[:80]
     if isinstance(value, bool):
-        field = ("T" if value else "F").rjust(20)
+        field = ("T" if value else "F").rjust(_FITS_VALUE_FIELD)
     elif isinstance(value, str):
-        field = ("'" + value + "'").ljust(20)
+        field = ("'" + value + "'").ljust(_FITS_VALUE_FIELD)
     else:
-        field = str(value).rjust(20)
+        field = str(value).rjust(_FITS_VALUE_FIELD)
     return (kw + "= " + field).ljust(80)[:80]
 
 
-def _fits_bytes(value, bunit="ADU") -> bytes:
-    """Return a valid FITS primary-HDU byte stream for a constant float32 array.
+def _pad_block(raw: bytes, fill: bytes) -> bytes:
+    """Pad ``raw`` to the next 2880-byte boundary with ``fill`` bytes."""
+    rem = len(raw) % _FITS_BLOCK
+    if rem:
+        raw += fill * (_FITS_BLOCK - rem)
+    return raw
 
-    Built entirely with NumPy (header cards + big-endian float32 data padded to
-    2880-byte blocks). The main Qt process never imports or constructs FITS
-    library objects — the worker reads these bytes on the QThread, exactly as in
-    production. ``bunit`` is written to the BUNIT card (defaults to ADU).
+
+def fits_bytes(data, header_cards=(), *, bunit=None) -> bytes:
+    """Return a valid FITS primary-HDU byte stream for ``data`` + header cards.
+
+    A minimal, standard-conformant FITS encoder built entirely with NumPy (no
+    FITS library imported or constructed in-process):
+
+    * ``data`` — a 2-D or 3-D NumPy array. int16 is encoded as ``BITPIX=16``,
+      float32 as ``BITPIX=-32``; both are stored big-endian (FITS standard).
+    * ``NAXIS`` is derived from ``data.ndim``; ``NAXIS1``/``NAXIS2``/``NAXIS3``
+      are derived from the (reversed) shape (``NAXIS1`` = last axis).
+    * ``header_cards`` — an iterable of ``(keyword, value)`` tuples written in
+      order after the structural cards; ``HISTORY``/``COMMENT`` become
+      commentary cards, everything else uses the ``=`` value syntax.
+    * ``bunit`` — optional BUNIT card (placed before ``header_cards``).
+
+    Header and data sections are each padded to 2880-byte blocks.
     """
-    data = np.full(SHAPE, float(value), dtype=">f4")  # big-endian float32
-    header = "".join([
+    arr = np.ascontiguousarray(data)
+    if arr.dtype.kind == "i" and arr.dtype.itemsize == 2:
+        bitpix = 16
+        big = arr.astype(">i2")
+    elif arr.dtype.kind == "f" and arr.dtype.itemsize == 4:
+        bitpix = -32
+        big = arr.astype(">f4")
+    else:
+        raise ValueError(
+            f"unsupported FITS dtype {arr.dtype!r}; expected int16 or float32"
+        )
+    if arr.ndim not in (2, 3):
+        raise ValueError(f"unsupported FITS ndim {arr.ndim}; expected 2 or 3")
+
+    cards = [
         _fits_card("SIMPLE", True),
-        _fits_card("BITPIX", -32),
-        _fits_card("NAXIS", 2),
-        _fits_card("NAXIS1", SHAPE[1]),
-        _fits_card("NAXIS2", SHAPE[0]),
-        _fits_card("BUNIT", bunit),
-        _fits_card("END", None),
-    ]).ljust(2880, " ")
-    data_bytes = data.tobytes()
-    data_bytes = data_bytes + b"\x00" * (2880 - len(data_bytes))
-    return header.encode("ascii") + data_bytes
+        _fits_card("BITPIX", bitpix),
+        _fits_card("NAXIS", arr.ndim),
+    ]
+    # FITS axis 1 is the fastest-varying (last) NumPy axis.
+    for i in range(arr.ndim):
+        cards.append(_fits_card(f"NAXIS{i + 1}", int(arr.shape[arr.ndim - 1 - i])))
+    if bunit is not None:
+        cards.append(_fits_card("BUNIT", bunit))
+    for item in header_cards:
+        cards.append(_fits_card(item[0], item[1]))
+    cards.append(_fits_card("END", None))
+
+    header = _pad_block("".join(cards).encode("ascii"), b" ")
+    data_bytes = _pad_block(big.tobytes(), b"\x00")
+    return header + data_bytes
 
 
 def write_fits(path, value, bunit="ADU"):
-    """Write a synthetic float32 FITS file WITHOUT a FITS library in-process.
+    """Write a synthetic constant float32 FITS file WITHOUT a FITS library.
 
     The FITS bytes are produced directly from NumPy; the main Qt process never
     imports/constructs FITS library objects. Signature/behavior are unchanged so
     existing tests keep working.
     """
+    data = np.full(SHAPE, float(value), dtype=np.float32)
     with open(path, "wb") as fh:
-        fh.write(_fits_bytes(value, bunit))
+        fh.write(fits_bytes(data, bunit=bunit))
+    return str(path)
+
+
+def write_fits_array(path, data, header_cards=(), *, bunit=None):
+    """Write a synthetic FITS primary HDU from a NumPy array + header cards.
+
+    General helper for GUI tests that need int16/float32, 2-D/3-D or extra
+    header cards (IMAGETYP/EXPTIME/HISTORY/...) without a FITS library in the
+    main process.
+    """
+    with open(path, "wb") as fh:
+        fh.write(fits_bytes(data, header_cards=header_cards, bunit=bunit))
     return str(path)
 
 

@@ -11,10 +11,11 @@ import json
 
 import numpy as np
 import pytest
-from astropy.io import fits
 
 import zecalibrator.api.v1 as v1
 from zecalibrator.gui import service
+
+from .conftest import write_fits_array
 
 SHAPE = (4, 4)
 
@@ -188,13 +189,13 @@ pytest.importorskip("PySide6")
 
 
 def _write_dark_with_cards(path):
-    hdu = fits.PrimaryHDU(np.full(SHAPE, 10.0, dtype=np.float32))
-    hdu.header["BUNIT"] = "ADU"
-    hdu.header["EXPTIME"] = 300.0
-    hdu.header["CCD-TEMP"] = 20.0
-    hdu.header["GAIN"] = 100.0
-    hdu.writeto(path, overwrite=True)
-    return str(path)
+    data = np.full(SHAPE, 10.0, dtype=np.float32)
+    cards = [
+        ("EXPTIME", 300.0),
+        ("CCD-TEMP", 20.0),
+        ("GAIN", 100.0),
+    ]
+    return write_fits_array(path, data, header_cards=cards, bunit="ADU")
 
 
 def _snapshot(kind, **kw):
