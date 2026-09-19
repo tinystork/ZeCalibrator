@@ -36,6 +36,9 @@ PHYSICAL_UNITS: tuple[str, ...] = ("ADU", "dimensionless")
 BIAS_STATES: tuple[str, ...] = ("included", "removed", "not_applicable", "unknown")
 FLAT_FORMS: tuple[str, ...] = ("raw_response", "corrected_unnormalized", "normalized_response")
 PROCESSING_SOURCES: tuple[str, ...] = ("synthetic_fixture", "user_import", "observed")
+# Discriminated DQ state (P7-M3B, R1). ``no_source_dq`` is a structural state:
+# ``mask_identity=None`` and no source-mask payload; never a fabricated hex64.
+DQ_STATES: tuple[str, ...] = ("source_mask", "no_source_dq")
 _BAYER_PHASES: tuple[str, ...] = ("GRBG", "RGGB", "BGGR", "GBRG")
 _CFA_SCALAR_KEYS: tuple[str, ...] = ("g1", "r", "b", "g2")
 
@@ -438,7 +441,7 @@ class MasterDescriptor:
     content_sha256: str
     size_bytes: int
     hdu: object  # int | str
-    mask_identity: str
+    mask_identity: Optional[str]
     processing_provenance: ProcessingProvenance
     validity_evidence: ValidityEvidence
     flat_form: Optional[str] = None
@@ -446,9 +449,12 @@ class MasterDescriptor:
     normalization_scalars: Optional[NormalizationScalars] = None
     optical_train_id: Optional[str] = None
     filter: Optional[str] = None
+    dq_state: str = "source_mask"
     descriptor_id: Optional[str] = None
 
     def __post_init__(self) -> None:
+        if self.dq_state not in DQ_STATES:
+            raise ValueError(f"dq_state must be one of {DQ_STATES}, got {self.dq_state!r}")
         if self.master_type not in MASTER_TYPES:
             raise ValueError(f"master_type must be one of {MASTER_TYPES}, got {self.master_type!r}")
         if self.pixel_domain not in PIXEL_DOMAINS:
@@ -463,7 +469,13 @@ class MasterDescriptor:
         if isinstance(self.hdu, bool) or not isinstance(self.hdu, (int, str)) or (isinstance(self.hdu, int) and self.hdu < 0):
             raise ValueError(f"hdu must be a non-negative int or str, got {self.hdu!r}")
         _require_hex64(self.content_sha256, "content_sha256")
-        _require_hex64(self.mask_identity, "mask_identity")
+        # R1: mask_identity is nullable; None iff dq_state == "no_source_dq" (structural,
+        # never a fabricated hex64 that could be mistaken for a real content hash).
+        if self.dq_state == "no_source_dq":
+            if self.mask_identity is not None:
+                raise ValueError("no_source_dq master requires mask_identity=None")
+        else:
+            _require_hex64(self.mask_identity, "mask_identity")
 
         if self.master_type == "flat":
             if self.flat_form not in FLAT_FORMS:
@@ -486,6 +498,7 @@ class MasterDescriptor:
 
         object.__setattr__(self, "content_sha256", _freeze(self.content_sha256))
         object.__setattr__(self, "mask_identity", _freeze(self.mask_identity))
+        object.__setattr__(self, "dq_state", _freeze(self.dq_state))
         object.__setattr__(self, "flat_form", _freeze(self.flat_form))
         object.__setattr__(self, "normalization_algorithm", _freeze(self.normalization_algorithm))
         object.__setattr__(self, "optical_train_id", _freeze(self.optical_train_id))
@@ -531,6 +544,7 @@ class MasterDescriptor:
             "size_bytes": self.size_bytes,
             "hdu": self.hdu,
             "mask_identity": self.mask_identity,
+            "dq_state": self.dq_state,
             "processing_provenance": dict(self.processing_provenance.to_dict()),
             "validity_evidence": dict(self.validity_evidence.to_dict()),
         }
@@ -670,7 +684,7 @@ _DESCRIPTOR_TOP_KEYS = frozenset({
     "master_type", "bias_state", "pixel_domain", "physical_units", "flat_form",
     "normalization_algorithm", "normalization_scalars", "geometry", "detector",
     "acquisition", "optical_train_id", "filter", "content_sha256", "size_bytes",
-    "hdu", "mask_identity", "processing_provenance", "validity_evidence", "descriptor_id",
+    "hdu", "mask_identity", "dq_state", "processing_provenance", "validity_evidence", "descriptor_id",
 })
 
 
@@ -701,6 +715,7 @@ def master_descriptor_from_dict(d: Mapping[str, object]) -> MasterDescriptor:
         size_bytes=d["size_bytes"],
         hdu=d["hdu"],
         mask_identity=d["mask_identity"],
+        dq_state=d.get("dq_state", "source_mask"),
         processing_provenance=_processing_from_dict(d["processing_provenance"]),
         validity_evidence=_validity_from_dict(d["validity_evidence"]),
     )
@@ -752,6 +767,7 @@ __all__ = [
     "DescriptorSchemaError",
     "DescriptorSnapshot",
     "DetectorIdentity",
+    "DQ_STATES",
     "FLAT_FORMS",
     "LightConstraints",
     "LightEvidence",

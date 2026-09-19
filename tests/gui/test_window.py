@@ -371,7 +371,12 @@ def test_standard_exposes_human_workflow(qapp, paths):
     assert w.add_folder_btn.text() == "Add folder…"
     assert w.remove_btn.text() == "Remove selected"
     assert w.clear_btn.text() == "Clear"
-    assert w.choose_library_btn.text() == "Choose library…"
+    # F2: the explicit SQLite chooser is NOT in Standard; Standard exposes the
+    # managed Calibration masters flow only.
+    assert not hasattr(w, "choose_library_btn")
+    assert w.scan_masters_btn.text() == "Detect masters…"
+    assert w.confirm_masters_btn.text() == "Confirm detected facts"
+    assert w.build_managed_btn.text() == "Build managed library"
     assert w.preflight_btn.text() == "Verify calibration"
     assert w.export_btn.text() == "Calibrate / Export…"
     assert w.lights_count_label.text() == "0 images selected"

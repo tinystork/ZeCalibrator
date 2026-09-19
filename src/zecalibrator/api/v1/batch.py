@@ -507,6 +507,7 @@ def _descriptor_from_spec(
         normalization_scalars=spec.normalization_scalars,
         optical_train_id=decl.optical_train_id,
         filter=decl.filter,
+        dq_state=spec.dq_state,
     )
 
 
@@ -516,8 +517,14 @@ def _build_candidate(path, spec, source, mask_path):
 
     loc = FitsFileLocator(path=path, hdu=spec.hdu)
     ident = source.image_identity(loc)
-    mask_loc = MaskPayloadLocator(path=mask_path)
-    mask_identity = source.mask_identity(mask_loc)
+    if mask_path is not None:
+        mask_loc = MaskPayloadLocator(path=mask_path)
+        mask_identity = source.mask_identity(mask_loc)
+    else:
+        # R1 structural no_source_dq: no mask locator and no mask identity; no
+        # synthetic mask file is ever written.
+        mask_loc = None
+        mask_identity = None
     shape = _fits_shape(source, path, spec.hdu)
     desc = _descriptor_from_spec(
         spec, shape=shape, content_sha256=ident.content_sha256,
@@ -570,16 +577,20 @@ def index_library(
     spec_by_path = {}
     mask_by_path = {}
     for imp in import_list:
-        if imp.mask_path is None:
-            raise InvalidRequestError(f"MasterImportSpec {imp.path!r} requires a mask_path")
         p = imp.path
         if not os.path.isabs(p):
             p = os.path.join(root, p)
         p = os.path.abspath(p)
-        m = imp.mask_path
-        if not os.path.isabs(m):
-            m = os.path.join(root, m)
-        mask_by_path[p] = os.path.abspath(m)
+        if imp.dq_state == "no_source_dq":
+            # R1: no source DQ mask; mask_locator is None and no synthetic file.
+            mask_by_path[p] = None
+        else:
+            if imp.mask_path is None:
+                raise InvalidRequestError(f"MasterImportSpec {imp.path!r} requires a mask_path")
+            m = imp.mask_path
+            if not os.path.isabs(m):
+                m = os.path.join(root, m)
+            mask_by_path[p] = os.path.abspath(m)
         spec_by_path[p] = imp
     paths = sorted(spec_by_path.keys())
 

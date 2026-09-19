@@ -258,7 +258,7 @@ class MasterBinding:
     content_sha256: str
     size_bytes: int
     hdu: object
-    mask_identity: str
+    mask_identity: Optional[str]
     locators: tuple[FitsFileLocator, ...] = ()
     mask_locator: Optional[MaskPayloadLocator] = None
 

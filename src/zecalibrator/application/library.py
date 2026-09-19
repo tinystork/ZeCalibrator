@@ -349,7 +349,10 @@ def validate_binding(binding, source) -> ValidationResult:
                 reasons.append(f"size mismatch at {loc.path}")
 
     if binding.mask_locator is None:
-        reasons.append("no mask locator to verify mask identity")
+        # R1 structural ``no_source_dq``: mask_identity is None with no mask
+        # locator and is a valid (not-to-verify) state, never a missing mask.
+        if binding.mask_identity is not None:
+            reasons.append("no mask locator to verify mask identity")
     else:
         try:
             mask_id = source.mask_identity(binding.mask_locator)

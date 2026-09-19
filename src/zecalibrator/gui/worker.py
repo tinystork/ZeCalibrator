@@ -317,6 +317,14 @@ class _OperationWorker(QtCore.QObject):
             return self._load_settings(snap)
         if snap.kind == "save_settings":
             return self._save_settings(snap)
+        if snap.kind == "scan_masters":
+            return self._scan_masters(snap)
+        if snap.kind == "load_ledger":
+            return self._load_ledger(snap)
+        if snap.kind == "confirm_evidence":
+            return self._confirm_evidence(snap)
+        if snap.kind == "build_managed_library":
+            return self._build_managed_library(snap)
         raise RuntimeError(f"unknown operation kind {snap.kind!r}")
 
     def _open_library(self, snap, token, progress) -> dict:
@@ -558,6 +566,149 @@ class _OperationWorker(QtCore.QObject):
             settings_mod.GuiSettings.from_dict(snap.settings_payload),
         )
         return {"kind": "save_settings", "status": "COMPLETED", "state": current.state}
+
+    # -- managed master ingestion (P7-M3B) ----------------------------------
+    def _scan_masters(self, snap) -> dict:
+        masters = []
+        for path in snap.master_paths:
+            try:
+                candidates, conflicts = service.read_header_candidates(path, hdu=0)
+                masters.append({
+                    "path": path,
+                    "master_type": snap.master_type,
+                    "status": "COMPLETED",
+                    "candidates": {f: fact.to_dict() for f, fact in candidates.items()},
+                    "conflicts": {f: [x.to_dict() for x in facts] for f, facts in conflicts.items()},
+                })
+            except Exception as exc:  # noqa: BLE001 - per-master scan failure
+                masters.append({
+                    "path": path,
+                    "master_type": snap.master_type,
+                    "status": "FAILED",
+                    "reason": str(exc),
+                    "candidates": {},
+                    "conflicts": {},
+                })
+        return {
+            "kind": "scan_masters",
+            "status": "COMPLETED",
+            "masters": masters,
+            "count": len(masters),
+        }
+
+    def _load_ledger(self, snap) -> dict:
+        result = v1.load_managed_ledger(v1.managed_ledger_path(snap.ledger_dir))
+        return {
+            "kind": "load_ledger",
+            "status": "COMPLETED",
+            "state": result.state,
+            "records": [r.to_dict() for r in result.records],
+            "count": len(result.records),
+        }
+
+    def _confirm_evidence(self, snap) -> dict:
+        payload = snap.confirm_payload or {}
+        path = payload.get("path")
+        role = payload.get("role")
+        if not path or role not in ("bias", "dark", "flat", "flat_dark"):
+            raise v1.InvalidRequestError("confirm_evidence requires a path and a valid role")
+        hdu = payload.get("hdu", 0)
+        content_sha256, size_bytes = v1.content_identity(path, hdu=hdu)
+
+        evidence: dict = {}
+        for field, e in (payload.get("evidence") or {}).items():
+            evidence[field] = v1.EvidenceFact(
+                field=field,
+                value=e["value"],
+                origin_type=e.get("origin_type", "user"),
+                origin_field=e.get("origin_field"),
+                confirmed_by="user",
+                version="1",
+            )
+
+        declaration = service.build_declaration(
+            payload.get("declaration_source", "user"),
+            payload.get("declaration_identity", "managed-import"),
+            payload.get("declaration_version", "1"),
+            evidence,
+            payload.get("extra"),
+        )
+        record = service.make_managed_record(
+            role=role,
+            content_sha256=content_sha256,
+            size_bytes=size_bytes,
+            declaration=declaration,
+            hdu=hdu,
+            bias_state=payload.get("bias_state"),
+            flat_form=payload.get("flat_form"),
+            evidence=evidence,
+            dq_state=payload.get("dq_state", "no_source_dq"),
+            mask_path=payload.get("mask_path"),
+            last_seen_path=path,
+        )
+
+        ledger_path = v1.managed_ledger_path(snap.ledger_dir)
+        loaded = v1.load_managed_ledger(ledger_path)
+        if loaded.state in (v1.STATE_MALFORMED, v1.STATE_UNSUPPORTED):
+            return {
+                "kind": "confirm_evidence",
+                "status": "PRESERVED",
+                "state": loaded.state,
+                "details": "existing managed ledger preserved (not overwritten)",
+            }
+        # Content identity + role is authoritative over path (same bytes+role =
+        # same record; same path+new bytes = new record).
+        records = [
+            r for r in loaded.records
+            if not (r.content_sha256 == content_sha256 and r.role == role)
+        ]
+        records.append(record)
+        v1.save_managed_ledger(ledger_path, records)
+        status, missing = service.master_evidence_status(role, declaration)
+        return {
+            "kind": "confirm_evidence",
+            "status": "COMPLETED",
+            "record": record.to_dict(),
+            "count": len(records),
+            "evidence_status": status,
+            "missing": list(missing),
+        }
+
+    def _build_managed_library(self, snap) -> dict:
+        result = v1.load_managed_ledger(v1.managed_ledger_path(snap.ledger_dir))
+        if result.state in (v1.STATE_MALFORMED, v1.STATE_UNSUPPORTED):
+            return {
+                "kind": "build_managed_library",
+                "status": "PRESERVED",
+                "state": result.state,
+                "details": "existing managed ledger preserved (not overwritten)",
+            }
+        ready = []
+        attention = []
+        for r in result.records:
+            status, missing = service.master_evidence_status(r.role, r.declaration)
+            if status == "ready":
+                ready.append(r)
+            else:
+                attention.append({
+                    "role": r.role,
+                    "path": r.last_seen_path,
+                    "missing": list(missing),
+                })
+        built = v1.build_managed_library(snap.managed_spec, ready)
+        return {
+            "kind": "build_managed_library",
+            "status": built.status,
+            "revision": built.revision,
+            "candidate_count": built.candidate_count,
+            "diagnostics": [
+                d.to_dict() if hasattr(d, "to_dict") else str(d)
+                for d in built.diagnostics
+            ],
+            "reason_code": built.reason_code,
+            "details": built.details,
+            "needs_attention": attention,
+        }
 
 
 class WorkerController(QtCore.QObject):

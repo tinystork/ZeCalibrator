@@ -396,7 +396,7 @@ def _load_masters(plan: CalibrationPlan, *, token, obs):
             raise ValueError(f"binding role {role!r}: descriptor master_type {desc.master_type!r} != expected {expected!r}")
         if not binding.locators:
             raise InvalidRequestError(f"binding {role} has no image locator")
-        if binding.mask_locator is None:
+        if binding.mask_locator is None and desc.dq_state != "no_source_dq":
             raise InvalidRequestError(f"binding {role} has no mask locator")
         for loc in binding.locators:
             if loc.hdu != binding.hdu or loc.hdu != desc.hdu:
@@ -411,10 +411,16 @@ def _load_masters(plan: CalibrationPlan, *, token, obs):
         if image_sha != binding.content_sha256 or len(image_data) != binding.size_bytes:
             raise ValueError(f"binding {role}: content/size mismatch")
 
-        mask_data = _io.read_bytes(binding.mask_locator.path, cancel=token)
-        external_mask = _io.load_mask_payload(
-            mask_data, desc.geometry.shape, expected_sha=binding.mask_identity
-        )
+        if binding.mask_locator is None:
+            # R1 structural ``no_source_dq``: no source DQ mask payload; the
+            # neutral all-valid mask is an execution-only detail (never
+            # persisted/represented as source DQ; provenance stays no_source_dq).
+            external_mask = np.zeros(desc.geometry.shape, dtype=np.uint16)
+        else:
+            mask_data = _io.read_bytes(binding.mask_locator.path, cancel=token)
+            external_mask = _io.load_mask_payload(
+                mask_data, desc.geometry.shape, expected_sha=binding.mask_identity
+            )
 
         if desc.master_type == "flat" and desc.flat_form == "normalized_response":
             data32, dq = _io.read_flat_array_bytes(image_data, locator.hdu, cancel=token)

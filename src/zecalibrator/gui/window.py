@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import os
 import uuid
 from pathlib import Path
 
@@ -48,6 +49,10 @@ _ACTIVE_LABELS = {
     "export": "Calibrating / exporting…",
     "load_declaration": "Loading input details…",
     "load_roi": "Loading input details…",
+    "scan_masters": "Detecting calibration masters…",
+    "load_ledger": "Loading managed masters…",
+    "confirm_evidence": "Confirming master evidence…",
+    "build_managed_library": "Building managed calibration library…",
 }
 
 
@@ -102,6 +107,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self._active_kind = None
         self._cancel_requested = False
 
+        # Managed master ingestion state (P7-M3B).
+        self._managed_scan: list[dict] = []
+        self._managed_pending: list[dict] = []
+        self._active_source: str | None = None  # "managed" | "explicit" | None
+        self._scan_targets: list = []
+        self._scan_index = 0
+        self._scan_results: list[dict] = []
+        self._confirm_index = 0
+
         self._build_ui()
         self._wire_controller()
         self._apply_icon()
@@ -143,7 +157,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._config_widgets = [
             self.add_btn, self.add_folder_btn, self.remove_btn, self.clear_btn,
-            self.choose_library_btn,
             self.apply_hdu_btn, self.hdu_edit,
             self.load_decl_btn, self.load_roi_btn,
             self.library_index_edit, self.open_library_btn,
@@ -151,6 +164,10 @@ class MainWindow(QtWidgets.QMainWindow):
             self.root_browse_btn, self.index_btn,
             self.additive_combo, self.flat_combo,
             self.standard_additive_combo, self.standard_flat_combo,
+            self.darks_folder_edit, self.darks_browse_btn,
+            self.bias_folder_edit, self.bias_browse_btn,
+            self.flats_folder_edit, self.flats_browse_btn,
+            self.scan_masters_btn, self.confirm_masters_btn, self.build_managed_btn,
         ]
         self._launch_widgets = [self.preflight_btn, self.calibrate_btn, self.export_btn]
         self._update_scope_label()
@@ -178,13 +195,46 @@ class MainWindow(QtWidgets.QMainWindow):
         inputs_layout.addWidget(self.lights_count_label)
         layout.addWidget(inputs_box)
 
-        library_box = QtWidgets.QGroupBox("Calibration library")
-        library_layout = QtWidgets.QVBoxLayout(library_box)
-        self.choose_library_btn = QtWidgets.QPushButton("Choose library…")
-        library_layout.addWidget(self.choose_library_btn)
         self.library_human_status = QtWidgets.QLabel("Library unavailable")
-        library_layout.addWidget(self.library_human_status)
-        layout.addWidget(library_box)
+        layout.addWidget(self.library_human_status)
+
+        masters_box = QtWidgets.QGroupBox("Calibration masters (managed)")
+        masters_layout = QtWidgets.QVBoxLayout(masters_box)
+        dark_row = QtWidgets.QHBoxLayout()
+        dark_row.addWidget(QtWidgets.QLabel("Darks folder:"))
+        self.darks_folder_edit = QtWidgets.QLineEdit()
+        dark_row.addWidget(self.darks_folder_edit, 1)
+        self.darks_browse_btn = QtWidgets.QPushButton("Browse…")
+        dark_row.addWidget(self.darks_browse_btn)
+        masters_layout.addLayout(dark_row)
+        bias_row = QtWidgets.QHBoxLayout()
+        bias_row.addWidget(QtWidgets.QLabel("Bias folder:"))
+        self.bias_folder_edit = QtWidgets.QLineEdit()
+        bias_row.addWidget(self.bias_folder_edit, 1)
+        self.bias_browse_btn = QtWidgets.QPushButton("Browse…")
+        bias_row.addWidget(self.bias_browse_btn)
+        masters_layout.addLayout(bias_row)
+        flats_row = QtWidgets.QHBoxLayout()
+        flats_row.addWidget(QtWidgets.QLabel("Flats folder/file:"))
+        self.flats_folder_edit = QtWidgets.QLineEdit()
+        flats_row.addWidget(self.flats_folder_edit, 1)
+        self.flats_browse_btn = QtWidgets.QPushButton("Browse…")
+        flats_row.addWidget(self.flats_browse_btn)
+        masters_layout.addLayout(flats_row)
+        masters_btn_row = QtWidgets.QHBoxLayout()
+        self.scan_masters_btn = QtWidgets.QPushButton("Detect masters…")
+        self.confirm_masters_btn = QtWidgets.QPushButton("Confirm detected facts")
+        self.build_managed_btn = QtWidgets.QPushButton("Build managed library")
+        for b in (self.scan_masters_btn, self.confirm_masters_btn, self.build_managed_btn):
+            masters_btn_row.addWidget(b)
+        masters_btn_row.addStretch(1)
+        masters_layout.addLayout(masters_btn_row)
+        self.managed_status_label = QtWidgets.QLabel("No managed masters detected.")
+        masters_layout.addWidget(self.managed_status_label)
+        layout.addWidget(masters_box)
+
+        self.active_source_label = QtWidgets.QLabel("Active calibration source: none")
+        layout.addWidget(self.active_source_label)
 
         modes_box = QtWidgets.QGroupBox("Calibration")
         modes_layout = QtWidgets.QGridLayout(modes_box)
@@ -403,7 +453,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.add_folder_btn.clicked.connect(self._on_add_folder)
         self.remove_btn.clicked.connect(self._on_remove_lights)
         self.clear_btn.clicked.connect(self._on_clear_lights)
-        self.choose_library_btn.clicked.connect(self._on_choose_library)
         self.apply_hdu_btn.clicked.connect(self._on_apply_hdu)
         self.load_decl_btn.clicked.connect(self._on_load_declaration)
         self.load_roi_btn.clicked.connect(self._on_load_roi)
@@ -416,6 +465,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.export_btn.clicked.connect(self._on_export)
         self.cancel_btn.clicked.connect(self._on_cancel)
         self.audit_link_btn.clicked.connect(self._on_open_manifest)
+        self.darks_browse_btn.clicked.connect(self._on_browse_darks)
+        self.bias_browse_btn.clicked.connect(self._on_browse_bias)
+        self.flats_browse_btn.clicked.connect(self._on_browse_flats)
+        self.scan_masters_btn.clicked.connect(self._on_scan_masters)
+        self.confirm_masters_btn.clicked.connect(self._on_confirm_masters)
+        self.build_managed_btn.clicked.connect(self._on_build_managed)
 
         self.additive_combo.currentIndexChanged.connect(self._on_mode_changed)
         self.flat_combo.currentIndexChanged.connect(self._on_mode_changed)
@@ -675,6 +730,30 @@ class MainWindow(QtWidgets.QMainWindow):
         base = self._LIBRARY_HUMAN.get(state, "Library unavailable")
         self.library_human_status.setText(f"{base}{' — ' + detail if detail else ''}")
 
+    # -- exactly-one-active calibration source (managed vs explicit) ----------
+    def _set_active_source(self, source: str | None) -> None:
+        """Set exactly one active calibration source and clear the other.
+
+        Selecting the managed source clears the explicit library spec (and vice
+        versa) so the two never mix silently; the active source is visible in the
+        Standard tab.
+        """
+        if source == "managed":
+            self._active_source = "managed"
+            self._library_spec = None
+            self.library_index_edit.clear()
+            self.library_root_edit.clear()
+            self.active_source_label.setText("Active calibration source: managed masters")
+        elif source == "explicit":
+            self._active_source = "explicit"
+            self._managed_scan.clear()
+            self._managed_pending.clear()
+            self.managed_status_label.setText("No managed masters detected.")
+            self.active_source_label.setText("Active calibration source: explicit library")
+        else:
+            self._active_source = None
+            self.active_source_label.setText("Active calibration source: none")
+
     # -- Standard summary (human outcomes) ----------------------------------
     def _reset_standard_summary(self) -> None:
         if hasattr(self, "standard_summary_label"):
@@ -859,30 +938,6 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         self._start_operation(snapshot)
 
-    def _on_choose_library(self) -> None:
-        """Standard-path library selection: pick an existing index, open it.
-
-        Shares the single ``_library_spec``/generation/worker path with the
-        Advanced "Open…" action (no duplicate library model).
-        """
-        start_dir = self._settings.last_library_dir or ""
-        index_path, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, "Choose calibration library index", start_dir,
-            "SQLite index (*.sqlite);;All files (*)",
-        )
-        if not index_path:
-            return
-        root = str(Path(index_path).parent)
-        self._library_spec = v1.LibrarySpec(root=root, index_path=index_path)
-        self.library_index_edit.setText(index_path)
-        self.library_root_edit.setText(root)
-        self._bump_generation()
-        snapshot = service.OperationSnapshot(
-            op_id=service.new_operation_id(), kind="open_library",
-            library_spec=self._library_spec, request=None, policy=None, lights=(),
-        )
-        self._start_operation(snapshot)
-
     def _on_open_library(self) -> None:
         index_path = self.library_index_edit.text().strip()
         if not index_path:
@@ -895,6 +950,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.library_index_edit.setText(index_path)
         root = str(Path(index_path).parent)
         self._library_spec = v1.LibrarySpec(root=root, index_path=index_path)
+        self._set_active_source("explicit")
         self._bump_generation()
         snapshot = service.OperationSnapshot(
             op_id=service.new_operation_id(), kind="open_library",
@@ -927,11 +983,219 @@ class MainWindow(QtWidgets.QMainWindow):
         index_path = self.library_index_edit.text().strip() or self._default_index_path()
         self._library_spec = v1.LibrarySpec(root=root, index_path=index_path)
         self.library_index_edit.setText(index_path)
+        self._set_active_source("explicit")
         self._bump_generation()
         snapshot = service.OperationSnapshot(
             op_id=service.new_operation_id(), kind="index_library",
             library_spec=self._library_spec, request=None, policy=None, lights=(),
             imports_path=imports_path,
+        )
+        self._start_operation(snapshot)
+
+    # -- managed master ingestion (P7-M3B) -----------------------------------
+    def _on_browse_darks(self) -> None:
+        folder = QtWidgets.QFileDialog.getExistingDirectory(self, "Select darks folder")
+        if folder:
+            self.darks_folder_edit.setText(folder)
+
+    def _on_browse_bias(self) -> None:
+        folder = QtWidgets.QFileDialog.getExistingDirectory(self, "Select bias folder")
+        if folder:
+            self.bias_folder_edit.setText(folder)
+
+    def _on_browse_flats(self) -> None:
+        folder = QtWidgets.QFileDialog.getExistingDirectory(self, "Select flats folder")
+        if folder:
+            self.flats_folder_edit.setText(folder)
+
+    def _managed_master_targets(self) -> list:
+        """Collect the selected master files (darks folder, bias folder, flats
+        folder OR single flat file) as ``(path, master_type)`` targets."""
+        targets: list = []
+
+        def add_folder(edit, role):
+            folder = edit.text().strip()
+            if not folder:
+                return
+            try:
+                paths, _ = service.scan_folder_inputs(folder)
+            except ValueError:
+                return
+            for p in paths:
+                targets.append((p, role))
+
+        add_folder(self.darks_folder_edit, "dark")
+        add_folder(self.bias_folder_edit, "bias")
+        flats = self.flats_folder_edit.text().strip()
+        if flats:
+            if os.path.isdir(flats):
+                add_folder(self.flats_folder_edit, "flat")
+            elif service.is_supported_input_file(flats):
+                targets.append((flats, "flat"))
+        return targets
+
+    def _on_scan_masters(self) -> None:
+        targets = self._managed_master_targets()
+        if not targets:
+            QtWidgets.QMessageBox.information(
+                self, "No masters",
+                "Select a darks folder, bias folder, or flats folder/file first.",
+            )
+            return
+        self._managed_scan.clear()
+        self._managed_pending.clear()
+        snapshot = service.OperationSnapshot(
+            op_id=service.new_operation_id(), kind="scan_masters",
+            library_spec=None, request=None, policy=None, lights=(),
+            master_paths=tuple(p for p, _ in targets),
+            master_type=None,  # per-file type resolved from the target list
+        )
+        # Scan each role group independently so master_type is known per file.
+        self._scan_targets = targets
+        self._scan_index = 0
+        self._scan_results: list[dict] = []
+        self._start_scan_next()
+
+    def _start_scan_next(self) -> None:
+        if self._scan_index >= len(self._scan_targets):
+            self._managed_scan = list(self._scan_results)
+            self._present_managed_scan()
+            return
+        path, role = self._scan_targets[self._scan_index]
+        self._scan_index += 1
+        snapshot = service.OperationSnapshot(
+            op_id=service.new_operation_id(), kind="scan_masters",
+            library_spec=None, request=None, policy=None, lights=(),
+            master_paths=(path,), master_type=role,
+        )
+        self._start_operation(snapshot)
+
+    def _present_managed_scan(self) -> None:
+        detected = sum(1 for m in self._managed_scan if m.get("candidates"))
+        conflicted = sum(1 for m in self._managed_scan if m.get("conflicts"))
+        self.managed_status_label.setText(
+            f"Detected {len(self._managed_scan)} master(s): {detected} with facts, {conflicted} with conflicts."
+        )
+        lines = []
+        for m in self._managed_scan:
+            lines.append(f"[{m.get('master_type')}] {m.get('path')}")
+            for field, fact in m.get("candidates", {}).items():
+                lines.append("    " + presentation.format_evidence_fact(fact))
+            for field, facts in m.get("conflicts", {}).items():
+                lines.append("    " + presentation.format_conflict(field, facts))
+        self.details_view.setPlainText("\n".join(lines) if lines else "(no candidates detected)")
+
+    def _collect_user_facts(self, master_type: str, candidates: dict) -> dict:
+        """Prompt for the required facts not already header-detected.
+
+        Returns a dict of ``field -> parsed value`` for the facts the user
+        supplied (empty entries are skipped, so absent stays absent). Flat
+        quality evidence is never offered (R4); it is not in the required-field
+        minimum.
+        """
+        missing = service.missing_fields_for_master(master_type, candidates)
+        if not missing:
+            return {}
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle(f"Supply required facts — {master_type}")
+        form = QtWidgets.QFormLayout(dialog)
+        edits: dict = {}
+        for field in missing:
+            edit = QtWidgets.QLineEdit()
+            edits[field] = edit
+            form.addRow(field, edit)
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        form.addRow(buttons)
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return {}
+        extra: dict = {}
+        for field, edit in edits.items():
+            text = edit.text().strip()
+            if not text:
+                continue
+            try:
+                extra[field] = service.parse_user_fact(field, text)
+            except ValueError as exc:
+                self._log(f"[managed] invalid value for {field}: {exc}")
+        return extra
+
+    def _on_confirm_masters(self) -> None:
+        if not self._managed_scan:
+            QtWidgets.QMessageBox.information(self, "Nothing to confirm", "Detect masters first.")
+            return
+        self._managed_pending.clear()
+        for m in self._managed_scan:
+            if m.get("status") != "COMPLETED":
+                continue
+            if m.get("conflicts"):
+                self._log(f"conflict not auto-resolved: {m.get('path')}")
+                continue
+            candidates = m.get("candidates", {})
+            if not candidates:
+                self._log(f"no detected facts for: {m.get('path')}")
+                continue
+            master_type = m.get("master_type")
+            extra = self._collect_user_facts(master_type, candidates)
+            evidence = {
+                field: {
+                    "value": fact.get("value"),
+                    "origin_type": fact.get("origin_type", "fits_header"),
+                    "origin_field": fact.get("origin_field"),
+                }
+                for field, fact in candidates.items()
+            }
+            self._managed_pending.append({
+                "role": master_type,
+                "path": m.get("path"),
+                "hdu": 0,
+                "evidence": evidence,
+                "extra": extra,
+                "dq_state": "no_source_dq",
+                "mask_path": None,
+                "declaration_source": "user",
+                "declaration_identity": "managed-session",
+                "declaration_version": "1",
+            })
+        if not self._managed_pending:
+            QtWidgets.QMessageBox.information(
+                self, "Nothing to confirm",
+                "No unambiguous detected facts to confirm (conflicts are not auto-resolved).",
+            )
+            return
+        self._confirm_index = 0
+        self._start_confirm_next()
+
+    def _start_confirm_next(self) -> None:
+        if self._confirm_index >= len(self._managed_pending):
+            self.managed_status_label.setText(
+                f"Confirmed {len(self._managed_pending)} master(s)."
+            )
+            return
+        payload = self._managed_pending[self._confirm_index]
+        self._confirm_index += 1
+        snapshot = service.OperationSnapshot(
+            op_id=service.new_operation_id(), kind="confirm_evidence",
+            library_spec=None, request=None, policy=None, lights=(),
+            ledger_dir=str(self._storage.user_data_path),
+            confirm_payload=payload,
+        )
+        self._start_operation(snapshot)
+
+    def _on_build_managed(self) -> None:
+        index_path = str(self._storage.user_cache_path / "zecalibrator.managed.sqlite")
+        spec = v1.LibrarySpec(root=str(self._storage.user_cache_path), index_path=index_path)
+        self._set_active_source("managed")
+        self._bump_generation()
+        snapshot = service.OperationSnapshot(
+            op_id=service.new_operation_id(), kind="build_managed_library",
+            library_spec=None, request=None, policy=None, lights=(),
+            ledger_dir=str(self._storage.user_data_path),
+            managed_spec=spec,
         )
         self._start_operation(snapshot)
 
@@ -1085,6 +1349,12 @@ class MainWindow(QtWidgets.QMainWindow):
             self._handle_settings_loaded(summary)
         elif kind == "save_settings":
             self._handle_settings_saved(summary)
+        elif kind == "scan_masters":
+            self._handle_scan_masters(summary)
+        elif kind == "confirm_evidence":
+            self._handle_confirm_evidence(summary)
+        elif kind == "build_managed_library":
+            self._handle_build_managed(summary)
         self.progress_bar.setRange(0, 1)
         if status in ("COMPLETED", "OPENED"):
             self.progress_bar.setValue(1)
@@ -1214,6 +1484,57 @@ class MainWindow(QtWidgets.QMainWindow):
         self._bump_generation()
         self.evidence_label.setText(f"ROI evidence loaded from {summary.get('display')} (selected lights).")
         self.status_label.setText("ROI evidence loaded.")
+
+    def _handle_scan_masters(self, summary: dict) -> None:
+        for m in summary.get("masters", []):
+            self._scan_results.append(m)
+        if summary.get("status") == "FAILED":
+            self.status_label.setText("Master detection failed.")
+            return
+        self._start_scan_next()
+
+    def _handle_confirm_evidence(self, summary: dict) -> None:
+        if summary.get("status") == "PRESERVED":
+            self._log(f"[managed] ledger preserved ({summary.get('state')}); not overwritten.")
+            self.status_label.setText("Managed ledger preserved (not overwritten).")
+            return
+        ev_status = summary.get("evidence_status")
+        missing = summary.get("missing", [])
+        if ev_status == "needs_attention":
+            self._log(
+                f"[managed] confirmed with insufficient evidence — missing/insufficient: "
+                f"{', '.join(missing) or '(none)'}"
+            )
+            self.status_label.setText("Master confirmed (needs attention — insufficient evidence).")
+        else:
+            self.status_label.setText("Master evidence confirmed.")
+        self._start_confirm_next()
+
+    def _handle_build_managed(self, summary: dict) -> None:
+        if summary.get("status") == "PRESERVED":
+            self.status_label.setText("Managed ledger preserved (not overwritten).")
+            self._log(f"[managed] ledger preserved ({summary.get('state')}).")
+            return
+        attention = summary.get("needs_attention", [])
+        if summary.get("status") in ("REUSED", "COMPLETED"):
+            self.managed_status_label.setText(
+                f"Managed library {summary.get('status')}: revision={summary.get('revision')!r} "
+                f"candidates={summary.get('candidate_count')}"
+            )
+            if attention:
+                self._set_library_human_status("attention", f"{len(attention)} master(s) insufficient evidence")
+                for a in attention:
+                    self._log(
+                        f"[managed] needs attention — {a.get('role')} {a.get('path')}: "
+                        f"insufficient evidence ({', '.join(a.get('missing', ())) or '(none)'})"
+                    )
+            else:
+                self._set_library_human_status("ready", "managed")
+        else:
+            self.managed_status_label.setText(
+                f"Managed library {summary.get('status')}: {summary.get('reason_code')} {summary.get('details')}"
+            )
+            self._set_library_human_status("unavailable", summary.get('reason_code') or "managed build failed")
 
     def _on_operation_failed(self, op_id: str, reason_code: str, details: str) -> None:
         if not self._is_current(op_id):

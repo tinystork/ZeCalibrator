@@ -316,12 +316,52 @@ def reason_codes_text(reason_codes: Sequence[str]) -> str:
     return ", ".join(reason_codes) if reason_codes else "(none)"
 
 
+# ---------------------------------------------------------------------------
+# Managed master ingestion presentation (P7-M3B)
+# ---------------------------------------------------------------------------
+_ORIGIN_TYPE_LABELS = {
+    "fits_header": "FITS header",
+    "user": "user",
+    "sidecar": "sidecar",
+    "native": "native",
+}
+
+_DQ_STATE_LABELS = {
+    "source_mask": "Source DQ mask",
+    "no_source_dq": "No source DQ",
+}
+
+
+def dq_state_label(dq_state) -> str:
+    """Human label for a DQ state (presentation only)."""
+    return _DQ_STATE_LABELS.get(dq_state, dq_state)
+
+
+def format_evidence_fact(fact: Mapping) -> str:
+    """Render one detected/confirmed evidence fact for the confirmation UI."""
+    field = fact.get("field", "?")
+    value = _fmt_value(fact.get("value"))
+    origin = fact.get("origin_field")
+    otype = _ORIGIN_TYPE_LABELS.get(fact.get("origin_type"), fact.get("origin_type", "?"))
+    loc = f" @ {origin}" if origin else ""
+    return f"{field}: {value} — source {otype}{loc}"
+
+
+def format_conflict(field: str, facts: Sequence[Mapping]) -> str:
+    """Render a detected evidence conflict (never auto-resolved)."""
+    vals = ", ".join(_fmt_value(f.get("value")) for f in facts)
+    return f"{field}: conflicting detected values ({vals}) — review, not auto-resolved"
+
+
 __all__ = [
     "additive_mode_label",
     "additive_modes",
+    "dq_state_label",
     "flat_mode_label",
     "flat_modes",
     "format_coherent_sets",
+    "format_conflict",
+    "format_evidence_fact",
     "format_metadata",
     "format_outcome_summary",
     "format_rejection_table",
