@@ -396,6 +396,9 @@ Activation contract/report baseline records the actual post-closure full SHA.
 
 - Native packaging G8 (G7 now separately activated; see current mission).
   G3/G4/G5/G6 are ACCEPTED.
+- GUI `Settings > Language` selector — future separate micro-phase only (the
+  repository has no ``QTranslator`` / ``.qm``/``.ts`` translation resources or
+  ``tr()`` routing; no i18n framework is built).
 - ZSSS signed preparation + adapter / ZeAlfie admission G9.
 - GPU G10; raw reducer/master generation G11; ZeMosaic adapter G12.
 - Shared ZeStackCore (unscheduled); destructive in-place calibration (not v1);

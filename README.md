@@ -49,13 +49,16 @@ scriptable JSON output, exit codes 0/2/3/130) as a thin facade over
 
 The GUI is a bounded public-API-only PySide6 client (Phase 7, **G7 NOT YET
 ACCEPTED**). With the optional `[gui]` extra installed, `zecalibrator-gui`
-launches a desktop client for selecting raw FITS lights + evidence/HDU, opening
-or indexing a calibration library, running an off-thread inspection/match
-preflight (MATCHED / NO_MATCH / AMBIGUOUS with structured rejection reasons),
-choosing explicit modes, calibrating in memory or exporting standalone FITS, and
-showing per-file results with progress/cancel and safe close. Without the `[gui]`
-extra, `zecalibrator-gui` emits a precise missing-extra diagnostic and exits
-non-zero while the engine and CLI remain usable.
+launches a desktop client organised as top-level tabs `Standard | Advanced |
+Settings` (Standard default): Standard shows the nominal workflow (add images,
+choose a calibration library, pick dark/flat in plain language, verify
+calibration, calibrate/export); Advanced keeps every technical control and the
+structured MATCHED / NO_MATCH / AMBIGUOUS outcomes with rejection reasons;
+Settings holds an Appearance/Theme preference (System/Light/Dark, System
+default) persisted through the existing settings file. Standard and Advanced are
+two views of the same scientific state. Without the `[gui]` extra,
+`zecalibrator-gui` emits a precise missing-extra diagnostic and exits non-zero
+while the engine and CLI remain usable.
 
 ## Storage paths
 

@@ -707,9 +707,30 @@ Modules (all under `src/zecalibrator/gui/`):
   (lazy Qt).
 - `worker.py` — one `QObject` worker on a dedicated `QThread`; queued immutable
   events; bounded/coalesced progress; shared `CancellationToken`; no terminate.
-- `window.py` — main window (lights/evidence/HDU, library open/index, explicit
-  modes, preflight, in-memory + standalone batch export, progress/cancel,
-  per-file audit, safe close).
+- `window.py` — main window: progressive-disclosure top-level tabs
+  (`Standard | Advanced | Settings`, Standard default) as three views of one
+  application/scientific state. Standard shows the nominal workflow (images,
+  library, dark/flat in human labels, verify, calibrate/export); Advanced
+  retains all technical controls/outcomes (HDU/declaration/ROI evidence,
+  library open/index, exact technical mode values, in-memory calibration,
+  technical preflight/results/details/audit, qualification label); Settings
+  holds the Appearance/Theme preference (System/Light/Dark). Progress/status/
+  Cancel live in a global footer below the tabs. Safe close, finished-driven
+  teardown and the single worker controller are unchanged.
+- `theme.py` — bounded Qt palette helper for System/Light/Dark (System restores
+  the pre-override palette and never forces a non-native style; Light/Dark are
+  deterministic ``QPalette`` overrides). Not a theme engine or style framework.
+
+P7-M2 UX simplification keeps Standard and Advanced bound to the same
+``_lights`` / ``_library_spec`` / request / generation / plans / results and
+controller: tab changes never mutate or re-bump scientific state, and a real
+mode change invalidates cached plans exactly once. The GUI-only
+``appearance_theme`` preference round-trips through the existing versioned
+``GuiSettings`` persistence (schema 1, backward compatible; missing/invalid
+value falls back to System). There is no ``QSettings`` and no Language control:
+the repository has no ``QTranslator`` / translation resources, so a
+`Settings > Language` selector is recorded as a future separate micro-phase and
+is not implemented here.
 
 Boundaries enforced: widgets assemble presentation requests only; all
 science/inspection/library/matching/calibration/indexing/output I/O run on the

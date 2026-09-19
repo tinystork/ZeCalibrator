@@ -159,3 +159,52 @@ def test_read_only_settings_directory_raises(tmp_path):
 
 def test_settings_path_is_under_injected_config_root(tmp_path):
     assert settings.settings_path(tmp_path) == Path(tmp_path) / "gui_settings.json"
+
+
+def test_default_settings_have_system_theme():
+    assert settings.default_settings().appearance_theme == "system"
+
+
+def test_theme_roundtrip(tmp_path):
+    s = GuiSettings(appearance_theme="dark")
+    settings.save_settings(tmp_path, s)
+    assert settings.load_settings(tmp_path).settings.appearance_theme == "dark"
+
+
+def test_theme_missing_defaults_to_system(tmp_path):
+    # Old settings (schema 1, no theme field) load as System.
+    path = settings.settings_path(tmp_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"schema_version": 1, "window_width": 1000}), encoding="utf-8")
+    loaded = settings.load_settings(tmp_path)
+    assert loaded.state == STATE_OK
+    assert loaded.settings.appearance_theme == "system"
+
+
+def test_theme_invalid_value_falls_back_to_system(tmp_path):
+    for bad in ("neon", 123, None, True):
+        path = settings.settings_path(tmp_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps({"schema_version": 1, "appearance_theme": bad}), encoding="utf-8"
+        )
+        assert settings.load_settings(tmp_path).settings.appearance_theme == "system"
+
+
+def test_theme_is_a_known_key_and_roundtrips_with_unknown_fields(tmp_path):
+    path = settings.settings_path(tmp_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({
+            "schema_version": 1, "appearance_theme": "light", "future_field": "keep-me",
+        }),
+        encoding="utf-8",
+    )
+    loaded = settings.load_settings(tmp_path)
+    assert loaded.state == STATE_OK
+    assert loaded.settings.appearance_theme == "light"
+    assert loaded.settings.extra["future_field"] == "keep-me"
+    settings.save_settings(tmp_path, loaded.settings)
+    reloaded = settings.load_settings(tmp_path)
+    assert reloaded.settings.appearance_theme == "light"
+    assert reloaded.settings.extra["future_field"] == "keep-me"

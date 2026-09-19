@@ -35,7 +35,11 @@ _KNOWN_KEYS = frozenset({
     "last_output_dir",
     "window_width",
     "window_height",
+    "appearance_theme",
 })
+
+# Valid GUI-only appearance theme values (System is the default).
+_THEMES = ("system", "light", "dark")
 
 
 @dataclass(frozen=True)
@@ -52,6 +56,7 @@ class GuiSettings:
     last_output_dir: Optional[str] = None
     window_width: int = 1280
     window_height: int = 800
+    appearance_theme: str = "system"
     extra: Mapping[str, object] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -65,6 +70,7 @@ class GuiSettings:
             "last_output_dir": self.last_output_dir,
             "window_width": self.window_width,
             "window_height": self.window_height,
+            "appearance_theme": self.appearance_theme,
         }
         for key, value in self.extra.items():
             if key not in _KNOWN_KEYS:
@@ -98,6 +104,10 @@ class GuiSettings:
                 return int(f)
             return default
 
+        def _theme_or_default(name):
+            v = d.get(name)
+            return v if v in _THEMES else "system"
+
         extra = {k: v for k, v in d.items() if k not in _KNOWN_KEYS}
         return cls(
             schema_version=SETTINGS_SCHEMA_VERSION,
@@ -106,6 +116,7 @@ class GuiSettings:
             last_output_dir=_str_or_none("last_output_dir"),
             window_width=_int_or_default("window_width", 1280),
             window_height=_int_or_default("window_height", 800),
+            appearance_theme=_theme_or_default("appearance_theme"),
             extra=extra,
         )
 

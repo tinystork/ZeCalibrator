@@ -16,6 +16,7 @@ row/config-generation events are rejected in addition to stale operation ids.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import uuid
 from pathlib import Path
@@ -23,7 +24,7 @@ from pathlib import Path
 from PySide6 import QtCore, QtGui, QtWidgets
 
 import zecalibrator.api.v1 as v1
-from zecalibrator.gui import identity, presentation, service
+from zecalibrator.gui import identity, presentation, service, theme
 from zecalibrator.gui.settings import (
     STATE_MALFORMED,
     STATE_UNSUPPORTED,
@@ -34,6 +35,20 @@ from zecalibrator.gui.worker import WorkerController
 from zecalibrator.storage import StoragePaths
 
 _SYNTH_ONLY_LABEL = "Qualification: SYNTH-BASE-1 synthetic-only. No real-camera claim."
+
+# Truthful human active-status labels per operation kind (progress counters are
+# phase-local and never a global percentage; these labels stay until terminal).
+_ACTIVE_LABELS = {
+    "load_settings": "Loading settings…",
+    "save_settings": "Saving settings…",
+    "open_library": "Opening calibration library…",
+    "index_library": "Updating calibration library…",
+    "preflight": "Checking calibration…",
+    "calibrate_in_memory": "Calibrating selected image…",
+    "export": "Calibrating / exporting…",
+    "load_declaration": "Loading input details…",
+    "load_roi": "Loading input details…",
+}
 
 
 class _LightEntry:
@@ -82,6 +97,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._active_generation = 0
         self._close_requested = False
         self._terminal_seen = False
+        self._syncing_modes = False
+        self._syncing_theme = False
+        self._active_kind = None
+        self._cancel_requested = False
 
         self._build_ui()
         self._wire_controller()
@@ -89,8 +108,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.resize(self._settings.window_width, self._settings.window_height)
         self._set_active(False)
 
-        # Production exit safety: request non-blocking worker quit at app exit.
+        # Capture the native Qt palette once before any theme override (System).
         app = QtWidgets.QApplication.instance()
+        if app is not None:
+            theme.get_system_palette(app)
+
+        # Production exit safety: request non-blocking worker quit at app exit.
         if app is not None:
             app.aboutToQuit.connect(self._controller.shutdown)
 
@@ -102,22 +125,117 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setWindowTitle("ZeCalibrator")
 
         central = QtWidgets.QWidget()
-        layout = QtWidgets.QVBoxLayout(central)
+        root_layout = QtWidgets.QVBoxLayout(central)
 
-        # -- Inputs -------------------------------------------------------
-        inputs_box = QtWidgets.QGroupBox("Lights")
+        # Top-level progressive-disclosure navigation (exact owner order).
+        self.main_tabs = QtWidgets.QTabWidget()
+        root_layout.addWidget(self.main_tabs, 1)
+
+        self._build_standard_tab()
+        self._build_advanced_tab()
+        self._build_settings_tab()
+        self._build_footer(root_layout)
+
+        self.setCentralWidget(central)
+        self.main_tabs.setCurrentIndex(0)  # Standard is the default view
+
+        self._connect_signals()
+
+        self._config_widgets = [
+            self.add_btn, self.remove_btn, self.choose_library_btn,
+            self.apply_hdu_btn, self.hdu_edit,
+            self.load_decl_btn, self.load_roi_btn,
+            self.library_index_edit, self.open_library_btn,
+            self.library_root_edit, self.imports_edit, self.imports_browse_btn,
+            self.root_browse_btn, self.index_btn,
+            self.additive_combo, self.flat_combo,
+            self.standard_additive_combo, self.standard_flat_combo,
+        ]
+        self._launch_widgets = [self.preflight_btn, self.calibrate_btn, self.export_btn]
+        self._update_scope_label()
+
+    def _build_standard_tab(self) -> None:
+        """Standard (nominal) workflow: human-first, progressive disclosure."""
+        page = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(page)
+
+        inputs_box = QtWidgets.QGroupBox("Images to calibrate")
         inputs_layout = QtWidgets.QVBoxLayout(inputs_box)
         self.lights_list = QtWidgets.QListWidget()
         self.lights_list.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.ExtendedSelection)
         inputs_layout.addWidget(self.lights_list)
         light_btn_row = QtWidgets.QHBoxLayout()
-        self.add_btn = QtWidgets.QPushButton("Add FITS…")
+        self.add_btn = QtWidgets.QPushButton("Add images…")
         self.remove_btn = QtWidgets.QPushButton("Remove selected")
         light_btn_row.addWidget(self.add_btn)
         light_btn_row.addWidget(self.remove_btn)
         light_btn_row.addStretch(1)
         inputs_layout.addLayout(light_btn_row)
+        self.lights_count_label = QtWidgets.QLabel("0 images selected")
+        inputs_layout.addWidget(self.lights_count_label)
+        layout.addWidget(inputs_box)
 
+        library_box = QtWidgets.QGroupBox("Calibration library")
+        library_layout = QtWidgets.QVBoxLayout(library_box)
+        self.choose_library_btn = QtWidgets.QPushButton("Choose library…")
+        library_layout.addWidget(self.choose_library_btn)
+        self.library_human_status = QtWidgets.QLabel("Library unavailable")
+        library_layout.addWidget(self.library_human_status)
+        layout.addWidget(library_box)
+
+        modes_box = QtWidgets.QGroupBox("Calibration")
+        modes_layout = QtWidgets.QGridLayout(modes_box)
+        modes_layout.addWidget(QtWidgets.QLabel("Dark:"), 0, 0)
+        self.standard_additive_combo = QtWidgets.QComboBox()
+        for mode in presentation.additive_modes():
+            self.standard_additive_combo.addItem(
+                presentation.standard_additive_mode_label(mode), mode
+            )
+        self.standard_additive_combo.setCurrentIndex(2)  # dark_incl_bias
+        modes_layout.addWidget(self.standard_additive_combo, 0, 1)
+        modes_layout.addWidget(QtWidgets.QLabel("Flat:"), 1, 0)
+        self.standard_flat_combo = QtWidgets.QComboBox()
+        for mode in presentation.flat_modes():
+            self.standard_flat_combo.addItem(presentation.standard_flat_mode_label(mode), mode)
+        modes_layout.addWidget(self.standard_flat_combo, 1, 1)
+        layout.addWidget(modes_box)
+
+        actions_row = QtWidgets.QHBoxLayout()
+        self.preflight_btn = QtWidgets.QPushButton("Verify calibration")
+        self.export_btn = QtWidgets.QPushButton("Calibrate / Export…")
+        actions_row.addWidget(self.preflight_btn)
+        actions_row.addWidget(self.export_btn)
+        actions_row.addStretch(1)
+        layout.addLayout(actions_row)
+
+        self.standard_summary_label = QtWidgets.QLabel(presentation.format_outcome_summary(0, 0, 0))
+        layout.addWidget(self.standard_summary_label)
+        self.standard_results_table = QtWidgets.QTableWidget(0, 3)
+        self.standard_results_table.setHorizontalHeaderLabels(["Image", "Outcome", "Summary"])
+        self.standard_results_table.horizontalHeader().setStretchLastSection(True)
+        self.standard_results_table.setSelectionBehavior(
+            QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows
+        )
+        self.standard_results_table.setSelectionMode(
+            QtWidgets.QAbstractItemView.SelectionMode.NoSelection
+        )
+        layout.addWidget(self.standard_results_table)
+
+        self.main_tabs.addTab(page, "Standard")
+
+    def _build_advanced_tab(self) -> None:
+        """Advanced: full technical controls/outcomes, simple grouped layout."""
+        page = QtWidgets.QWidget()
+        outer = QtWidgets.QVBoxLayout(page)
+        outer.setContentsMargins(0, 0, 0, 0)
+
+        scroll = QtWidgets.QScrollArea()
+        scroll.setWidgetResizable(True)
+        content = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(content)
+
+        input_box = QtWidgets.QGroupBox("Input details")
+        input_layout = QtWidgets.QVBoxLayout(input_box)
         hdu_row = QtWidgets.QHBoxLayout()
         hdu_row.addWidget(QtWidgets.QLabel("HDU for selected:"))
         self.hdu_edit = QtWidgets.QLineEdit("0")
@@ -126,21 +244,19 @@ class MainWindow(QtWidgets.QMainWindow):
         self.apply_hdu_btn = QtWidgets.QPushButton("Apply HDU")
         hdu_row.addWidget(self.apply_hdu_btn)
         hdu_row.addStretch(1)
-        inputs_layout.addLayout(hdu_row)
-
+        input_layout.addLayout(hdu_row)
         ev_row = QtWidgets.QHBoxLayout()
         self.load_decl_btn = QtWidgets.QPushButton("Load declaration JSON…")
         self.load_roi_btn = QtWidgets.QPushButton("Load ROI JSON…")
         ev_row.addWidget(self.load_decl_btn)
         ev_row.addWidget(self.load_roi_btn)
         ev_row.addStretch(1)
-        inputs_layout.addLayout(ev_row)
+        input_layout.addLayout(ev_row)
         self.evidence_label = QtWidgets.QLabel("Evidence applies to the currently selected light(s).")
-        inputs_layout.addWidget(self.evidence_label)
-        layout.addWidget(inputs_box)
+        input_layout.addWidget(self.evidence_label)
+        layout.addWidget(input_box)
 
-        # -- Library ------------------------------------------------------
-        library_box = QtWidgets.QGroupBox("Library")
+        library_box = QtWidgets.QGroupBox("Library management")
         library_layout = QtWidgets.QVBoxLayout(library_box)
         open_row = QtWidgets.QHBoxLayout()
         open_row.addWidget(QtWidgets.QLabel("Index path:"))
@@ -171,8 +287,7 @@ class MainWindow(QtWidgets.QMainWindow):
         library_layout.addWidget(self.library_status)
         layout.addWidget(library_box)
 
-        # -- Modes --------------------------------------------------------
-        modes_box = QtWidgets.QGroupBox("Calibration modes")
+        modes_box = QtWidgets.QGroupBox("Calibration details")
         modes_layout = QtWidgets.QGridLayout(modes_box)
         modes_layout.addWidget(QtWidgets.QLabel("Additive:"), 0, 0)
         self.additive_combo = QtWidgets.QComboBox()
@@ -187,36 +302,22 @@ class MainWindow(QtWidgets.QMainWindow):
         modes_layout.addWidget(self.flat_combo, 1, 1)
         self.mode_note = QtWidgets.QLabel("")
         modes_layout.addWidget(self.mode_note, 2, 0, 1, 2)
+        self.mode_token_label = QtWidgets.QLabel("")
+        self.mode_token_label.setStyleSheet("color: gray;")
+        modes_layout.addWidget(self.mode_token_label, 4, 0, 1, 2)
+        in_memory_row = QtWidgets.QHBoxLayout()
+        self.calibrate_btn = QtWidgets.QPushButton("Calibrate selected in memory")
+        in_memory_row.addWidget(self.calibrate_btn)
+        in_memory_row.addStretch(1)
+        modes_layout.addLayout(in_memory_row, 3, 0, 1, 2)
         layout.addWidget(modes_box)
         self._update_mode_note()
 
-        # -- Qualification label (G4) -------------------------------------
         self.qualification_label = QtWidgets.QLabel(_SYNTH_ONLY_LABEL)
         self.qualification_label.setStyleSheet("color: gray;")
         layout.addWidget(self.qualification_label)
 
-        # -- Actions / progress -------------------------------------------
-        actions_row = QtWidgets.QHBoxLayout()
-        self.preflight_btn = QtWidgets.QPushButton("Preflight (inspect & match)")
-        self.calibrate_btn = QtWidgets.QPushButton("Calibrate selected in memory")
-        self.export_btn = QtWidgets.QPushButton("Export…")
-        self.cancel_btn = QtWidgets.QPushButton("Cancel")
-        actions_row.addWidget(self.preflight_btn)
-        actions_row.addWidget(self.calibrate_btn)
-        actions_row.addWidget(self.export_btn)
-        actions_row.addWidget(self.cancel_btn)
-        layout.addLayout(actions_row)
-        self.scope_label = QtWidgets.QLabel("Export scope: all")
-        layout.addWidget(self.scope_label)
-
-        self.progress_bar = QtWidgets.QProgressBar()
-        self.progress_bar.setRange(0, 0)
-        self.progress_bar.setValue(0)
-        layout.addWidget(self.progress_bar)
-        self.status_label = QtWidgets.QLabel("Ready.")
-        layout.addWidget(self.status_label)
-
-        # -- Results tabs --------------------------------------------------
+        # Existing result/details sub-tab widget (kept as the `tabs` attribute).
         self.tabs = QtWidgets.QTabWidget()
 
         self.preflight_table = QtWidgets.QTableWidget(0, 4)
@@ -233,12 +334,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.results_table.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
         self.tabs.addTab(self.results_table, "Results / audit")
 
-        # Details (concise human summary) — plain text, never HTML-interpreted.
         self.details_view = QtWidgets.QPlainTextEdit()
         self.details_view.setReadOnly(True)
         self.tabs.addTab(self.details_view, "Details")
 
-        # Full read-only raw audit pane (serialized public plan/decision/provenance).
         audit_widget = QtWidgets.QWidget()
         audit_layout = QtWidgets.QVBoxLayout(audit_widget)
         self.audit_view = QtWidgets.QPlainTextEdit()
@@ -249,17 +348,57 @@ class MainWindow(QtWidgets.QMainWindow):
         audit_layout.addWidget(self.audit_view)
         self.audit_link_btn = QtWidgets.QPushButton("Open manifest…")
         self.audit_link_btn.setVisible(False)
-        self.audit_link_btn.clicked.connect(self._on_open_manifest)
         audit_layout.addWidget(self.audit_link_btn)
         self.tabs.addTab(audit_widget, "Audit")
 
         layout.addWidget(self.tabs)
 
-        self.setCentralWidget(central)
+        scroll.setWidget(content)
+        outer.addWidget(scroll)
+        self.main_tabs.addTab(page, "Advanced")
 
-        # -- Connect control slots -----------------------------------------
+    def _build_settings_tab(self) -> None:
+        """Settings: application preferences only (Appearance / Theme)."""
+        page = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(page)
+
+        appearance_box = QtWidgets.QGroupBox("Appearance")
+        appearance_layout = QtWidgets.QVBoxLayout(appearance_box)
+        theme_row = QtWidgets.QHBoxLayout()
+        theme_row.addWidget(QtWidgets.QLabel("Theme:"))
+        self.theme_combo = QtWidgets.QComboBox()
+        for name in theme.THEMES:
+            self.theme_combo.addItem(theme.theme_label(name), name)
+        self.theme_combo.setEnabled(False)  # disabled until async settings load applies
+        theme_row.addWidget(self.theme_combo)
+        theme_row.addStretch(1)
+        appearance_layout.addLayout(theme_row)
+        layout.addWidget(appearance_box)
+        layout.addStretch(1)
+
+        self.main_tabs.addTab(page, "Settings")
+
+    def _build_footer(self, root_layout) -> None:
+        """Global lifecycle footer below the top-level tabs (Cancel always reachable)."""
+        self.scope_label = QtWidgets.QLabel("Export scope: all")
+        root_layout.addWidget(self.scope_label)
+
+        self.progress_bar = QtWidgets.QProgressBar()
+        self.progress_bar.setRange(0, 0)
+        self.progress_bar.setValue(0)
+        root_layout.addWidget(self.progress_bar)
+
+        status_row = QtWidgets.QHBoxLayout()
+        self.cancel_btn = QtWidgets.QPushButton("Cancel")
+        self.status_label = QtWidgets.QLabel("Ready.")
+        status_row.addWidget(self.cancel_btn)
+        status_row.addWidget(self.status_label, 1)
+        root_layout.addLayout(status_row)
+
+    def _connect_signals(self) -> None:
         self.add_btn.clicked.connect(self._on_add_lights)
         self.remove_btn.clicked.connect(self._on_remove_lights)
+        self.choose_library_btn.clicked.connect(self._on_choose_library)
         self.apply_hdu_btn.clicked.connect(self._on_apply_hdu)
         self.load_decl_btn.clicked.connect(self._on_load_declaration)
         self.load_roi_btn.clicked.connect(self._on_load_roi)
@@ -271,23 +410,16 @@ class MainWindow(QtWidgets.QMainWindow):
         self.calibrate_btn.clicked.connect(self._on_calibrate_in_memory)
         self.export_btn.clicked.connect(self._on_export)
         self.cancel_btn.clicked.connect(self._on_cancel)
+        self.audit_link_btn.clicked.connect(self._on_open_manifest)
 
         self.additive_combo.currentIndexChanged.connect(self._on_mode_changed)
         self.flat_combo.currentIndexChanged.connect(self._on_mode_changed)
+        self.standard_additive_combo.currentIndexChanged.connect(self._on_standard_mode_changed)
+        self.standard_flat_combo.currentIndexChanged.connect(self._on_standard_mode_changed)
+        self.theme_combo.currentIndexChanged.connect(self._on_theme_changed)
         self.lights_list.itemSelectionChanged.connect(self._on_selection_changed)
         self.preflight_table.currentCellChanged.connect(self._on_preflight_selection_changed)
         self.results_table.currentCellChanged.connect(self._on_results_selection_changed)
-
-        self._config_widgets = [
-            self.add_btn, self.remove_btn, self.apply_hdu_btn, self.hdu_edit,
-            self.load_decl_btn, self.load_roi_btn,
-            self.library_index_edit, self.open_library_btn,
-            self.library_root_edit, self.imports_edit, self.imports_browse_btn,
-            self.root_browse_btn, self.index_btn,
-            self.additive_combo, self.flat_combo,
-        ]
-        self._launch_widgets = [self.preflight_btn, self.calibrate_btn, self.export_btn]
-        self._update_scope_label()
 
     def _wire_controller(self) -> None:
         self._controller.operation_started.connect(self._on_operation_started)
@@ -312,6 +444,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.preflight_table.setRowCount(0)
         self._in_memory_result = None
         self._clear_batch_presentation()
+        self._reset_standard_summary()
 
     def _clear_batch_presentation(self) -> None:
         self._batch_items.clear()
@@ -333,6 +466,13 @@ class MainWindow(QtWidgets.QMainWindow):
             item = QtWidgets.QListWidgetItem(entry.display())
             item.setData(QtCore.Qt.ItemDataRole.UserRole, entry.path)
             self.lights_list.addItem(item)
+        self._update_lights_count()
+
+    def _update_lights_count(self) -> None:
+        n = len(self._lights)
+        self.lights_count_label.setText(
+            f"{n} {'image' if n == 1 else 'images'} selected"
+        )
 
     def _request(self) -> v1.CalibrationRequest:
         return v1.CalibrationRequest(self.additive_combo.currentData(), self.flat_combo.currentData())
@@ -343,6 +483,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _update_mode_note(self) -> None:
         additive = self.additive_combo.currentData()
         flat = self.flat_combo.currentData()
+        self.mode_token_label.setText(f"Exact values: additive={additive}  flat={flat}")
         if presentation.is_partial_mode(additive, flat):
             self.mode_note.setText(
                 "Note: this selection is an explicit partial/uncalibrated mode, "
@@ -357,7 +498,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if selected:
             self.scope_label.setText(f"Export scope: selected ({len(selected)} of {total})")
         else:
-            self.scope_label.setText(f"Export scope: all ({total})")
+            noun = "image" if total == 1 else "images"
+            self.scope_label.setText(f"Export scope: all ({total} {noun})")
 
     def _set_active(self, active: bool) -> None:
         self._active = active
@@ -369,9 +511,12 @@ class MainWindow(QtWidgets.QMainWindow):
         if active:
             self.progress_bar.setRange(0, 0)
             self.progress_bar.setValue(0)
+            self.progress_bar.show()
         else:
+            # No operation active: hide the busy indicator (never a fake 0%).
             self.progress_bar.setRange(0, 1)
             self.progress_bar.setValue(0)
+            self.progress_bar.hide()
 
     def _start_operation(self, snapshot: service.OperationSnapshot) -> None:
         if self._controller.is_active:
@@ -380,12 +525,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self._token = v1.CancellationToken()
         self._current_op_id = snapshot.op_id
         self._active_generation = self._generation
+        self._active_kind = snapshot.kind
         self._terminal_seen = False
+        self._cancel_requested = False
         self._set_active(True)
         self._controller.start(snapshot, self._token)
 
     def _is_current(self, op_id: str) -> bool:
         return op_id == self._current_op_id and self._generation == self._active_generation
+
+    def _active_label(self) -> str:
+        return _ACTIVE_LABELS.get(self._active_kind, "Working…")
 
     def _log(self, text: str) -> None:
         # Literal plain-text logging: never interpret technical strings as HTML.
@@ -453,6 +603,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._settings = GuiSettings.from_dict(summary.get("settings", {}))
         self._settings_loaded = True
         self.resize(self._settings.window_width, self._settings.window_height)
+        self._apply_theme(self._settings.appearance_theme)
+        self._sync_theme_combo()
+        self.theme_combo.setEnabled(True)
+        # Truthful idle state: startup settings load is complete; no fake progress.
+        self.status_label.setText("Ready.")
         if self._settings_state in (STATE_MALFORMED, STATE_UNSUPPORTED):
             self._log(
                 f"[settings] existing settings file is {self._settings_state}; "
@@ -465,12 +620,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._settings_saved = True
             return
         self._close_requested = True
-        self._settings = GuiSettings(
-            last_input_dir=self._settings.last_input_dir,
-            last_library_dir=self._settings.last_library_dir,
-            last_output_dir=self._settings.last_output_dir,
-            window_width=self.width(), window_height=self.height(),
-            extra=self._settings.extra,
+        self._settings = dataclasses.replace(
+            self._settings, window_width=self.width(), window_height=self.height(),
         )
         snapshot = service.OperationSnapshot(
             op_id=service.new_operation_id(), kind="save_settings",
@@ -485,6 +636,68 @@ class MainWindow(QtWidgets.QMainWindow):
         if summary.get("status") == "PRESERVED":
             self._log("[settings] existing settings preserved (not overwritten).")
 
+    # -- theme / appearance ------------------------------------------------
+    def _apply_theme(self, theme_name) -> None:
+        app = QtWidgets.QApplication.instance()
+        if app is None:
+            return
+        theme.apply_theme(app, theme_name, theme.get_system_palette(app))
+
+    def _sync_theme_combo(self) -> None:
+        self._syncing_theme = True
+        try:
+            idx = self.theme_combo.findData(self._settings.appearance_theme)
+            self.theme_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        finally:
+            self._syncing_theme = False
+
+    def _on_theme_changed(self, *_args) -> None:
+        if self._syncing_theme:
+            return
+        theme_name = self.theme_combo.currentData()
+        self._apply_theme(theme_name)
+        # Theme is a presentation preference only; never bumps scientific generation.
+        self._settings = dataclasses.replace(self._settings, appearance_theme=theme_name)
+
+    # -- library human status ----------------------------------------------
+    _LIBRARY_HUMAN = {
+        "ready": "Library ready",
+        "unavailable": "Library unavailable",
+        "attention": "Library needs attention",
+    }
+
+    def _set_library_human_status(self, state: str, detail: str = "") -> None:
+        base = self._LIBRARY_HUMAN.get(state, "Library unavailable")
+        self.library_human_status.setText(f"{base}{' — ' + detail if detail else ''}")
+
+    # -- Standard summary (human outcomes) ----------------------------------
+    def _reset_standard_summary(self) -> None:
+        if hasattr(self, "standard_summary_label"):
+            self.standard_summary_label.setText(presentation.format_outcome_summary(0, 0, 0))
+        if hasattr(self, "standard_results_table"):
+            self.standard_results_table.setRowCount(0)
+
+    def _update_standard_summary(self) -> None:
+        ready, attention, ambiguous = presentation.summarize_outcomes(self._preflight_summaries)
+        self.standard_summary_label.setText(
+            presentation.format_outcome_summary(ready, attention, ambiguous)
+        )
+        self.standard_results_table.setRowCount(0)
+        for summary in self._preflight_summaries:
+            row = self.standard_results_table.rowCount()
+            self.standard_results_table.insertRow(row)
+            self.standard_results_table.setItem(
+                row, 0, QtWidgets.QTableWidgetItem(summary.get("display", ""))
+            )
+            self.standard_results_table.setItem(
+                row, 1, QtWidgets.QTableWidgetItem(
+                    presentation.human_outcome_label(summary.get("outcome"))
+                )
+            )
+            self.standard_results_table.setItem(
+                row, 2, QtWidgets.QTableWidgetItem(presentation.human_reason_text(summary))
+            )
+
     # -------------------------------------------------------------- slots
     def _on_add_lights(self) -> None:
         start_dir = self._settings.last_input_dir or ""
@@ -497,12 +710,10 @@ class MainWindow(QtWidgets.QMainWindow):
         hdu = service.parse_hdu(self.hdu_edit.text())
         for path in paths:
             self._lights.append(_LightEntry(path, hdu=hdu))
-        self._settings = GuiSettings(
+        self._settings = dataclasses.replace(
+            self._settings,
             last_input_dir=str(Path(paths[0]).parent),
-            last_library_dir=self._settings.last_library_dir,
-            last_output_dir=self._settings.last_output_dir,
             window_width=self.width(), window_height=self.height(),
-            extra=self._settings.extra,
         )
         self._refresh_lights_list()
         self._bump_generation()
@@ -524,8 +735,44 @@ class MainWindow(QtWidgets.QMainWindow):
         self._bump_generation()
 
     def _on_mode_changed(self, *_args) -> None:
+        # Canonical (Advanced) combo changed: sync Standard labels, then invalidate once.
+        self._sync_standard_modes()
         self._update_mode_note()
         self._bump_generation()
+
+    def _on_standard_mode_changed(self, *_args) -> None:
+        """Standard combo changed: forward to the canonical combo (single source of truth).
+
+        Forwarding triggers ``_on_mode_changed`` exactly once (guarded), which is the
+        only place that bumps the generation. This handler never bumps directly.
+        """
+        if self._syncing_modes:
+            return
+        self._syncing_modes = True
+        try:
+            self.additive_combo.setCurrentIndex(
+                self.additive_combo.findData(self.standard_additive_combo.currentData())
+            )
+            self.flat_combo.setCurrentIndex(
+                self.flat_combo.findData(self.standard_flat_combo.currentData())
+            )
+        finally:
+            self._syncing_modes = False
+
+    def _sync_standard_modes(self) -> None:
+        """Reflect the canonical combo values into the Standard presentation combos."""
+        if self._syncing_modes:
+            return
+        self._syncing_modes = True
+        try:
+            self.standard_additive_combo.setCurrentIndex(
+                self.standard_additive_combo.findData(self.additive_combo.currentData())
+            )
+            self.standard_flat_combo.setCurrentIndex(
+                self.standard_flat_combo.findData(self.flat_combo.currentData())
+            )
+        finally:
+            self._syncing_modes = False
 
     def _on_selection_changed(self) -> None:
         self._update_scope_label()
@@ -567,6 +814,30 @@ class MainWindow(QtWidgets.QMainWindow):
             op_id=service.new_operation_id(), kind="load_roi",
             library_spec=None, request=None, policy=None, lights=(),
             evidence_path=path, target_indices=tuple(indices),
+        )
+        self._start_operation(snapshot)
+
+    def _on_choose_library(self) -> None:
+        """Standard-path library selection: pick an existing index, open it.
+
+        Shares the single ``_library_spec``/generation/worker path with the
+        Advanced "Open…" action (no duplicate library model).
+        """
+        start_dir = self._settings.last_library_dir or ""
+        index_path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Choose calibration library index", start_dir,
+            "SQLite index (*.sqlite);;All files (*)",
+        )
+        if not index_path:
+            return
+        root = str(Path(index_path).parent)
+        self._library_spec = v1.LibrarySpec(root=root, index_path=index_path)
+        self.library_index_edit.setText(index_path)
+        self.library_root_edit.setText(root)
+        self._bump_generation()
+        snapshot = service.OperationSnapshot(
+            op_id=service.new_operation_id(), kind="open_library",
+            library_spec=self._library_spec, request=None, policy=None, lights=(),
         )
         self._start_operation(snapshot)
 
@@ -671,12 +942,10 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         if not destination:
             return
-        self._settings = GuiSettings(
-            last_input_dir=self._settings.last_input_dir,
-            last_library_dir=self._settings.last_library_dir,
+        self._settings = dataclasses.replace(
+            self._settings,
             last_output_dir=destination,
             window_width=self.width(), window_height=self.height(),
-            extra=self._settings.extra,
         )
         self._batch_items.clear()
         self.results_table.setRowCount(0)
@@ -690,6 +959,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._start_operation(snapshot)
 
     def _on_cancel(self) -> None:
+        self._cancel_requested = True
         if self._token is not None:
             self._token.cancel()
         self.status_label.setText("Cancellation requested…")
@@ -698,21 +968,22 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_operation_started(self, op_id: str) -> None:
         if not self._is_current(op_id):
             return
-        self.status_label.setText("Working…")
+        self.status_label.setText(self._active_label())
 
     def _on_progress(self, op_id: str, event) -> None:
         if not self._is_current(op_id):
             return
         if self._terminal_seen:
             return  # terminal result is authoritative; never overwrite it
-        total = event.total
-        if total:
-            self.progress_bar.setRange(0, total)
-            self.progress_bar.setValue(min(event.completed, total))
-        else:
-            self.progress_bar.setRange(0, 0)
-        frame = f" — {event.frame_id}" if getattr(event, "frame_id", None) else ""
-        self.status_label.setText(f"{event.phase} ({event.completed}/{event.total}){frame}")
+        if self._cancel_requested:
+            return  # never overwrite "Cancellation requested…" before terminal
+        # Engine progress counters are phase-local (nested sub-phases), never a
+        # reliable global operation denominator. Keep the busy indicator
+        # indeterminate and leave the truthful operation-kind label in place;
+        # never render a sub-phase fraction/percentage or `complete` as global
+        # completion while the operation is still active.
+        self.progress_bar.setRange(0, 0)
+        self.progress_bar.setValue(0)
 
     def _on_preflight_light(self, op_id: str, summary: dict, plan) -> None:
         if not self._is_current(op_id):
@@ -729,6 +1000,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.preflight_table.setItem(row, 2, QtWidgets.QTableWidgetItem(summary.get("plan_id") or ""))
         self.preflight_table.setItem(row, 3, QtWidgets.QTableWidgetItem(
             presentation.reason_codes_text(summary.get("reason_codes", ()))))
+        self._update_standard_summary()
 
     def _on_batch_item(self, op_id: str, item: dict) -> None:
         if not self._is_current(op_id):
@@ -783,24 +1055,33 @@ class MainWindow(QtWidgets.QMainWindow):
                 f"Library opened: revision={summary.get('revision')!r} "
                 f"roles={summary.get('roles')} counts={summary.get('candidate_counts')}"
             )
+            detail = Path(self._library_spec.index_path).name if self._library_spec else ""
+            self._set_library_human_status("ready", detail)
         else:
             self.library_status.setText(
                 f"Library open failed: {summary.get('reason_code')} {summary.get('details')}"
             )
+            self._set_library_human_status("unavailable", summary.get("reason_code") or "open failed")
             self._log(f"library open FAILED [{summary.get('reason_code')}]: {summary.get('details')}")
 
     def _handle_index_finished(self, summary: dict) -> None:
         if summary.get("status") == "COMPLETED":
+            diagnostics = summary.get("diagnostics", ())
             self.library_status.setText(
                 f"Indexed: revision={summary.get('revision')!r} "
-                f"candidates={summary.get('candidate_count')} diagnostics={len(summary.get('diagnostics', ()))}"
+                f"candidates={summary.get('candidate_count')} diagnostics={len(diagnostics)}"
             )
-            for diag in summary.get("diagnostics", ()):
+            for diag in diagnostics:
                 self._log(f"index diagnostic: {diag}")
+            if diagnostics:
+                self._set_library_human_status("attention", f"{len(diagnostics)} diagnostic(s)")
+            else:
+                self._set_library_human_status("ready")
         else:
             self.library_status.setText(
                 f"Indexing {summary.get('status')}: {summary.get('reason_code')} {summary.get('details')}"
             )
+            self._set_library_human_status("unavailable", summary.get("reason_code") or "index failed")
             self._log(f"indexing FAILED [{summary.get('reason_code')}]: {summary.get('details')}")
 
     def _handle_preflight_finished(self, summary: dict) -> None:

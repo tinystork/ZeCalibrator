@@ -32,6 +32,71 @@ _MODE_LABELS = {
     "apply": "Apply flat",
 }
 
+# Standard (progressive-disclosure) labels. These are presentation-only: each
+# label maps 1:1 to the exact frozen runtime value carried by the Advanced
+# technical combos (``control`` / ``bias_only`` / ``dark_incl_bias`` /
+# ``dark_bias_removed`` and ``none`` / ``apply``). No value is invented.
+_STANDARD_MODE_LABELS = {
+    "control": "None",
+    "bias_only": "Bias only",
+    "dark_incl_bias": "Standard dark",
+    "dark_bias_removed": "Dark already bias-corrected",
+    "none": "None",
+    "apply": "Use flat",
+}
+
+# Human-first outcomes for the Standard summary. Exact technical outcomes remain
+# accessible in Advanced; these never re-rank, re-guess or pick a candidate.
+_HUMAN_OUTCOME_LABELS = {
+    "MATCHED": "Ready",
+    "NO_MATCH": "Needs attention",
+    "AMBIGUOUS": "Ambiguous calibration set",
+}
+
+# Human names for the matcher's structural roles (presentation fallback only).
+_ROLE_HUMAN_NAMES = {
+    "dark": "dark",
+    "bias": "bias",
+    "flat": "flat",
+    "flat_dark": "flat dark",
+}
+
+# Inspect-failure human explanations (presentation fallback only). Exact
+# ``reason_code``/``details`` remain in Advanced; these never expose raw
+# filesystem exception prose.
+_INSPECT_SOURCE_UNREADABLE = "Could not read this image."
+_INSPECT_NEEDS_EVIDENCE = "This image needs valid raw-sensor import evidence."
+_INSPECT_DECODE_FAILED = "This file could not be decoded as a supported raw FITS image."
+_INSPECT_NOT_RAW = "This image is not raw 2-D sensor data (it looks processed or colour)."
+_INSPECT_HDU = "The selected HDU has no usable 2-D image — pick another HDU in Advanced."
+_INSPECT_GENERIC = "This image could not be inspected."
+
+# Reason codes that mean the source file was missing/unreadable.
+_SOURCE_READ_CODES = frozenset({"SOURCE_ERROR"})
+
+# Reason codes that mean the frame lacks valid raw-domain/unit import evidence.
+_EVIDENCE_CODES = frozenset({"UNKNOWN_DOMAIN", "UNKNOWN_UNITS", "UNITS_UNSUPPORTED"})
+
+# Reason codes that mean the file/data could not be decoded as a supported raw
+# FITS image (precision/range refusal, malformed cards, invalid/conflicting
+# metadata or source).
+_DECODE_FAILED_CODES = frozenset({
+    "PRECISION_REFUSAL",
+    "MALFORMED_CARD",
+    "METADATA_ADAPTER",
+    "INVALID_SOURCE",
+    "ALIAS_CONFLICT",
+    "DECLARATION_CONFLICT",
+})
+
+# Reason codes that mean the input is processed/colour rather than raw 2-D data.
+_NOT_RAW_CODES = frozenset({"PROCESSED_HISTORY", "RGB_UNSUPPORTED"})
+
+# Reason codes that mean the selected HDU has no usable 2-D image.
+_HDU_CODES = frozenset({
+    "HDU_NOT_FOUND", "HDU_NOT_2D_IMAGE", "HDU_AMBIGUOUS", "NO_2D_IMAGE", "NOT_2D_PLANE",
+})
+
 _ADDITIVE_MODES = ("control", "bias_only", "dark_incl_bias", "dark_bias_removed")
 _FLAT_MODES = ("none", "apply")
 
@@ -46,6 +111,108 @@ def additive_mode_label(mode: str) -> str:
 
 def flat_mode_label(mode: str) -> str:
     return _MODE_LABELS.get(mode, mode)
+
+
+def standard_additive_mode_label(mode: str) -> str:
+    """Standard (human) label for an additive mode value (presentation only)."""
+    return _STANDARD_MODE_LABELS.get(mode, mode)
+
+
+def standard_flat_mode_label(mode: str) -> str:
+    """Standard (human) label for a flat mode value (presentation only)."""
+    return _STANDARD_MODE_LABELS.get(mode, mode)
+
+
+def human_outcome_label(outcome) -> str:
+    """Map a technical outcome to its human-first Standard label.
+
+    ``None`` (inspection failed / not resolved) is reported truthfully as
+    "Needs attention" rather than collapsed into a technical token.
+    """
+    if outcome is None:
+        return "Needs attention"
+    return _HUMAN_OUTCOME_LABELS.get(outcome, outcome)
+
+
+def human_reason_text(summary: Mapping) -> str:
+    """Concise, truthful human explanation for one preflight summary.
+
+    This is a presentation mapping/fallback only: it never selects, ranks or
+    guesses a candidate, and never exposes exact codes/expected/observed values
+    (those remain in Advanced).
+    """
+    outcome = summary.get("outcome")
+    if outcome == "MATCHED":
+        return "A compatible calibration set was found."
+    if outcome == "AMBIGUOUS":
+        return "More than one compatible calibration set was found."
+    if outcome == "NO_MATCH":
+        role = _unavailable_role(summary.get("reasons", ()))
+        if role:
+            return f"No compatible {_ROLE_HUMAN_NAMES.get(role, role)} found."
+        return "No compatible calibration set was found."
+    # outcome is None: the frame could not be inspected/resolved. Explain in
+    # plain language from the existing reason-code category (never raw details).
+    return _inspect_failure_text(summary.get("reason_code"))
+
+
+def _inspect_failure_text(reason_code) -> str:
+    """Map an inspect/resolve failure reason code to a concise human sentence."""
+    if reason_code in _SOURCE_READ_CODES:
+        return _INSPECT_SOURCE_UNREADABLE
+    if reason_code in _EVIDENCE_CODES:
+        return _INSPECT_NEEDS_EVIDENCE
+    if reason_code in _DECODE_FAILED_CODES:
+        return _INSPECT_DECODE_FAILED
+    if reason_code in _NOT_RAW_CODES:
+        return _INSPECT_NOT_RAW
+    if reason_code in _HDU_CODES:
+        return _INSPECT_HDU
+    return _INSPECT_GENERIC
+
+
+def _unavailable_role(reasons) -> str | None:
+    """Return the first structurally unavailable role, or ``None``.
+
+    Only the manifest ``ROLE_UNAVAILABLE`` reason is interpreted, and only to
+    name a *missing* required role — never to choose a candidate.
+    """
+    for reason in reasons:
+        if reason.get("code") == "ROLE_UNAVAILABLE" and reason.get("role"):
+            return reason.get("role")
+    return None
+
+
+def summarize_outcomes(summaries: Sequence[Mapping]) -> tuple[int, int, int]:
+    """Count (ready, needs_attention, ambiguous) from per-light summaries."""
+    ready = attention = ambiguous = 0
+    for summary in summaries:
+        outcome = summary.get("outcome")
+        if outcome == "MATCHED":
+            ready += 1
+        elif outcome == "AMBIGUOUS":
+            ambiguous += 1
+        else:
+            attention += 1
+    return ready, attention, ambiguous
+
+
+def format_outcome_summary(ready: int, attention: int, ambiguous: int) -> str:
+    """Render a truthful human outcome-count summary (empty until verified)."""
+    parts = []
+    if ready:
+        parts.append(f"{ready} {_plural(ready, 'image', 'images')} ready")
+    if attention:
+        parts.append(f"{attention} {_plural(attention, 'needs', 'need')} attention")
+    if ambiguous:
+        parts.append(
+            f"{ambiguous} {_plural(ambiguous, 'ambiguous calibration set', 'ambiguous calibration sets')}"
+        )
+    return "; ".join(parts) or "No images verified."
+
+
+def _plural(count: int, singular: str, plural: str) -> str:
+    return singular if count == 1 else plural
 
 
 def additive_modes() -> tuple:
@@ -144,8 +311,14 @@ __all__ = [
     "flat_modes",
     "format_coherent_sets",
     "format_metadata",
+    "format_outcome_summary",
     "format_rejection_table",
+    "human_outcome_label",
+    "human_reason_text",
     "is_partial_mode",
     "reason_codes_text",
+    "standard_additive_mode_label",
+    "standard_flat_mode_label",
     "status_label",
+    "summarize_outcomes",
 ]

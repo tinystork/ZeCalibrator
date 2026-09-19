@@ -351,3 +351,454 @@ def test_preflight_audit_shows_nested_plan_master_identity(qapp, paths, tmp_path
         assert "descriptor_id" in audit
     finally:
         _close(w)
+
+
+# ---------------------------------------------------------------------------
+# P7-M2 GUI/UX simplification: top-level tabs, human Standard workflow,
+# shared Standard/Advanced state, and System/Light/Dark theme.
+# ---------------------------------------------------------------------------
+def test_top_level_tabs_exact_order_and_standard_default(qapp, paths):
+    w = MainWindow(paths)
+    assert [w.main_tabs.tabText(i) for i in range(w.main_tabs.count())] == \
+        ["Standard", "Advanced", "Settings"]
+    assert w.main_tabs.currentIndex() == 0  # Standard is the default view
+    _close(w)
+
+
+def test_standard_exposes_human_workflow(qapp, paths):
+    w = MainWindow(paths)
+    assert w.add_btn.text() == "Add images…"
+    assert w.remove_btn.text() == "Remove selected"
+    assert w.choose_library_btn.text() == "Choose library…"
+    assert w.preflight_btn.text() == "Verify calibration"
+    assert w.export_btn.text() == "Calibrate / Export…"
+    assert w.lights_count_label.text() == "0 images selected"
+    # Lifecycle footer is globally reachable (Cancel/progress/status exist in the
+    # footer below the top-level tabs, outside any single tab page).
+    assert w.cancel_btn is not None
+    assert w.progress_bar is not None
+    assert w.status_label is not None
+    _close(w)
+
+
+def test_standard_mode_labels_are_presentation_only(qapp, paths):
+    from zecalibrator.gui import presentation
+
+    w = MainWindow(paths)
+    labels = [w.standard_additive_combo.itemText(i) for i in range(w.standard_additive_combo.count())]
+    values = [w.standard_additive_combo.itemData(i) for i in range(w.standard_additive_combo.count())]
+    assert labels == ["None", "Bias only", "Standard dark", "Dark already bias-corrected"]
+    assert values == list(presentation.additive_modes())
+    flat_labels = [w.standard_flat_combo.itemText(i) for i in range(w.standard_flat_combo.count())]
+    flat_values = [w.standard_flat_combo.itemData(i) for i in range(w.standard_flat_combo.count())]
+    assert flat_labels == ["None", "Use flat"]
+    assert flat_values == list(presentation.flat_modes())
+    _close(w)
+
+
+def test_advanced_retains_technical_controls(qapp, paths):
+    from zecalibrator.gui import presentation
+
+    w = MainWindow(paths)
+    assert w.hdu_edit is not None and w.apply_hdu_btn is not None
+    assert w.load_decl_btn.text() == "Load declaration JSON…"
+    assert w.load_roi_btn.text() == "Load ROI JSON…"
+    assert w.open_library_btn.text() == "Open…"
+    assert w.index_btn.text() == "Index library…"
+    assert w.calibrate_btn.text() == "Calibrate selected in memory"
+    assert "SYNTH-BASE-1" in w.qualification_label.text()
+    assert "synthetic-only" in w.qualification_label.text()
+    assert [w.additive_combo.itemData(i) for i in range(w.additive_combo.count())] == \
+        list(presentation.additive_modes())
+    assert [w.flat_combo.itemData(i) for i in range(w.flat_combo.count())] == \
+        list(presentation.flat_modes())
+    _close(w)
+
+
+def test_tab_switch_does_not_change_state(qapp, paths, tmp_path):
+    fixture = make_synth_fixture(tmp_path)
+    w = _make_window(qapp, paths, fixture)
+    try:
+        w._on_preflight()
+        assert _pump(lambda: not w._controller.is_active)
+        gen = w._generation
+        plans = dict(w._plans)
+        summaries = list(w._preflight_summaries)
+        spec = w._library_spec
+        lights = list(w._lights)
+        request = w._request()
+
+        for idx in (1, 2, 0):
+            w.main_tabs.setCurrentIndex(idx)
+
+        assert w._generation == gen
+        assert w._plans == plans
+        assert w._preflight_summaries == summaries
+        assert w._library_spec == spec
+        assert w._lights == lights
+        assert w._request() == request
+    finally:
+        _close(w)
+
+
+def test_standard_mode_change_maps_to_advanced_and_request(qapp, paths):
+    w = MainWindow(paths)
+    w.standard_additive_combo.setCurrentIndex(w.standard_additive_combo.findData("bias_only"))
+    assert w.additive_combo.currentData() == "bias_only"
+    assert w._request().additive_mode == "bias_only"
+    w.standard_flat_combo.setCurrentIndex(w.standard_flat_combo.findData("apply"))
+    assert w.flat_combo.currentData() == "apply"
+    assert w._request().flat_mode == "apply"
+    _close(w)
+
+
+def test_advanced_mode_change_maps_to_standard_and_request(qapp, paths):
+    w = MainWindow(paths)
+    w.additive_combo.setCurrentIndex(w.additive_combo.findData("dark_bias_removed"))
+    assert w.standard_additive_combo.currentData() == "dark_bias_removed"
+    assert w._request().additive_mode == "dark_bias_removed"
+    w.flat_combo.setCurrentIndex(w.flat_combo.findData("none"))
+    assert w.standard_flat_combo.currentData() == "none"
+    assert w._request().flat_mode == "none"
+    _close(w)
+
+
+def test_single_generation_bump_per_mode_change(qapp, paths):
+    w = MainWindow(paths)
+    before = w._generation
+    w.standard_additive_combo.setCurrentIndex(w.standard_additive_combo.findData("bias_only"))
+    assert w._generation == before + 1
+    # Sync reflection must not cause a second invalidation.
+    assert w.additive_combo.currentData() == "bias_only"
+
+    before = w._generation
+    w.additive_combo.setCurrentIndex(w.additive_combo.findData("dark_incl_bias"))
+    assert w._generation == before + 1
+    assert w.standard_additive_combo.currentData() == "dark_incl_bias"
+    _close(w)
+
+
+def test_standard_summary_counts_truthful_human_outcomes(qapp, paths, tmp_path):
+    fixture = make_synth_fixture(tmp_path)
+    w = _make_window(qapp, paths, fixture)
+    try:
+        w.flat_combo.setCurrentIndex(w.flat_combo.findData("apply"))  # NO_MATCH
+        w._on_preflight()
+        assert _pump(lambda: not w._controller.is_active)
+        assert w._preflight_summaries[0]["outcome"] == "NO_MATCH"
+        assert "needs attention" in w.standard_summary_label.text()
+        # Human outcome table shows the human label, not the technical token.
+        assert w.standard_results_table.item(0, 1).text() == "Needs attention"
+        assert "No compatible" in w.standard_results_table.item(0, 2).text()
+    finally:
+        _close(w)
+
+
+def test_standard_summary_matched_shows_ready(qapp, paths, tmp_path):
+    fixture = make_synth_fixture(tmp_path)
+    w = _make_window(qapp, paths, fixture)
+    try:
+        w._on_preflight()
+        assert _pump(lambda: not w._controller.is_active)
+        assert w._preflight_summaries[0]["outcome"] == "MATCHED"
+        assert "image ready" in w.standard_summary_label.text()
+        assert w.standard_results_table.item(0, 1).text() == "Ready"
+        assert w.standard_results_table.item(0, 2).text() == \
+            "A compatible calibration set was found."
+    finally:
+        _close(w)
+
+
+def test_theme_options_exact_and_default_system(qapp, paths):
+    w = MainWindow(paths)
+    assert [w.theme_combo.itemData(i) for i in range(w.theme_combo.count())] == \
+        ["system", "light", "dark"]
+    assert w.theme_combo.currentData() == "system"
+    _close(w)
+
+
+def test_theme_change_does_not_bump_scientific_generation(qapp, paths):
+    from zecalibrator.gui import theme as theme_mod
+
+    w = MainWindow(paths)
+    assert _pump(lambda: w._settings_loaded)
+    before = w._generation
+    w.theme_combo.setCurrentIndex(w.theme_combo.findData("dark"))
+    assert w._generation == before
+    assert w._settings.appearance_theme == "dark"
+    w.theme_combo.setCurrentIndex(w.theme_combo.findData("light"))
+    assert w._generation == before
+    assert w._settings.appearance_theme == "light"
+    # Restore System for the shared QApplication.
+    theme_mod.apply_theme(
+        QtWidgets.QApplication.instance(), theme_mod.THEME_SYSTEM,
+        theme_mod.get_system_palette(QtWidgets.QApplication.instance()),
+    )
+    _close(w)
+
+
+def test_theme_preference_persisted_through_settings(qapp, tmp_path):
+    from zecalibrator.gui.settings import save_settings, default_settings, settings_path
+
+    paths = resolve_paths(base=str(tmp_path))
+    save_settings(paths.user_config_path, default_settings())
+    w = MainWindow(paths)
+    assert _pump(lambda: w._settings_loaded)
+    w.theme_combo.setCurrentIndex(w.theme_combo.findData("dark"))
+    assert w._settings.appearance_theme == "dark"
+    _close(w)  # triggers async settings save
+    from zecalibrator.gui.settings import load_settings
+
+    loaded = load_settings(paths.user_config_path)
+    assert loaded.settings.appearance_theme == "dark"
+
+
+# ---------------------------------------------------------------------------
+# REWORK-1: F1 (truthful idle/progress), F2 (inspect-failure explanation),
+# F3 (theme-load race) + acceptance-alignment (summary/scope/token label).
+# ---------------------------------------------------------------------------
+def test_fresh_window_idle_state_is_truthful(qapp, paths):
+    """F1: after the startup settings load reaches idle, the window shows Ready.
+    and no visible fake progress indicator (never Working…/0% at idle)."""
+    w = MainWindow(paths)
+    assert _pump(lambda: w._settings_loaded and not w._controller.is_active)
+    assert w.status_label.text() == "Ready."
+    assert w.progress_bar.isHidden()
+    assert not w.cancel_btn.isEnabled()  # no active operation at idle
+    _close(w)
+
+
+def test_progress_visible_only_during_active_operation(qapp, paths, tmp_path):
+    """F1: the progress indicator is shown only while an operation is active."""
+    fixture = make_synth_fixture(tmp_path)
+    w = _make_window(qapp, paths, fixture)
+
+    import zecalibrator.api.v1 as v1_mod
+
+    real_inspect = v1_mod.inspect_frame
+
+    def slow_inspect(source, *args, **kwargs):
+        time.sleep(0.3)
+        return real_inspect(source, *args, **kwargs)
+
+    v1_mod.inspect_frame = slow_inspect
+    try:
+        assert w.progress_bar.isHidden()
+        w._on_preflight()
+        assert w._controller.is_active
+        assert not w.progress_bar.isHidden()
+        assert _pump(lambda: not w._controller.is_active)
+        assert w.progress_bar.isHidden()
+    finally:
+        v1_mod.inspect_frame = real_inspect
+        _close(w)
+
+
+def test_standard_explains_missing_source(qapp, paths, tmp_path):
+    """F2: a missing/unreadable image is explained in plain language in Standard
+    (never `Not inspected.` and never raw filesystem exception prose)."""
+    fixture = make_synth_fixture(tmp_path)
+    w = _make_window(qapp, paths, fixture)
+    try:
+        missing_path = str(tmp_path / "missing.fits")
+        w._lights.append(_LightEntry(missing_path, hdu=0))
+        w._refresh_lights_list()
+        w._on_preflight()
+        assert _pump(lambda: not w._controller.is_active)
+
+        row = None
+        for i, s in enumerate(w._preflight_summaries):
+            if s.get("path") == missing_path:
+                row = i
+                break
+        assert row is not None, "missing-source summary not present"
+        assert w.standard_results_table.item(row, 1).text() == "Needs attention"
+        assert w.standard_results_table.item(row, 2).text() == "Could not read this image."
+        # Raw filesystem exception prose must not leak into Standard.
+        assert "Errno" not in w.standard_results_table.item(row, 2).text()
+    finally:
+        _close(w)
+
+
+def test_theme_control_disabled_during_load_and_applies_persisted(qapp, tmp_path):
+    """F3: Theme is disabled during the async settings load, enabled after, and the
+    persisted preference is applied without silently discarding a user choice."""
+    import zecalibrator.gui.settings as settings_mod
+    from zecalibrator.gui.settings import GuiSettings, save_settings
+
+    paths = resolve_paths(base=str(tmp_path))
+    save_settings(paths.user_config_path, GuiSettings(appearance_theme="dark"))
+
+    real_load = settings_mod.load_settings
+    release = {"go": False}
+
+    def slow_load(config_dir):
+        while not release["go"]:
+            time.sleep(0.01)
+        return real_load(config_dir)
+
+    settings_mod.load_settings = slow_load
+    w = None
+    try:
+        w = MainWindow(paths)
+        assert not w._settings_loaded
+        assert not w.theme_combo.isEnabled()
+        release["go"] = True
+        assert _pump(lambda: w._settings_loaded)
+        assert w.theme_combo.isEnabled()
+        assert w.theme_combo.currentData() == "dark"
+        assert w._settings.appearance_theme == "dark"
+    finally:
+        settings_mod.load_settings = real_load
+        if w is not None:
+            w._controller.shutdown()
+            _pump(lambda: w._controller.is_finished)
+
+
+def test_standard_summary_initialized_and_reset_no_images_verified(qapp, paths):
+    w = MainWindow(paths)
+    assert w.standard_summary_label.text() == "No images verified."
+    w._bump_generation()
+    assert w.standard_summary_label.text() == "No images verified."
+    _close(w)
+
+
+def test_scope_all_wording_explicit_images(qapp, paths, tmp_path):
+    fixture = make_synth_fixture(tmp_path)
+    w = _make_window(qapp, paths, fixture)
+    try:
+        w._update_scope_label()
+        assert w.scope_label.text() == "Export scope: all (1 image)"
+        from .conftest import write_fits
+
+        write_fits(tmp_path / "light2.fits", 120.0)
+        w._lights.append(_LightEntry(str(tmp_path / "light2.fits"), hdu=0))
+        w._refresh_lights_list()
+        w._update_scope_label()
+        assert w.scope_label.text() == "Export scope: all (2 images)"
+    finally:
+        _close(w)
+
+
+def test_advanced_token_label_shows_exact_values(qapp, paths):
+    w = MainWindow(paths)
+    assert w.mode_token_label.text() == "Exact values: additive=dark_incl_bias  flat=none"
+    w.additive_combo.setCurrentIndex(w.additive_combo.findData("bias_only"))
+    assert w.mode_token_label.text() == "Exact values: additive=bias_only  flat=none"
+    w.flat_combo.setCurrentIndex(w.flat_combo.findData("apply"))
+    assert w.mode_token_label.text() == "Exact values: additive=bias_only  flat=apply"
+    _close(w)
+
+
+# ---------------------------------------------------------------------------
+# REWORK-2: F2 (inspect-failure buckets) + F4 (no false sub-phase completion).
+# ---------------------------------------------------------------------------
+def test_standard_explains_hdu_failure(qapp, paths, tmp_path):
+    """F2 (non-SOURCE bucket): a wrong HDU is explained in plain language via the
+    public GUI seam, never leaking a raw reason-code string in Standard."""
+    fixture = make_synth_fixture(tmp_path)
+    w = _make_window(qapp, paths, fixture)
+    try:
+        bad = _LightEntry(
+            fixture["light"], hdu=1,
+            declaration=v1.ImportDeclaration(**json.loads(open(fixture["decl"]).read())),
+            roi_extent=v1.RoiExtentEvidence(**json.loads(open(fixture["roi"]).read())),
+        )
+        w._lights.append(bad)
+        w._refresh_lights_list()
+        w._on_preflight()
+        assert _pump(lambda: not w._controller.is_active)
+
+        row = None
+        for i, s in enumerate(w._preflight_summaries):
+            if s.get("row_id") == bad.row_id:
+                row = i
+                break
+        assert row is not None, "HDU-failure summary not present"
+        assert w.standard_results_table.item(row, 1).text() == "Needs attention"
+        assert w.standard_results_table.item(row, 2).text() == \
+            "The selected HDU has no usable 2-D image — pick another HDU in Advanced."
+        assert "HDU_NOT_FOUND" not in w.standard_results_table.item(row, 2).text()
+    finally:
+        _close(w)
+
+
+def test_nested_complete_progress_cannot_show_terminal_while_active(qapp, paths):
+    """F4: a phase-local `complete (2/2)` event while active must not produce a
+    full/terminal-looking bar or status."""
+    w = MainWindow(paths)
+    w._current_op_id = "op-1"
+    w._active_generation = w._generation
+    w._active_kind = "preflight"
+    w._terminal_seen = False
+    w._cancel_requested = False
+    w.progress_bar.setRange(0, 0)
+    w.status_label.setText("Checking calibration…")
+
+    class Evt:
+        phase = "complete"
+        completed = 2
+        total = 2
+        unit = "steps"
+        frame_id = None
+
+    w._on_progress("op-1", Evt())
+    assert w.progress_bar.minimum() == 0 and w.progress_bar.maximum() == 0
+    assert w.status_label.text() == "Checking calibration…"
+    assert "complete" not in w.status_label.text()
+    _close(w)
+
+
+def test_slow_preflight_status_is_kind_label_not_complete(qapp, paths, tmp_path):
+    """F4: during a slow preflight the status stays on the kind label and the bar
+    stays indeterminate (never `complete`/100%) while the controller is active."""
+    fixture = make_synth_fixture(tmp_path)
+    w = _make_window(qapp, paths, fixture)
+
+    import zecalibrator.api.v1 as v1_mod
+
+    real_inspect = v1_mod.inspect_frame
+
+    def slow_inspect(source, *args, **kwargs):
+        time.sleep(0.4)
+        return real_inspect(source, *args, **kwargs)
+
+    v1_mod.inspect_frame = slow_inspect
+    try:
+        w._on_preflight()
+        assert _pump(lambda: w.status_label.text() == "Checking calibration…")
+        assert w._controller.is_active
+        assert w.status_label.text() == "Checking calibration…"
+        assert "complete" not in w.status_label.text()
+        assert w.progress_bar.minimum() == 0 and w.progress_bar.maximum() == 0
+        assert w.cancel_btn.isEnabled()
+        assert _pump(lambda: not w._controller.is_active)
+        assert "Preflight COMPLETED" in w.status_label.text()
+        assert w.progress_bar.isHidden()
+    finally:
+        v1_mod.inspect_frame = real_inspect
+        _close(w)
+
+
+def test_cancel_requested_status_stable_against_later_progress(qapp, paths):
+    """F4: progress arriving after Cancel is requested must not overwrite
+    `Cancellation requested…` before the terminal outcome."""
+    w = MainWindow(paths)
+    w._current_op_id = "op-1"
+    w._active_generation = w._generation
+    w._active_kind = "export"
+    w._terminal_seen = False
+    w._cancel_requested = False
+    w._on_cancel()
+    assert w.status_label.text() == "Cancellation requested…"
+
+    class Evt:
+        phase = "frame_complete"
+        completed = 1
+        total = 1
+        unit = "frames"
+        frame_id = "0"
+
+    w._on_progress("op-1", Evt())
+    assert w.status_label.text() == "Cancellation requested…"
+    _close(w)
