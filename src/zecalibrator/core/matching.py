@@ -405,7 +405,6 @@ def _acquisition_reasons(light: Acquisition, master: Acquisition, policy: MatchP
     reasons += _numeric_reason(light.offset, master.offset, "OFFSET_MISMATCH", "acquisition.offset")  # necessary
     reasons += _disambiguator_reasons(light.readout_mode, master.readout_mode, "READOUT_MISMATCH", "acquisition.readout_mode")
     reasons += _disambiguator_reasons(light.adc_mode, master.adc_mode, "ADC_MISMATCH", "acquisition.adc_mode")
-    reasons += _temperature_reason(light.temperature_c, master.temperature_c, policy)  # necessary
     return reasons
 
 
@@ -522,6 +521,7 @@ def _candidate_compatibility(
 
     if check in (_CHECK_DARK_EXPOSURE, _CHECK_FLATDARK_EXPOSURE):
         reasons += _exposure_reason(reference_exposure, desc.acquisition.exposure_s, policy)
+        reasons += _temperature_reason(reference.acquisition.temperature_c, desc.acquisition.temperature_c, policy)
     elif check in (_CHECK_BIAS_RANGE, _CHECK_FLATBIAS_RANGE):
         reasons += _bias_exposure_reason(desc.acquisition.exposure_s, reference_bias_range)
 

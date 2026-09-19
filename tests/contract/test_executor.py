@@ -121,6 +121,26 @@ def test_already_normalized_branch(make_frame_fixture):
     assert np.allclose(result.data, np.full((2, 2), 50.0))  # 100 / 2
 
 
+def test_already_normalized_flat_does_not_require_temperature(make_frame_fixture):
+    make_frame = make_frame_fixture
+    light = make_frame((2, 2), value=100.0, temperature_c=None)
+    R = _with_data(make_frame, np.full((2, 2), 2.0), exposure_s=1.0, units="dimensionless", temperature_c=None)
+    masters = {
+        "flat": MasterBinding(
+            role="flat", frame=R, flat_form="normalized_response",
+            normalization_proof=_proof(scalars={"mono": 1.0}),
+        ),
+    }
+    result = execute_calibration(
+        light,
+        CalibrationRequest(additive_mode="control", flat_mode="apply"),
+        masters,
+        flat_prep_mode="already_normalized",
+    )
+    assert result.status == "COMPLETED"
+    assert np.allclose(result.data, np.full((2, 2), 50.0))  # 100 / 2
+
+
 def test_already_normalized_requires_evidence(make_frame_fixture):
     make_frame = make_frame_fixture
     light = make_frame((2, 2), value=100.0)

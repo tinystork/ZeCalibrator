@@ -142,6 +142,62 @@ def test_disambiguator_one_known_one_unknown_blocks(light_kw, desc_kw):
     assert not r.unverified
 
 
+# --- Temperature relation-scoping (R3C): dark/flat_dark only ---------------
+def test_temperature_unknown_does_not_block_bias():
+    lt = light(acquisition=acquisition(temperature_c=None))
+    bk = descriptor(
+        "bias", "not_applicable", exposure_s=0.005,
+        acquisition_obj=acquisition(temperature_c=None, exposure_s=0.005),
+    )
+    r = match_calibration(lt, request("bias_only"), pool(bias=[candidate("b1", bk)]), policy())
+    assert r.outcome == OUTCOME_MATCHED
+
+
+def test_temperature_unknown_does_not_block_flat():
+    pp = ProcessingProvenance(
+        source="synthetic_fixture", additive_correction_history=("flat_dark_subtracted",)
+    )
+    lt = light(
+        acquisition=acquisition(temperature_c=None),
+        optical=OpticalIdentity(filter="NONE", optical_train_id=None),
+    )
+    fk = descriptor(
+        "flat", "not_applicable", exposure_s=1.0, flat_form="corrected_unnormalized",
+        filter="NONE", optical_train_id=None, processing=pp,
+        geometry=geo(cfa_phase="mono"),
+        acquisition_obj=acquisition(temperature_c=None, exposure_s=1.0),
+    )
+    r = match_calibration(lt, request("control", "apply"), pool(flat=[candidate("f1", fk)]), policy())
+    assert r.outcome == OUTCOME_MATCHED
+
+
+def test_temperature_unknown_blocks_dark():
+    lt = light(acquisition=acquisition(temperature_c=None))
+    dk = descriptor("dark", "included", acquisition_obj=acquisition(temperature_c=None))
+    r = match_calibration(lt, request(), pool(dark=[candidate("d1", dk)]), policy())
+    assert r.outcome == OUTCOME_NO_MATCH
+    assert "MISSING_REQUIRED_FIELD" in r.reason_codes
+
+
+def test_temperature_unknown_blocks_flat_dark():
+    lt = light(optical=OpticalIdentity(filter="NONE", optical_train_id=None))
+    flat = descriptor(
+        "flat", "not_applicable", exposure_s=1.0, flat_form="raw_response",
+        filter="NONE", optical_train_id=None, geometry=geo(cfa_phase="mono"),
+    )
+    fd = descriptor(
+        "flat_dark", "included", exposure_s=1.0,
+        acquisition_obj=acquisition(temperature_c=None, exposure_s=1.0),
+    )
+    r = match_calibration(
+        lt, request("control", "apply"),
+        pool(flat=[candidate("f1", flat)], flat_dark=[candidate("fd1", fd)]),
+        policy(),
+    )
+    assert r.outcome == OUTCOME_NO_MATCH
+    assert "MISSING_REQUIRED_FIELD" in r.reason_codes
+
+
 # --- CFA-conditional tier: necessary for CFA, disambiguator for mono ---------
 @pytest.mark.parametrize("field", ["orientation", "roi_origin", "roi_extent"])
 def test_cfa_conditional_unknown_blocks_for_bayer(field):

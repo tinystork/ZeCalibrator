@@ -131,16 +131,28 @@ def _full_dark_decl():
 
 
 def test_header_only_master_is_insufficient_evidence():
-    # A header-only dark (no user-only facts) leaves required fields unset.
+    # A header-only dark leaves the NECESSARY (matching-blocking) fields unset;
+    # disambiguators are never reported missing (R3C) and never block "ready".
     decl = service.build_declaration(
         "user", "managed-import", "1",
         {"exposure_s": v1.EvidenceFact("exposure_s", 300.0, "fits_header", "EXPTIME", "user", "1")},
     )
     missing = service.missing_required_fields("dark", decl)
-    assert "detector_instance_id" in missing
-    assert "sensor_dimensions" in missing
-    assert "orientation" in missing
-    assert "roi_origin" in missing
+    # Disambiguators are never part of the necessary tier.
+    assert "detector_instance_id" not in missing
+    assert "sensor_dimensions" not in missing
+    assert "readout_mode" not in missing
+    assert "adc_mode" not in missing
+    # cfa_phase is unknown (None), so CFA-only geometry is not required.
+    assert "orientation" not in missing
+    assert "roi_origin" not in missing
+    # The genuinely necessary facts are reported.
+    assert "detector_model" in missing
+    assert "gain" in missing
+    assert "offset" in missing
+    assert "binning" in missing
+    assert "cfa_phase" in missing
+    assert "temperature_c" in missing
     status, reasons = service.master_evidence_status("dark", decl)
     assert status == "needs_attention"
 
@@ -279,7 +291,9 @@ def test_worker_build_excludes_insufficient_evidence_master(controller, tmp_path
     s1 = r1.finished_summary()
     assert s1["status"] == "COMPLETED"
     assert s1["evidence_status"] == "needs_attention"
-    assert "detector_instance_id" in s1["missing"]
+    # Disambiguators never block readiness (R3C); only the necessary tier does.
+    assert "detector_model" in s1["missing"]
+    assert "detector_instance_id" not in s1["missing"]
 
     spec = v1.LibrarySpec(root=str(tmp_path / "cache"), index_path=str(tmp_path / "cache" / "managed.sqlite"))
     build = _snapshot("build_managed_library", ledger_dir=ledger_dir, managed_spec=spec)
@@ -289,7 +303,8 @@ def test_worker_build_excludes_insufficient_evidence_master(controller, tmp_path
     # reported truthfully (never silently a usable library).
     assert s2["candidate_count"] == 0
     assert len(s2["needs_attention"]) == 1
-    assert "detector_instance_id" in s2["needs_attention"][0]["missing"]
+    assert "detector_model" in s2["needs_attention"][0]["missing"]
+    assert "detector_instance_id" not in s2["needs_attention"][0]["missing"]
 
 
 def test_worker_build_filters_by_session_selection(controller, tmp_path):

@@ -534,36 +534,86 @@ USER_ONLY_FIELDS = (
     "saturation_evidence",
 )
 
-# Matching-relevant field minimum per master type (prepared §5). ``filter`` and
-# ``optical_train_id`` are flat-only; ``exposure_s``/``temperature_c`` are not
-# needed for bias; ``bias_exposure_max_s`` is bias/flat-dependency-relevant.
-REQUIRED_FIELDS_BY_MASTER_TYPE: Mapping[str, Tuple[str, ...]] = {
+# ---------------------------------------------------------------------------
+# R3C field tiers: necessary (matching-blocking) vs disambiguator (UNVERIFIED).
+# ---------------------------------------------------------------------------
+# A missing *necessary* field blocks "ready" and reports "needs attention"; a
+# missing *disambiguator* never does (R3B: non-blocking UNVERIFIED) and is never
+# prompted to the user. ``orientation``/``roi_origin`` are necessary ONLY for a
+# Bayer sensor (cfa_phase in GRBG/RGGB/BGGR/GBRG); for mono/unknown CFA they
+# degrade to disambiguators. ``roi_extent`` is not a declaration field — on the
+# managed path it is always the full array shape — so "full frame (no crop)"
+# only ever sets ``roi_origin=(0,0)``.
+_BAYER_CFA_PHASES = frozenset({"GRBG", "RGGB", "BGGR", "GBRG"})
+
+# Shape-driven geometry (binning) + detector_model/gain/offset + per-type
+# acquisition/optical facts + cfa_phase. CFA-only geometry (orientation/roi_origin)
+# is added conditionally by :func:`necessary_fields`. ``filter`` is flat-only;
+# ``exposure_s``/``temperature_c`` are dark/flat_dark-only (a bias has neither).
+NECESSARY_FIELDS_BY_MASTER_TYPE: Mapping[str, Tuple[str, ...]] = {
     "dark": (
-        "detector_instance_id", "detector_model", "gain", "offset", "readout_mode",
-        "adc_mode", "temperature_c", "exposure_s", "sensor_dimensions", "binning",
-        "orientation", "roi_origin", "cfa_phase",
+        "detector_model", "gain", "offset", "binning", "cfa_phase",
+        "exposure_s", "temperature_c",
     ),
     "bias": (
-        "detector_instance_id", "detector_model", "gain", "offset", "readout_mode",
-        "adc_mode", "sensor_dimensions", "binning", "orientation", "roi_origin",
-        "cfa_phase", "bias_exposure_max_s",
+        "detector_model", "gain", "offset", "binning", "cfa_phase",
     ),
     "flat": (
-        "detector_instance_id", "detector_model", "gain", "offset", "readout_mode",
-        "adc_mode", "temperature_c", "exposure_s", "sensor_dimensions", "binning",
-        "orientation", "roi_origin", "cfa_phase", "filter", "optical_train_id",
+        "detector_model", "gain", "offset", "binning", "cfa_phase",
+        "filter",
     ),
     "flat_dark": (
-        "detector_instance_id", "detector_model", "gain", "offset", "readout_mode",
-        "adc_mode", "temperature_c", "exposure_s", "sensor_dimensions", "binning",
-        "orientation", "roi_origin", "cfa_phase",
+        "detector_model", "gain", "offset", "binning", "cfa_phase",
+        "exposure_s", "temperature_c",
+    ),
+}
+
+# CFA-only necessary geometry facts (required only for a Bayer sensor).
+CFA_ONLY_FIELDS: Tuple[str, ...] = ("orientation", "roi_origin")
+
+# Matching-relevant but non-blocking (UNVERIFIED) fields: never necessary, never
+# prompted. ``optical_train_id`` is flat-only.
+DISAMBIGUATOR_FIELDS_BY_MASTER_TYPE: Mapping[str, Tuple[str, ...]] = {
+    "dark": (
+        "detector_instance_id", "readout_mode", "adc_mode", "sensor_dimensions",
+    ),
+    "bias": (
+        "detector_instance_id", "readout_mode", "adc_mode", "sensor_dimensions",
+    ),
+    "flat": (
+        "detector_instance_id", "readout_mode", "adc_mode", "sensor_dimensions",
+        "optical_train_id",
+    ),
+    "flat_dark": (
+        "detector_instance_id", "readout_mode", "adc_mode", "sensor_dimensions",
     ),
 }
 
 
+def is_bayer_phase(cfa_phase) -> bool:
+    """Return ``True`` when ``cfa_phase`` denotes a Bayer CFA sensor."""
+    return cfa_phase in _BAYER_CFA_PHASES
+
+
+def necessary_fields(master_type: str, cfa_phase=None) -> Tuple[str, ...]:
+    """Return the necessary (matching-blocking) fields for a master type.
+
+    CFA-only geometry facts (``orientation``/``roi_origin``) are included only
+    when ``cfa_phase`` is a Bayer phase.
+    """
+    base = NECESSARY_FIELDS_BY_MASTER_TYPE.get(master_type, ())
+    if is_bayer_phase(cfa_phase):
+        return base + CFA_ONLY_FIELDS
+    return base
+
+
+# Backward-compatible alias: "required" now means the necessary (blocking) tier.
+REQUIRED_FIELDS_BY_MASTER_TYPE = NECESSARY_FIELDS_BY_MASTER_TYPE
+
+
 def required_fields_for_master_type(master_type: str) -> Tuple[str, ...]:
-    """Return the matching-relevant field minimum for a master type (or empty)."""
-    return REQUIRED_FIELDS_BY_MASTER_TYPE.get(master_type, ())
+    """Return the necessary (matching-blocking) field minimum for a master type."""
+    return NECESSARY_FIELDS_BY_MASTER_TYPE.get(master_type, ())
 
 
 # Flat quality evidence is never user-assertable (R4): normalization/validity/
@@ -574,11 +624,13 @@ _FLAT_QUALITY_REASON = "flat quality evidence (normalization/validity/saturation
 
 
 def missing_required_fields(master_type: str, declaration) -> Tuple[str, ...]:
-    """Return the required-field names whose declaration value is ``None``.
+    """Return the necessary-field names whose declaration value is ``None``.
 
-    Uses the frozen per-master-type minimum; absent facts are never invented.
+    Uses only the NECESSARY tier (R3C): a missing disambiguator never appears
+    here and never blocks "ready". CFA-only geometry facts are required only
+    for a Bayer sensor. Absent facts are never invented.
     """
-    required = REQUIRED_FIELDS_BY_MASTER_TYPE.get(master_type, ())
+    required = necessary_fields(master_type, getattr(declaration, "cfa_phase", None))
     return tuple(
         f for f in required if getattr(declaration, f, None) is None
     )
@@ -587,9 +639,10 @@ def missing_required_fields(master_type: str, declaration) -> Tuple[str, ...]:
 def master_evidence_status(master_type: str, declaration) -> Tuple[str, Tuple[str, ...]]:
     """Return ``(status, reasons)`` for a master's evidence completeness.
 
-    ``status`` is ``"ready"`` when every matching-relevant required field is
+    ``status`` is ``"ready"`` when every NECESSARY (matching-blocking) field is
     present and (for flats) machine-readable quality evidence exists; otherwise
-    ``"needs_attention"`` with the concrete missing/insufficient reasons.
+    ``"needs_attention"`` with the concrete missing/insufficient reasons. A
+    missing disambiguator never reports "needs attention" (R3C).
 
     For flats, the R4 quality evidence (normalization/validity/saturation/CFA
     quality) can never be a user assertion; without machine-readable provenance
@@ -639,14 +692,68 @@ def parse_user_fact(field: str, text: str):
     return text
 
 
-def missing_fields_for_master(master_type: str, candidates: Mapping) -> Tuple[str, ...]:
-    """Return the required fields not already detected from the header.
+def _candidate_value(entry):
+    """Return the value of a candidate entry (fact dict / fact object / raw)."""
+    if entry is None:
+        return None
+    if isinstance(entry, dict):
+        return entry.get("value")
+    return getattr(entry, "value", entry)
 
-    Used by the confirmation UI to know which facts must still be supplied by the
-    user (``candidates`` holds the header-detected fields).
+
+def missing_fields_for_master(master_type: str, candidates: Mapping) -> Tuple[str, ...]:
+    """Return the NECESSARY fields not already detected from the header.
+
+    Disambiguators are never returned (→ never prompted). CFA-only geometry
+    facts (``orientation``/``roi_origin``) are returned only when the detected
+    ``cfa_phase`` is a Bayer phase. ``candidates`` maps field -> value (or a
+    fact dict / :class:`~zecalibrator.api.v1.EvidenceFact` carrying ``value``).
     """
-    required = REQUIRED_FIELDS_BY_MASTER_TYPE.get(master_type, ())
+    cfa_phase = _candidate_value(candidates.get("cfa_phase"))
+    required = necessary_fields(master_type, cfa_phase)
     return tuple(f for f in required if f not in candidates)
+
+
+# ---------------------------------------------------------------------------
+# Human-readable confirmation (R3C Standard UX): never expose internal names.
+# ---------------------------------------------------------------------------
+# Human labels for the NECESSARY facts a normal user may still need to supply.
+# Internal field names are never shown. Header-derived facts (INSTRUME/GAIN/
+# OFFSET/CCD-TEMP/EXPTIME/XBINNING/YBINNING/BAYERPAT/FILTER) are auto-detected
+# and therefore never reach this mapping for prompting.
+HUMAN_FACT_LABELS: Mapping[str, str] = {
+    "detector_model": "Camera / detector model",
+    "gain": "Gain (e⁻/ADU)",
+    "offset": "Offset / pedestal (ADU)",
+    "exposure_s": "Exposure time (seconds)",
+    "temperature_c": "Sensor temperature (°C)",
+    "binning": "Binning (height × width)",
+    "cfa_phase": "CFA / Bayer pattern",
+    "filter": "Filter",
+}
+
+# CFA-only geometry confirmation: a bounded, explicit mapping from a clear
+# user-facing choice to the internal geometry fact. Provenance = user
+# confirmation (never guessed silently). ``roi_extent`` is not a declaration
+# field — on the managed path it is always the full array shape — so "full
+# frame (no crop)" maps to ``roi_origin=(0,0)``.
+CFA_GEOMETRY_CONFIRMATIONS: Tuple[Tuple[str, str, str, object], ...] = (
+    ("full_frame", "Full frame (no crop)", "roi_origin", (0, 0)),
+    ("standard_orientation", "Standard orientation (not flipped)", "orientation", "identity"),
+)
+
+
+def human_fact_label(field: str) -> Optional[str]:
+    """Return the human label for a necessary fact (or ``None``)."""
+    return HUMAN_FACT_LABELS.get(field)
+
+
+def cfa_geometry_confirmation(field: str) -> Optional[Tuple[str, str, object]]:
+    """Return ``(id, human_label, value)`` for a CFA geometry field, or ``None``."""
+    for cid, label, fld, value in CFA_GEOMETRY_CONFIRMATIONS:
+        if fld == field:
+            return (cid, label, value)
+    return None
 
 
 def build_declaration(source, identity, version, evidence: Mapping, extra: Optional[Mapping] = None) -> "v1.ImportDeclaration":
@@ -941,20 +1048,28 @@ def to_jsonable(value):
 
 
 __all__ = [
+    "CFA_GEOMETRY_CONFIRMATIONS",
+    "CFA_ONLY_FIELDS",
+    "DISAMBIGUATOR_FIELDS_BY_MASTER_TYPE",
     "EVIDENCE_SOURCE_MAP",
+    "HUMAN_FACT_LABELS",
     "IMAGETYP_ROLE_MAP",
+    "NECESSARY_FIELDS_BY_MASTER_TYPE",
     "REQUIRED_FIELDS_BY_MASTER_TYPE",
     "SUPPORTED_INPUT_EXTENSIONS",
     "USER_ONLY_FIELDS",
     "LightInput",
     "OperationSnapshot",
     "build_declaration",
+    "cfa_geometry_confirmation",
     "dedup_input_paths",
     "detect_header_candidates",
     "detect_imagetyp_role",
     "detect_role_conflict",
     "evidence_for_fields",
+    "human_fact_label",
     "input_dialog_filter",
+    "is_bayer_phase",
     "is_supported_input_file",
     "load_json_array",
     "load_json_object",
@@ -963,6 +1078,7 @@ __all__ = [
     "master_incompatibility",
     "missing_fields_for_master",
     "missing_required_fields",
+    "necessary_fields",
     "new_batch_id",
     "new_operation_id",
     "parse_declaration",

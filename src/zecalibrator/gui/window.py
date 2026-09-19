@@ -1124,24 +1124,43 @@ class MainWindow(QtWidgets.QMainWindow):
         self.details_view.setPlainText("\n".join(lines) if lines else "(no candidates detected)")
 
     def _collect_user_facts(self, master_type: str, candidates: dict) -> dict:
-        """Prompt for the required facts not already header-detected.
+        """Confirm only genuinely-necessary-and-missing facts, in human terms.
 
+        Never shows internal field names. Header-derived facts and disambiguators
+        are never prompted. CFA-only geometry facts (orientation/roi_origin) are
+        presented as ONE clear checkbox confirmation mapped explicitly to their
+        internal values (provenance = user confirmation, never guessed silently).
         Returns a dict of ``field -> parsed value`` for the facts the user
-        supplied (empty entries are skipped, so absent stays absent). Flat
-        quality evidence is never offered (R4); it is not in the required-field
-        minimum.
+        supplied (absent stays absent). Flat quality evidence is never offered
+        (R4).
         """
         missing = service.missing_fields_for_master(master_type, candidates)
         if not missing:
             return {}
+        text_fields = [f for f in missing if f not in service.CFA_ONLY_FIELDS]
+        cfa_fields = [f for f in missing if f in service.CFA_ONLY_FIELDS]
+
         dialog = QtWidgets.QDialog(self)
-        dialog.setWindowTitle(f"Supply required facts — {master_type}")
+        dialog.setWindowTitle(f"Confirm required facts — {master_type}")
         form = QtWidgets.QFormLayout(dialog)
+
         edits: dict = {}
-        for field in missing:
+        for field in text_fields:
+            label = service.human_fact_label(field) or field
             edit = QtWidgets.QLineEdit()
             edits[field] = edit
-            form.addRow(field, edit)
+            form.addRow(label, edit)
+
+        cfa_checks: dict = {}
+        for field in cfa_fields:
+            confirmation = service.cfa_geometry_confirmation(field)
+            if confirmation is None:
+                continue
+            _cid, label, value = confirmation
+            check = QtWidgets.QCheckBox(label)
+            cfa_checks[field] = (check, value)
+            form.addRow("", check)
+
         buttons = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.StandardButton.Ok
             | QtWidgets.QDialogButtonBox.StandardButton.Cancel
@@ -1160,6 +1179,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 extra[field] = service.parse_user_fact(field, text)
             except ValueError as exc:
                 self._log(f"[managed] invalid value for {field}: {exc}")
+        for field, (check, value) in cfa_checks.items():
+            if check.isChecked():
+                extra[field] = value
         return extra
 
     def _resolve_role_conflict(self, conflict: dict) -> str | None:

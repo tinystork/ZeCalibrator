@@ -67,6 +67,30 @@ def test_nan_temperature_rejected(make_frame_fixture):
     assert "MISSING_REQUIRED_FIELD" in exc.value.reason_code
 
 
+def test_bias_does_not_require_temperature(make_frame_fixture):
+    make_frame = make_frame_fixture
+    light = make_frame((4, 4), value=100.0, temperature_c=None)
+    bias = make_frame((4, 4), value=4.0, exposure_s=0.01, temperature_c=None)
+    masters = {"bias": MasterBinding(role="bias", frame=bias)}
+    r = execute_calibration(light, CalibrationRequest("bias_only"), masters)
+    assert r.status == "COMPLETED"
+
+
+def test_flat_dark_temperature_mismatch_rejected(make_frame_fixture):
+    make_frame = make_frame_fixture
+    light = make_frame((4, 4), value=100.0, temperature_c=20.0)
+    finc = make_frame((4, 4), value=100.0, exposure_s=1.0, temperature_c=20.0)
+    fdinc = make_frame((4, 4), value=10.0, exposure_s=1.0, temperature_c=20.0 + 0.001)
+    masters = {
+        "flat": MasterBinding(role="flat", frame=finc, flat_form="raw_response"),
+        "flat_dark": MasterBinding(role="flat_dark", frame=fdinc, bias_state="included"),
+    }
+    with pytest.raises(GeometryMismatchError) as exc:
+        execute_calibration(light, CalibrationRequest("control", "apply"), masters,
+                            flat_prep_mode="flat_dark_incl_bias")
+    assert "TEMPERATURE_MISMATCH" in exc.value.reason_code
+
+
 def test_missing_light_exposure_rejected(make_frame_fixture):
     make_frame = make_frame_fixture
     light = make_frame((4, 4), value=100.0, exposure_s=None)

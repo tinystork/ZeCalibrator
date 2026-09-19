@@ -295,7 +295,6 @@ def _validate_compatibility(
     reasons.append(_numeric_field_reason(light.offset, m.offset, "OFFSET_MISMATCH"))
     reasons.append(_disambiguator_field_reason(light.readout_mode, m.readout_mode, "READOUT_MISMATCH"))
     reasons.append(_disambiguator_field_reason(light.adc_mode, m.adc_mode, "ADC_MISMATCH"))
-    reasons.append(_temp_reason(light.temperature_c, m.temperature_c))
 
     # Units: the light is always sensor-ADU (validated separately); the master
     # must match the role-specific expectation (ADU for sensor masters,
@@ -303,8 +302,11 @@ def _validate_compatibility(
     if m.units != expected_units:
         reasons.append("MISSING_REQUIRED_FIELD")
 
+    # Temperature is relation-scoped like exposure (dark/flat_dark only): a bias
+    # is temperature-stable and a flat is normalized, so neither requires it.
     if exposure_reference is not None:
         reasons.append(_exposure_reason(exposure_reference, m.exposure_s))
+        reasons.append(_temp_reason(light.temperature_c, m.temperature_c))
 
     if check_filter:
         reasons.append(_field_reason(light.filter, m.filter, "FILTER_MISMATCH"))
