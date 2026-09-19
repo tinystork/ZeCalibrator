@@ -5,9 +5,16 @@ lives on a dedicated ``QThread`` that runs its own event loop for the lifetime o
 the application. Each operation is dispatched as an immutable
 :class:`~zecalibrator.gui.service.OperationSnapshot` + a shared
 :class:`~zecalibrator.api.v1.CancellationToken` + a bounded progress mailbox
-through a queued signal, so the request crosses the thread boundary by reference
-and never races the previous operation (the controller's ``_active`` guard
-prevents overlap).
+through a shared thread-safe :class:`queue.Queue` (a no-payload Qt signal is
+used only as a wakeup), so the request crosses the thread boundary by plain
+Python reference — never via Qt ``Signal(object)`` marshalling — and never races
+the previous operation (the controller's ``_active`` guard prevents overlap).
+
+Worker→GUI payloads (``preflight_light`` / ``batch_item`` / ``finished``) use
+the same queue transport: the worker puts a ``(kind, op_id, payload)`` tuple on
+a second shared :class:`queue.Queue` and emits a no-payload ``relay`` wakeup;
+the controller's main-thread ``_on_relay`` slot pops the tuple and re-emits the
+matching PUBLIC signal.
 
 Threading/lifetime invariants (ARCHITECTURE §3.7, ASTRA §11, prepared §5-§8):
 
@@ -37,6 +44,7 @@ from __future__ import annotations
 import atexit
 import json
 import os
+import queue
 import sys
 import threading
 from pathlib import Path
@@ -253,22 +261,46 @@ def _resolve_failed_summary(index: int, light: "service.LightInput", inspection,
 
 
 class _OperationWorker(QtCore.QObject):
-    """The single worker QObject (lives on the worker thread)."""
+    """The single worker QObject (lives on the worker thread).
 
-    start_op = QtCore.Signal(object, object, object)  # (snapshot, token, mailbox)
+    Python payloads do NOT cross the worker↔GUI thread boundary through Qt
+    ``Signal(object)`` marshalling. Requests and responses travel through two
+    shared :class:`queue.Queue` objects (thread-safe, plain Python references,
+    no Shiboken refcount work); the Qt signals used here are no-payload wakeups
+    only:
+
+    * ``start_op`` (GUI→worker): wakes ``_run``, which pops one request tuple
+      ``(snapshot, token, mailbox)`` from ``self._req_queue``.
+    * ``relay`` (worker→GUI): wakes the controller's ``_on_relay`` slot, which
+      pops one ``(kind, op_id, payload)`` tuple from ``self._res_queue`` and
+      re-emits the matching PUBLIC controller signal.
+    """
+
+    start_op = QtCore.Signal()  # no payload: wakeup only
     started = QtCore.Signal(str)
-    preflight_light = QtCore.Signal(str, object, object)  # op_id, summary, plan
-    batch_item = QtCore.Signal(str, object)  # op_id, item dict
-    finished = QtCore.Signal(str, object)  # op_id, summary
+    relay = QtCore.Signal()  # no payload: wakeup only
     failed = QtCore.Signal(str, str, str)  # op_id, reason_code, details
     ended = QtCore.Signal()
 
-    def __init__(self, parent=None):
+    def __init__(self, req_queue: queue.Queue, res_queue: queue.Queue, parent=None):
         super().__init__(parent)
+        self._req_queue = req_queue
+        self._res_queue = res_queue
         self.start_op.connect(self._run)
 
-    @QtCore.Slot(object, object, object)
-    def _run(self, snapshot, token, mailbox):
+    def _relay(self, kind: str, op_id: str, payload) -> None:
+        """Post one worker→GUI payload and wake the main-thread relay slot."""
+        self._res_queue.put((kind, op_id, payload))
+        self.relay.emit()
+
+    @QtCore.Slot()
+    def _run(self):
+        try:
+            snapshot, token, mailbox = self._req_queue.get_nowait()
+        except queue.Empty:
+            # A lost/coalesced wakeup must never happen (the put precedes the
+            # emit on the producing thread). Fail loudly instead of hanging.
+            raise RuntimeError("worker start_op wakeup without a queued request")
         op_id = snapshot.op_id
         self.started.emit(op_id)
 
@@ -294,7 +326,7 @@ class _OperationWorker(QtCore.QObject):
         # guard: _on_operation_finished/_on_operation_failed set it before the
         # controller's final drain runs, so a late "complete" can never overwrite
         # the truthful terminal summary. Engine-sourced progress is preserved.
-        self.finished.emit(op_id, summary)
+        self._relay("finished", op_id, summary)
         self.ended.emit()
 
     # -- operations ----------------------------------------------------------
@@ -391,8 +423,9 @@ class _OperationWorker(QtCore.QObject):
                 if insp.operation_status == "CANCELLED":
                     return {"kind": "preflight", "status": "CANCELLED", "count": index}
                 if insp.operation_status == "FAILED":
-                    self.preflight_light.emit(
-                        snap.op_id, _inspect_failed_summary(index, light, insp), None
+                    self._relay(
+                        "preflight", snap.op_id,
+                        (_inspect_failed_summary(index, light, insp), None),
                     )
                     continue
                 inspection = insp.inspection
@@ -403,12 +436,13 @@ class _OperationWorker(QtCore.QObject):
                 if res.operation_status == "CANCELLED":
                     return {"kind": "preflight", "status": "CANCELLED", "count": index}
                 if res.operation_status == "FAILED":
-                    self.preflight_light.emit(
-                        snap.op_id, _resolve_failed_summary(index, light, inspection, res), None
+                    self._relay(
+                        "preflight", snap.op_id,
+                        (_resolve_failed_summary(index, light, inspection, res), None),
                     )
                     continue
                 summary, plan = _resolve_summary(index, light, inspection, res.decision)
-                self.preflight_light.emit(snap.op_id, summary, plan)
+                self._relay("preflight", snap.op_id, (summary, plan))
             return {"kind": "preflight", "status": "COMPLETED", "count": len(snap.lights)}
         finally:
             handle.close()
@@ -464,7 +498,7 @@ class _OperationWorker(QtCore.QObject):
             ):
                 d = item.to_dict()
                 items.append(d)
-                self.batch_item.emit(snap.op_id, d)
+                self._relay("batch_item", snap.op_id, d)
         except v1.OperationCancelled:
             cancelled = True
         except v1.BatchManifestError as exc:
@@ -767,13 +801,17 @@ class WorkerController(QtCore.QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._thread = QtCore.QThread()  # no parent: Python-owned; released on main thread after the thread stops
-        self._worker = _OperationWorker()  # no parent: Python-owned; released after the thread stops
+        # Shared request/response queues (thread-safe plain-Python transport).
+        # Owned by the controller (created here, kept for the controller's
+        # lifetime); referenced by the worker. Payloads never cross the thread
+        # boundary via Qt ``Signal(object)`` marshalling.
+        self._req_queue = queue.Queue()
+        self._res_queue = queue.Queue()
+        self._worker = _OperationWorker(self._req_queue, self._res_queue)  # no parent: Python-owned; released after the thread stops
         self._worker.moveToThread(self._thread)
 
         self._worker.started.connect(self.operation_started)
-        self._worker.preflight_light.connect(self.preflight_light)
-        self._worker.batch_item.connect(self.batch_item)
-        self._worker.finished.connect(self.operation_finished)
+        self._worker.relay.connect(self._on_relay)
         self._worker.failed.connect(self.operation_failed)
         self._worker.ended.connect(self._on_worker_ended)
 
@@ -827,8 +865,26 @@ class WorkerController(QtCore.QObject):
         self._active = True
         self._active_op_id = snapshot.op_id
         self._mailbox = ProgressMailbox()
-        self._worker.start_op.emit(snapshot, token, self._mailbox)
+        # Single-active-operation guarantee: the ``_active`` guard above
+        # prevents overlap, so the request queue holds at most one entry.
+        self._req_queue.put((snapshot, token, self._mailbox))
+        self._worker.start_op.emit()
         self._drain_timer.start()
+
+    @QtCore.Slot()
+    def _on_relay(self) -> None:
+        """Main-thread slot: pop one worker→GUI payload and re-emit the PUBLIC signal."""
+        try:
+            kind, op_id, payload = self._res_queue.get_nowait()
+        except queue.Empty:
+            # Lost/coalesced relay wakeup must never happen; fail loudly.
+            raise RuntimeError("worker relay wakeup without a queued payload")
+        if kind == "preflight":
+            self.preflight_light.emit(op_id, payload[0], payload[1])
+        elif kind == "batch_item":
+            self.batch_item.emit(op_id, payload)
+        elif kind == "finished":
+            self.operation_finished.emit(op_id, payload)
 
     @QtCore.Slot()
     def _drain_progress(self) -> None:
