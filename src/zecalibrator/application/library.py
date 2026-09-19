@@ -196,6 +196,7 @@ class DecisionEnvelope:
     light_constraints: Optional[LightConstraints] = None
     selection_decisions: Tuple[Tuple[str, str], ...] = ()
     verification: Optional[ValidationResult] = None
+    unverified: Tuple[Reason, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "rejected_candidates", tuple(self.rejected_candidates))
@@ -203,6 +204,7 @@ class DecisionEnvelope:
         object.__setattr__(self, "reasons", tuple(self.reasons))
         object.__setattr__(self, "coherent_sets", tuple(MappingProxyType(dict(s)) for s in self.coherent_sets))
         object.__setattr__(self, "selection_decisions", tuple((k, v) for k, v in self.selection_decisions))
+        object.__setattr__(self, "unverified", tuple(self.unverified))
 
     def to_dict(self) -> Mapping[str, object]:
         return {
@@ -215,6 +217,7 @@ class DecisionEnvelope:
             "rejected_candidates": [r.to_dict() for r in self.rejected_candidates],
             "reason_codes": list(self.reason_codes),
             "reasons": [r.to_dict() for r in self.reasons],
+            "unverified": [r.to_dict() for r in self.unverified],
             "coherent_sets": [
                 {role: _candidate_to_dict(c) for role, c in s.items()}
                 for s in self.coherent_sets
@@ -248,6 +251,7 @@ class DecisionEnvelope:
             light_constraints=CalibrationPlan._light_from_dict(d["light_constraints"]) if d.get("light_constraints") is not None else None,
             selection_decisions=tuple(tuple(kv) for kv in d.get("selection_decisions", ())),
             verification=ValidationResult(status=d["verification"]["status"], reasons=tuple(d["verification"].get("reasons", ()))) if d.get("verification") is not None else None,
+            unverified=tuple(_reason_from_dict(r) for r in d.get("unverified", ())),
         )
 def light_constraints_from_sensor_metadata(md: SensorMetadata) -> LightConstraints:
     """Adapt G3 ``SensorMetadata`` into pure matching constraints (no reverse import).
@@ -322,6 +326,7 @@ def resolve_calibration(
         input_identity=input_identity,
         light_constraints=light,
         selection_decisions=selection,
+        unverified=result.unverified,
     )
 
 
@@ -419,6 +424,7 @@ def plan_calibration_file_backed(
         light_constraints=envelope.light_constraints,
         selection_decisions=envelope.selection_decisions,
         verification=verification,
+        unverified=envelope.unverified,
     )
 
 

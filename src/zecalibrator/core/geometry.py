@@ -69,6 +69,19 @@ def _freeze_tuple(value):
     raise ValueError(f"geometry tuple field must be a tuple/list or None, got {type(value)!r}")
 
 
+def is_bayer_phase(cfa_phase: Optional[str]) -> bool:
+    """Return ``True`` when ``cfa_phase`` denotes a Bayer CFA sensor.
+
+    This is the shared CFA-conditional decision predicate for the relation
+    matcher and its execution-time mirror (R3B): for a Bayer sensor a one-pixel
+    ROI translation flips the parity phase, so ``orientation``/``roi_origin``/
+    ``roi_extent`` are *necessary*; for an explicit mono sensor (``"mono"``) —
+    where CFA does not apply — those fields degrade to disambiguators.
+    ``None`` (unknown) is not a Bayer phase.
+    """
+    return cfa_phase in ("GRBG", "RGGB", "BGGR", "GBRG")
+
+
 def _phase_labels(cfa_phase: str) -> tuple[str, str, str, str]:
     try:
         return _PHASE_LABELS[cfa_phase]
@@ -172,6 +185,7 @@ __all__ = [
     "MONO_PLANES",
     "array_plane",
     "geometry_matches",
+    "is_bayer_phase",
     "plane_index_array",
     "plane_label_array",
     "sensor_plane",

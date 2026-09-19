@@ -99,12 +99,14 @@ def test_none_none_detector_model_rejects():
     assert "UNKNOWN_EQUALS_UNKNOWN" in r.reason_codes
 
 
-def test_explicit_unknown_unknown_instance_rejects():
+def test_explicit_unknown_unknown_instance_unverified():
+    # R3B: detector_instance_id is a disambiguator, so both-unknown is a
+    # non-blocking UNVERIFIED note (unlike the *necessary* detector_model).
     lt = light(detector=detector(instance="unknown"))
     dk = descriptor("dark", "included", detector_obj=detector(instance="unknown"))
     r = match_calibration(lt, request(), pool(dark=[candidate("d1", dk)]), policy())
-    assert r.outcome == OUTCOME_NO_MATCH
-    assert set(r.reason_codes) == {"UNKNOWN_EQUALS_UNKNOWN", "MISSING_REQUIRED_FIELD"}
+    assert r.outcome == OUTCOME_MATCHED
+    assert {reason.code for reason in r.unverified} == {"UNVERIFIED"}
 
 
 def test_known_unknown_gain_rejects():

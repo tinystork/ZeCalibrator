@@ -38,7 +38,7 @@ from zecalibrator.core.descriptors import (
     MasterDescriptor,
     OpticalIdentity,
 )
-from zecalibrator.core.geometry import Geometry
+from zecalibrator.core.geometry import Geometry, is_bayer_phase
 from zecalibrator.core.plans import (
     CalibrationPlan,
     CalibrationRequest,
@@ -55,6 +55,7 @@ OUTCOME_AMBIGUOUS = "AMBIGUOUS"
 
 _MISSING = "MISSING_REQUIRED_FIELD"
 _UNKNOWN_EQ = "UNKNOWN_EQUALS_UNKNOWN"
+_UNVERIFIED = "UNVERIFIED"
 _BAYER_PHASES = ("GRBG", "RGGB", "BGGR", "GBRG")
 _CFA_PLANES = ("G1", "R", "B", "G2")
 _MONO_PLANES = ("mono",)
@@ -76,7 +77,15 @@ def _freeze_value(value):
 
 @dataclass(frozen=True)
 class Reason:
-    """A structured rejection reason (code + field/role/parent + evidence)."""
+    """A structured rejection reason (code + field/role/parent + evidence).
+
+    ``blocking`` (default ``True``) marks a reason that rejects a candidate.
+    A non-blocking ``UNVERIFIED`` note (``blocking=False``) records an unknown
+    *disambiguator* (e.g. both sides unknown) without rejecting: a candidate is
+    compatible iff it has **zero blocking** reasons (R3B). ``blocking`` is an
+    in-memory decision flag; the serialized ``code`` (``"UNVERIFIED"``) is the
+    round-trip-safe signal of a non-blocking note.
+    """
 
     code: str
     field: Optional[str] = None
@@ -84,6 +93,7 @@ class Reason:
     parent: Optional[str] = None
     expected: object = None
     observed: object = None
+    blocking: bool = True
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "expected", _freeze_value(self.expected))
@@ -129,12 +139,14 @@ class MatchResult:
     reasons: tuple[Reason, ...] = ()
     coherent_sets: tuple[Mapping[str, Candidate], ...] = ()
     structural_reasons: tuple[Reason, ...] = ()
+    unverified: tuple[Reason, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "rejected_candidates", tuple(self.rejected_candidates))
         object.__setattr__(self, "reasons", tuple(self.reasons))
         object.__setattr__(self, "coherent_sets", tuple(MappingProxyType(dict(s)) for s in self.coherent_sets))
         object.__setattr__(self, "structural_reasons", tuple(self.structural_reasons))
+        object.__setattr__(self, "unverified", tuple(self.unverified))
 
 
 # ---------------------------------------------------------------------------
@@ -163,43 +175,121 @@ def _dedup(codes: Iterable[str]) -> list[str]:
     return list(dict.fromkeys(codes))
 
 
+def _disambiguator_reasons(light, master, code: str, field: str, *, unknown=_unknown) -> list[Reason]:
+    """Disambiguator-tier reasons (R3B).
+
+    Semantics:
+
+    * both known + equal      -> ok (no reason)
+    * both known + different  -> mismatch (blocking)
+    * both unknown            -> UNVERIFIED (non-blocking, recorded)
+    * one known + one unknown -> MISSING (blocking, conservative)
+    """
+    lu = unknown(light)
+    mu = unknown(master)
+    if lu and mu:
+        return [Reason(_UNVERIFIED, field, expected=light, observed=master, blocking=False)]
+    if lu or mu:
+        return [Reason(_MISSING, field, expected=light, observed=master, blocking=True)]
+    if light != master:
+        return [Reason(code, field, expected=light, observed=master, blocking=True)]
+    return []
+
+
+def _split_reasons(reasons: Iterable[Reason]) -> tuple[list[Reason], list[Reason]]:
+    """Partition reasons into ``(blocking, unverified)``."""
+    blocking: list[Reason] = []
+    unverified: list[Reason] = []
+    for r in reasons:
+        if r.blocking:
+            blocking.append(r)
+        else:
+            unverified.append(r)
+    return blocking, unverified
+
+
+def _hashable(value):
+    try:
+        hash(value)
+        return value
+    except TypeError:
+        return repr(value)
+
+
+def _dedup_unverified(reasons: Iterable[Reason]) -> list[Reason]:
+    """Dedup UNVERIFIED notes by ``(code, field, expected, observed)`` (R3B)."""
+    seen: set[tuple] = set()
+    out: list[Reason] = []
+    for r in reasons:
+        key = (r.code, r.field, _hashable(r.expected), _hashable(r.observed))
+        if key not in seen:
+            seen.add(key)
+            out.append(r)
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Per-field compatibility reasons
 # ---------------------------------------------------------------------------
 def _geometry_reasons(light: Geometry, master: Geometry) -> list[Reason]:
     reasons: list[Reason] = []
 
-    def req(code, field, lv, mv):
-        reasons.append(Reason(code=code, field=field, expected=lv, observed=mv))
+    def req(code, field, lv, mv, blocking=True):
+        reasons.append(Reason(code=code, field=field, expected=lv, observed=mv, blocking=blocking))
 
     if light.shape != master.shape:
         req("GEOMETRY_MISMATCH", "geometry.shape", light.shape, master.shape)
 
-    for fld, code in (("sensor_dimensions", "GEOMETRY_MISMATCH"), ("binning", "BINNING_MISMATCH"), ("orientation", "GEOMETRY_MISMATCH")):
-        lv = getattr(light, fld)
-        mv = getattr(master, fld)
-        if lv is None or mv is None:
-            req(_MISSING, f"geometry.{fld}", lv, mv)
-        elif lv != mv:
-            req(code, f"geometry.{fld}", lv, mv)
-            if fld == "binning":
-                req("GEOMETRY_MISMATCH", "geometry.binning", lv, mv)
+    # binning — necessary (unchanged).
+    lb = light.binning
+    mb = master.binning
+    if lb is None or mb is None:
+        req(_MISSING, "geometry.binning", lb, mb)
+    elif lb != mb:
+        req("BINNING_MISMATCH", "geometry.binning", lb, mb)
+        req("GEOMETRY_MISMATCH", "geometry.binning", lb, mb)
 
-    lre = light.roi_extent
-    mre = master.roi_extent
-    if lre is None or mre is None:
-        req(_MISSING, "geometry.roi_extent", lre, mre)
-    elif lre != mre:
-        req("GEOMETRY_MISMATCH", "geometry.roi_extent", lre, mre)
+    # sensor_dimensions — disambiguator.
+    reasons += _disambiguator_reasons(
+        light.sensor_dimensions, master.sensor_dimensions, "GEOMETRY_MISMATCH", "geometry.sensor_dimensions"
+    )
+
+    # CFA-conditional tier: orientation/roi_origin/roi_extent are *necessary*
+    # for a Bayer sensor, *disambiguators* otherwise (mono / CFA not applicable).
+    cfa_applies = is_bayer_phase(light.cfa_phase) or is_bayer_phase(master.cfa_phase)
+
+    lo = light.orientation
+    mo = master.orientation
+    if cfa_applies:
+        if lo is None or mo is None:
+            req(_MISSING, "geometry.orientation", lo, mo)
+        elif lo != mo:
+            req("GEOMETRY_MISMATCH", "geometry.orientation", lo, mo)
+    else:
+        reasons += _disambiguator_reasons(lo, mo, "GEOMETRY_MISMATCH", "geometry.orientation")
 
     lroi = light.roi_origin
     mroi = master.roi_origin
-    if lroi is None or mroi is None:
-        req(_MISSING, "geometry.roi_origin", lroi, mroi)
-    elif lroi != mroi:
-        req("ROI_ORIGIN_MISMATCH", "geometry.roi_origin", lroi, mroi)
-        req("CFA_PHASE_MISMATCH", "geometry.roi_origin", lroi, mroi)
+    if cfa_applies:
+        if lroi is None or mroi is None:
+            req(_MISSING, "geometry.roi_origin", lroi, mroi)
+        elif lroi != mroi:
+            req("ROI_ORIGIN_MISMATCH", "geometry.roi_origin", lroi, mroi)
+            req("CFA_PHASE_MISMATCH", "geometry.roi_origin", lroi, mroi)
+    else:
+        reasons += _disambiguator_reasons(lroi, mroi, "ROI_ORIGIN_MISMATCH", "geometry.roi_origin")
 
+    lre = light.roi_extent
+    mre = master.roi_extent
+    if cfa_applies:
+        if lre is None or mre is None:
+            req(_MISSING, "geometry.roi_extent", lre, mre)
+        elif lre != mre:
+            req("GEOMETRY_MISMATCH", "geometry.roi_extent", lre, mre)
+    else:
+        reasons += _disambiguator_reasons(lre, mre, "GEOMETRY_MISMATCH", "geometry.roi_extent")
+
+    # cfa_phase — necessary (unchanged).
     lcfa = light.cfa_phase
     mcfa = master.cfa_phase
     if lcfa is None or mcfa is None:
@@ -212,15 +302,14 @@ def _geometry_reasons(light: Geometry, master: Geometry) -> list[Reason]:
 
 def _detector_reasons(light: DetectorIdentity, master: DetectorIdentity) -> list[Reason]:
     reasons: list[Reason] = []
-    li = None if _unknown_instance(light.detector_instance_id) else light.detector_instance_id
-    mi = None if _unknown_instance(master.detector_instance_id) else master.detector_instance_id
-    if li is None or mi is None:
-        reasons.append(Reason(_MISSING, "detector.detector_instance_id", expected=light.detector_instance_id, observed=master.detector_instance_id))
-        if li is None and mi is None:
-            reasons.append(Reason(_UNKNOWN_EQ, "detector.detector_instance_id", expected=light.detector_instance_id, observed=master.detector_instance_id))
-    elif li != mi:
-        reasons.append(Reason("DETECTOR_MISMATCH", "detector.detector_instance_id", expected=light.detector_instance_id, observed=master.detector_instance_id))
 
+    # detector_instance_id — disambiguator ("unknown" string or None = unknown).
+    reasons += _disambiguator_reasons(
+        light.detector_instance_id, master.detector_instance_id,
+        "DETECTOR_MISMATCH", "detector.detector_instance_id", unknown=_unknown_instance,
+    )
+
+    # detector_model — necessary (unchanged).
     lm = light.detector_model
     mm = master.detector_model
     if lm is None or mm is None:
@@ -312,11 +401,11 @@ def _units_reason(desc: MasterDescriptor, expected_units: str) -> list[Reason]:
 
 def _acquisition_reasons(light: Acquisition, master: Acquisition, policy: MatchPolicy) -> list[Reason]:
     reasons: list[Reason] = []
-    reasons += _numeric_reason(light.gain, master.gain, "GAIN_MISMATCH", "acquisition.gain")
-    reasons += _numeric_reason(light.offset, master.offset, "OFFSET_MISMATCH", "acquisition.offset")
-    reasons += _string_reason(light.readout_mode, master.readout_mode, "READOUT_MISMATCH", "acquisition.readout_mode")
-    reasons += _string_reason(light.adc_mode, master.adc_mode, "ADC_MISMATCH", "acquisition.adc_mode")
-    reasons += _temperature_reason(light.temperature_c, master.temperature_c, policy)
+    reasons += _numeric_reason(light.gain, master.gain, "GAIN_MISMATCH", "acquisition.gain")  # necessary
+    reasons += _numeric_reason(light.offset, master.offset, "OFFSET_MISMATCH", "acquisition.offset")  # necessary
+    reasons += _disambiguator_reasons(light.readout_mode, master.readout_mode, "READOUT_MISMATCH", "acquisition.readout_mode")
+    reasons += _disambiguator_reasons(light.adc_mode, master.adc_mode, "ADC_MISMATCH", "acquisition.adc_mode")
+    reasons += _temperature_reason(light.temperature_c, master.temperature_c, policy)  # necessary
     return reasons
 
 
@@ -441,7 +530,7 @@ def _candidate_compatibility(
     if check_filter:
         reasons += _string_reason(reference.optical.filter, desc.filter, "FILTER_MISMATCH", "optical.filter")
     if check_optical:
-        reasons += _string_reason(reference.optical.optical_train_id, desc.optical_train_id, "OPTICAL_TRAIN_MISMATCH", "optical.optical_train_id")
+        reasons += _disambiguator_reasons(reference.optical.optical_train_id, desc.optical_train_id, "OPTICAL_TRAIN_MISMATCH", "optical.optical_train_id")
 
     if flat_extra:
         reasons += _flat_evidence_reasons(desc, policy)
@@ -494,23 +583,26 @@ def _flat_dependency_options(
     candidates: Mapping[str, Sequence[Candidate]],
     policy: MatchPolicy,
 ):
-    """Return ``(options, manifest_records, structural, audit_records)``.
+    """Return ``(options, manifest_records, structural, audit_records, unverified)``.
 
     ``options`` are complete dependency bindings; ``manifest_records`` are
     applicable-but-incompatible dependency rejections (exposure/bias-range);
     ``structural`` is ``FLAT_ADDITIVE_DEPENDENCY_MISSING`` when the flat's
     additive dependency is entirely absent; ``audit_records`` are wrong-role
-    candidates in the dependency pools (audit only, not manifest).
+    candidates in the dependency pools (audit only, not manifest);
+    ``unverified`` are non-blocking UNVERIFIED notes from accepted dependency
+    candidates (R3B).
     """
     ff = flat.flat_form
     if ff in ("normalized_response", "corrected_unnormalized"):
-        return [{}], [], [], []
+        return [{}], [], [], [], []
 
     if ff == "raw_response":
         options = []
         manifest_records: list[RejectionRecord] = []
         structural: list[Reason] = []
         audit_records: list[RejectionRecord] = []
+        unverified: list[Reason] = []
 
         all_fd = list(candidates.get("flat_dark", ()))
         all_bias = list(candidates.get("bias", ()))
@@ -537,10 +629,12 @@ def _flat_dependency_options(
                 check=_CHECK_FLATDARK_EXPOSURE, reference_exposure=flat.acquisition.exposure_s, reference_bias_range=None,
                 check_filter=False, check_optical=False, expected_units="ADU", flat_extra=False,
             )
-            if not reasons:
-                options.append({"flat_dark": fd})
+            blocking, unv = _split_reasons(reasons)
+            if blocking:
+                manifest_records.append(RejectionRecord(fd.candidate_id, "flat_dark", tuple(blocking), fd.descriptor_snapshot))
             else:
-                manifest_records.append(RejectionRecord(fd.candidate_id, "flat_dark", tuple(reasons), fd.descriptor_snapshot))
+                options.append({"flat_dark": fd})
+                unverified.extend(unv)
 
         # Route 2: flat_dark_bias_removed.
         for fd in _sorted_candidates(fd_pool):
@@ -551,8 +645,9 @@ def _flat_dependency_options(
                 check=_CHECK_FLATDARK_EXPOSURE, reference_exposure=flat.acquisition.exposure_s, reference_bias_range=None,
                 check_filter=False, check_optical=False, expected_units="ADU", flat_extra=False,
             )
-            if fd_reasons:
-                manifest_records.append(RejectionRecord(fd.candidate_id, "flat_dark", tuple(fd_reasons), fd.descriptor_snapshot))
+            fd_blocking, fd_unv = _split_reasons(fd_reasons)
+            if fd_blocking:
+                manifest_records.append(RejectionRecord(fd.candidate_id, "flat_dark", tuple(fd_blocking), fd.descriptor_snapshot))
                 continue
             for bf in _sorted_candidates(bias_pool):
                 bf_reasons = _candidate_compatibility(
@@ -560,10 +655,13 @@ def _flat_dependency_options(
                     check=_CHECK_FLATBIAS_RANGE, reference_exposure=None, reference_bias_range=flat_bias_range,
                     check_filter=False, check_optical=False, expected_units="ADU", flat_extra=False,
                 )
-                if not bf_reasons:
-                    options.append({"flat_dark": fd, "bias_flat": bf})
+                bf_blocking, bf_unv = _split_reasons(bf_reasons)
+                if bf_blocking:
+                    manifest_records.append(RejectionRecord(bf.candidate_id, "bias_flat", tuple(bf_blocking), bf.descriptor_snapshot))
                 else:
-                    manifest_records.append(RejectionRecord(bf.candidate_id, "bias_flat", tuple(bf_reasons), bf.descriptor_snapshot))
+                    options.append({"flat_dark": fd, "bias_flat": bf})
+                    unverified.extend(fd_unv)
+                    unverified.extend(bf_unv)
 
         # Route 3: bias_only_flat.
         if flat_short:
@@ -573,17 +671,19 @@ def _flat_dependency_options(
                     check=_CHECK_FLATBIAS_RANGE, reference_exposure=None, reference_bias_range=flat_bias_range,
                     check_filter=False, check_optical=False, expected_units="ADU", flat_extra=False,
                 )
-                if not bf_reasons:
-                    options.append({"bias_flat": bf})
+                bf_blocking, bf_unv = _split_reasons(bf_reasons)
+                if bf_blocking:
+                    manifest_records.append(RejectionRecord(bf.candidate_id, "bias_flat", tuple(bf_blocking), bf.descriptor_snapshot))
                 else:
-                    manifest_records.append(RejectionRecord(bf.candidate_id, "bias_flat", tuple(bf_reasons), bf.descriptor_snapshot))
+                    options.append({"bias_flat": bf})
+                    unverified.extend(bf_unv)
 
         routable_fd = [c for c in fd_pool if c.descriptor.bias_state in ("included", "removed")]
         if not options and len(routable_fd) == 0:
             structural.append(Reason("FLAT_ADDITIVE_DEPENDENCY_MISSING", "flat_dark", role="flat", parent="flat"))
 
-        return options, manifest_records, structural, audit_records
-    return [], [], [Reason("UNDOCUMENTED_PROCESSING", "flat_form", role="flat")], []
+        return options, manifest_records, structural, audit_records, unverified
+    return [], [], [Reason("UNDOCUMENTED_PROCESSING", "flat_form", role="flat")], [], []
 
 
 # ---------------------------------------------------------------------------
@@ -602,6 +702,7 @@ def match_calibration(
     rejected: list[RejectionRecord] = []
     manifest_rejected: list[RejectionRecord] = []
     structural: list[Reason] = []
+    unverified: list[Reason] = []
     per_role_compatible: dict[str, list[Candidate]] = {}
 
     light_bias_range = light.acquisition.bias_exposure_max_s
@@ -647,11 +748,13 @@ def match_calibration(
                 check=check, reference_exposure=ref_exposure, reference_bias_range=ref_bias_range,
                 check_filter=False, check_optical=False, expected_units="ADU", flat_extra=False,
             )
-            if reasons:
-                manifest_rejected.append(RejectionRecord(c.candidate_id, role, tuple(reasons), c.descriptor_snapshot))
-                rejected.append(RejectionRecord(c.candidate_id, role, tuple(reasons), c.descriptor_snapshot))
+            blocking, unv = _split_reasons(reasons)
+            if blocking:
+                manifest_rejected.append(RejectionRecord(c.candidate_id, role, tuple(blocking), c.descriptor_snapshot))
+                rejected.append(RejectionRecord(c.candidate_id, role, tuple(blocking), c.descriptor_snapshot))
             else:
                 compatible.append(c)
+                unverified.extend(unv)
         per_role_compatible[role] = compatible
 
     flat_options: list[tuple[Candidate, dict[str, Candidate]]] = []
@@ -672,17 +775,22 @@ def match_calibration(
                 check=_CHECK_NONE, reference_exposure=None, reference_bias_range=None,
                 check_filter=True, check_optical=True, expected_units=expected_units, flat_extra=True,
             )
-            if reasons:
-                manifest_rejected.append(RejectionRecord(c.candidate_id, "flat", tuple(reasons), c.descriptor_snapshot))
-                rejected.append(RejectionRecord(c.candidate_id, "flat", tuple(reasons), c.descriptor_snapshot))
+            blocking, unv = _split_reasons(reasons)
+            if blocking:
+                manifest_rejected.append(RejectionRecord(c.candidate_id, "flat", tuple(blocking), c.descriptor_snapshot))
+                rejected.append(RejectionRecord(c.candidate_id, "flat", tuple(blocking), c.descriptor_snapshot))
                 continue
-            opts, recs, struct, audit = _flat_dependency_options(c.descriptor, c, candidates, policy)
+            unverified.extend(unv)
+            opts, recs, struct, audit, dep_unv = _flat_dependency_options(c.descriptor, c, candidates, policy)
             rejected.extend(audit)
             rejected.extend(recs)
             manifest_rejected.extend(recs)
             structural.extend(struct)
+            unverified.extend(dep_unv)
             for deps in opts:
                 flat_options.append((c, deps))
+
+    unverified = _dedup_unverified(unverified)
 
     additive_role_order = [r for r in roles if r != "flat"]
     role_lists = [per_role_compatible[r] for r in additive_role_order]
@@ -738,6 +846,7 @@ def match_calibration(
             reason_codes=tuple(sorted(reason_codes)),
             reasons=reasons,
             structural_reasons=tuple(structural),
+            unverified=tuple(unverified),
         )
 
     if len(unique_sets) > 1:
@@ -746,6 +855,7 @@ def match_calibration(
             rejected_candidates=tuple(rejected),
             reason_codes=(),
             coherent_sets=tuple(unique_sets),
+            unverified=tuple(unverified),
         )
 
     chosen = unique_sets[0]
@@ -756,6 +866,7 @@ def match_calibration(
         rejected_candidates=tuple(rejected),
         reason_codes=(),
         coherent_sets=(chosen,),
+        unverified=tuple(unverified),
     )
 
 

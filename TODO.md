@@ -195,6 +195,12 @@ No-calibration and partial modes are explicit, not silent role downgrades.
   complete matcher (normalized-flat dependency and None/None acquisition checks);
   unknown nested-schema extension policy to make explicit in implementation.
   Cover these at appropriate Phase3/4 contract tests, not by claiming full matching.
+- R3B (relation matcher): the owner-frozen declarative case
+  `unknown_not_equal_unknown` (research/phase1/cases.json) is overridden in
+  `tests/contract/test_matching_cases.py` (`_R3B_CASE_OVERRIDES`) — under R3B,
+  `detector_instance_id` is a disambiguator, so both-unknown is MATCHED with a
+  non-blocking UNVERIFIED note rather than the old hard NO_MATCH. cases.json is
+  NOT edited; the divergence is localized to the test adapter.
 - generated_at is volatile; compare semantic replay excluding ONLY this field.
 - Original r3 evidence-hash discrepancy is historical; r4 report matched then.
   Closure hashes are in the new final acceptance record, not backdated into r4.

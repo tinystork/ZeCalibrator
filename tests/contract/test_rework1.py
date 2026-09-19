@@ -85,9 +85,11 @@ def test_missing_bias_qualified_range_rejects():
     assert "MISSING_REQUIRED_FIELD" in r.reason_codes
 
 
-def test_missing_roi_extent_rejects():
-    lt = light(geometry=geo(roi_extent=None))
-    dk = descriptor("dark", "included", geometry=geo(roi_extent=None))
+def test_missing_roi_extent_rejects_for_cfa():
+    # R3B: roi_extent is CFA-conditional — necessary for a Bayer sensor (a missing
+    # ROI extent cannot be invented), a disambiguator for an explicit mono sensor.
+    lt = light(geometry=geo(cfa_phase="GRBG", roi_extent=None))
+    dk = descriptor("dark", "included", geometry=geo(cfa_phase="GRBG", roi_extent=None))
     r = match_calibration(lt, request(), pool(dark=[candidate("d1", dk)]), policy())
     assert r.outcome == "NO_MATCH"
     assert "MISSING_REQUIRED_FIELD" in r.reason_codes
