@@ -5,6 +5,27 @@ imports, indexed via the public ``zecalibrator.api.v1`` only) plus a small
 blocking harness that runs one worker operation on the shared Qt application and
 collects its queued events. Synthetic facts are explicit, never real detector
 defaults.
+
+Harness-architecture note (diagnostic isolation — the whole point of this file):
+the GUI main Qt process must reproduce the PRODUCTION architecture, where the
+FITS I/O library and all FITS object construction live ONLY on the worker thread
+(``zecalibrator.io.raw_decoder`` owns that import; the GUI controller never
+does). The harness therefore never imports or constructs FITS library
+objects on the main thread:
+
+* ``write_fits`` emits a minimal, valid FITS primary HDU directly from NumPy
+  (header cards + big-endian float32 data) — no FITS library is imported or
+  constructed in-process, and no subprocess is involved.
+* ``run_operation`` and the ``controller`` teardown use a manual pump loop
+  (``QApplication.processEvents()`` against a ``time.monotonic()`` deadline)
+  with NO ``QEventLoop``/``QTimer`` and NO QObject result collector: the result
+  collector is a plain Python object whose bound methods are connected to the
+  controller signals for the WHOLE operation and disconnected before returning.
+
+Both measures remove the transient Qt/Python object graphs (FITS HDU objects,
+ephemeral event loops/timers, QObject collectors) that could otherwise be
+finalized LATER by cyclic GC while the worker thread is active — exactly the
+"gc.disable() suppresses the crash" signature that motivated this rewrite.
 """
 
 from __future__ import annotations
@@ -16,7 +37,6 @@ import time
 
 import numpy as np
 import pytest
-from astropy.io import fits
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -34,10 +54,56 @@ DECL = dict(
 ROI = dict(extent=[4, 4], source="synthetic_fixture", identity="SYNTH-BASE-1", version="1.0")
 
 
+def _fits_card(keyword, value) -> str:
+    """Format one 80-byte FITS header card (SIMPLE/BITPIX/NAXIS*/BUNIT/END).
+
+    Booleans and integers are right-justified in the 20-char value field;
+    strings are single-quoted and left-justified (FITS standard).
+    """
+    kw = str(keyword).upper()[:8].ljust(8)
+    if value is None:  # END card
+        return kw.ljust(80)
+    if isinstance(value, bool):
+        field = ("T" if value else "F").rjust(20)
+    elif isinstance(value, str):
+        field = ("'" + value + "'").ljust(20)
+    else:
+        field = str(value).rjust(20)
+    return (kw + "= " + field).ljust(80)[:80]
+
+
+def _fits_bytes(value, bunit="ADU") -> bytes:
+    """Return a valid FITS primary-HDU byte stream for a constant float32 array.
+
+    Built entirely with NumPy (header cards + big-endian float32 data padded to
+    2880-byte blocks). The main Qt process never imports or constructs FITS
+    library objects — the worker reads these bytes on the QThread, exactly as in
+    production. ``bunit`` is written to the BUNIT card (defaults to ADU).
+    """
+    data = np.full(SHAPE, float(value), dtype=">f4")  # big-endian float32
+    header = "".join([
+        _fits_card("SIMPLE", True),
+        _fits_card("BITPIX", -32),
+        _fits_card("NAXIS", 2),
+        _fits_card("NAXIS1", SHAPE[1]),
+        _fits_card("NAXIS2", SHAPE[0]),
+        _fits_card("BUNIT", bunit),
+        _fits_card("END", None),
+    ]).ljust(2880, " ")
+    data_bytes = data.tobytes()
+    data_bytes = data_bytes + b"\x00" * (2880 - len(data_bytes))
+    return header.encode("ascii") + data_bytes
+
+
 def write_fits(path, value, bunit="ADU"):
-    hdu = fits.PrimaryHDU(np.full(SHAPE, value, dtype=np.float32))
-    hdu.header["BUNIT"] = bunit
-    hdu.writeto(path, overwrite=True)
+    """Write a synthetic float32 FITS file WITHOUT a FITS library in-process.
+
+    The FITS bytes are produced directly from NumPy; the main Qt process never
+    imports/constructs FITS library objects. Signature/behavior are unchanged so
+    existing tests keep working.
+    """
+    with open(path, "wb") as fh:
+        fh.write(_fits_bytes(value, bunit))
     return str(path)
 
 
@@ -94,17 +160,26 @@ def make_synth_fixture(tmp_path, *, light_value=100.0, dark_value=10.0, dark_mas
     }
 
 
-def wait_idle(window, timeout_ms=20000) -> bool:
-    """Pump Qt events until the window's worker is idle (no active operation)."""
-    from PySide6 import QtTest, QtWidgets
+def _pump_until(cond, timeout_ms=20000) -> bool:
+    """Pump Qt events (no QEventLoop/QTimer) until ``cond()`` or deadline."""
+    from PySide6 import QtWidgets
 
-    start = time.monotonic()
-    while time.monotonic() - start < timeout_ms / 1000.0:
+    deadline = time.monotonic() + timeout_ms / 1000.0
+    while time.monotonic() < deadline:
         QtWidgets.QApplication.processEvents()
-        if not window._controller.is_active:
+        if cond():
             return True
-        QtTest.QTest.qWait(5)
+        time.sleep(0.0005)
     return False
+
+
+def wait_idle(window, timeout_ms=20000) -> bool:
+    """Pump Qt events until the window's worker is idle (no active operation).
+
+    Manual pump loop only — no ``QEventLoop``/``QTimer`` and no connections that
+    could leak into a later GC pass.
+    """
+    return _pump_until(lambda: not window._controller.is_active, timeout_ms)
 
 
 class RunResult:
@@ -122,87 +197,72 @@ class RunResult:
         return self.finished[-1][1]
 
 
+class _RunCollector:
+    """Plain-Python result collector (NOT a QObject).
+
+    The handlers are plain bound methods connected directly to the controller's
+    (main-thread) signals. No ``@QtCore.Slot`` decoration: in PySide6 6.11.2,
+    ``@Slot`` handlers taking ``object`` arguments corrupt the refcounts of
+    cross-thread relayed values (a native double-free at the next GC pass). A
+    plain object with whole-operation lifetime and an explicit disconnect before
+    return avoids both that marshalling path and any lingering Qt object graph.
+    """
+
+    def __init__(self, result):
+        self.result = result
+
+    def on_finished(self, op_id, summary):
+        self.result.finished.append((op_id, summary))
+
+    def on_failed(self, op_id, reason_code, details):
+        self.result.failed.append((op_id, reason_code, details))
+
+    def on_progress(self, op_id, event):
+        self.result.progress.append((op_id, event))
+
+    def on_preflight(self, op_id, summary, plan):
+        self.result.preflight.append((op_id, summary, plan))
+
+    def on_batch_item(self, op_id, item):
+        self.result.batch_items.append((op_id, item))
+
+    def on_worker_ended(self):
+        self.result.ended = True
+
+
 @pytest.fixture
 def controller(qapp):
-    """A fresh WorkerController per test (finished-driven shutdown at teardown)."""
-    from PySide6 import QtCore
+    """A fresh WorkerController per test (pump-loop shutdown at teardown).
 
+    Teardown makes NO ``shutdown_finished`` connection and creates no
+    ``QEventLoop``/``QTimer``; it pumps ``processEvents()`` until ``is_finished``
+    (with a monotonic deadline), then calls ``finalize()`` to release the
+    worker/thread references after the thread has actually stopped.
+    """
     from zecalibrator.gui.worker import WorkerController
 
     ctl = WorkerController()
     yield ctl
     ctl.shutdown()
-    # Pump the event loop until the thread has actually finished (finished-driven
-    # cleanup; never block the GUI thread with a synchronous wait).
-    loop = QtCore.QEventLoop()
-    timer = QtCore.QTimer()
-    timer.setSingleShot(True)
-    timer.timeout.connect(loop.quit)
-    timer.start(20000)
-    ctl.shutdown_finished.connect(loop.quit)
-    if not ctl.is_finished:
-        loop.exec()
-    # Bounded post-loop join: once the thread has stopped, finalize() releases the
-    # worker/thread references deterministically (instead of relying on controller
-    # collection while the thread may still be winding down).
+    _pump_until(lambda: ctl.is_finished, 20000)
     ctl.finalize()
 
 
 def run_operation(controller, snapshot, token, timeout_ms=20000) -> RunResult:
-    """Start one operation and block (nested event loop) until it ends.
+    """Start one operation and block (manual pump loop) until it ends.
 
-    Collects events through a small QObject ``RunCollector`` whose handlers are
-    plain bound methods — no transient lambda/free-function receivers (a
-    documented PySide6 GC-segfault pattern). The collector owns the
-    ``QEventLoop`` and the timeout ``QTimer`` for the whole operation; the timer
-    is stopped and exactly the connections made here are disconnected before the
-    collector is released.
-
-    The handlers are deliberately NOT decorated with ``@QtCore.Slot``: in
-    PySide6 6.11.2, ``@Slot`` handlers that take ``object`` arguments (e.g.
-    ``@Slot(str, object, object)``) corrupt the refcounts of those objects when
-    invoked against signals whose values cross the worker→GUI thread boundary —
-    a native double-free that surfaces as "Fatal Python error: Aborted" during
-    the next GC pass. Plain bound methods on the collector take the same
-    arguments with the same whole-operation lifetime but without that
-    marshalling path.
+    Collects events through a plain Python ``_RunCollector`` whose bound methods
+    are connected to the controller signals, kept alive in a local variable for
+    the WHOLE operation, and disconnected exactly before returning. There is no
+    ``QEventLoop``, no ``QTimer`` and no QObject collector: the terminal
+    ``worker_ended`` sets ``result.ended`` and the pump loop observes it against
+    a ``time.monotonic()`` deadline. This mirrors production (no transient Qt
+    object graph to be finalized later by cyclic GC while the worker is active).
     """
-    from PySide6 import QtCore
-
-    class RunCollector(QtCore.QObject):
-        """QObject result collector with an explicit, whole-operation lifetime."""
-
-        def __init__(self, result, loop, timer):
-            super().__init__()
-            self.result = result
-            self.loop = loop
-            self.timer = timer
-
-        def on_finished(self, op_id, summary):
-            self.result.finished.append((op_id, summary))
-
-        def on_failed(self, op_id, reason_code, details):
-            self.result.failed.append((op_id, reason_code, details))
-
-        def on_progress(self, op_id, event):
-            self.result.progress.append((op_id, event))
-
-        def on_preflight(self, op_id, summary, plan):
-            self.result.preflight.append((op_id, summary, plan))
-
-        def on_batch_item(self, op_id, item):
-            self.result.batch_items.append((op_id, item))
-
-        def on_worker_ended(self):
-            self.result.ended = True
-            self.loop.quit()
+    from PySide6 import QtWidgets
 
     result = RunResult()
-    loop = QtCore.QEventLoop()
-    timer = QtCore.QTimer()
-    timer.setSingleShot(True)
-    timer.timeout.connect(loop.quit)
-    collector = RunCollector(result, loop, timer)
+    collector = _RunCollector(result)
 
     connections = [
         (controller.operation_finished,
@@ -219,12 +279,18 @@ def run_operation(controller, snapshot, token, timeout_ms=20000) -> RunResult:
          controller.worker_ended.connect(collector.on_worker_ended)),
     ]
 
-    timer.start(timeout_ms)
-    controller.start(snapshot, token)
-    loop.exec()
+    deadline = time.monotonic() + timeout_ms / 1000.0
+    try:
+        controller.start(snapshot, token)
+        while not result.ended and time.monotonic() < deadline:
+            QtWidgets.QApplication.processEvents()
+            time.sleep(0.0005)
+    finally:
+        for sig, handle in connections:
+            try:
+                sig.disconnect(handle)
+            except (RuntimeError, TypeError):
+                pass
 
     result.timed_out = not result.ended
-    timer.stop()
-    for sig, handle in connections:
-        sig.disconnect(handle)
     return result

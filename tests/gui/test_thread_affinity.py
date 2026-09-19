@@ -15,13 +15,26 @@ These are the invariants that the Qt ownership fix (Finding C) must preserve:
 thread affinity was already correct; the defects are ownership/lifetime. This
 test pins the affinity so any regression is caught deterministically.
 
-Implementation note: the handler methods are ``@QtCore.Slot``-decorated in
-production, so this test does NOT subclass the production QObjects to record
-their thread (PySide6 resolves inherited/overridden ``@Slot`` connections by C++
-slot index, which would change the observed affinity). Instead it attaches
-*DirectConnection* observers to the signals each handler emits, so the observer
-runs synchronously on the thread that emitted the signal — which is exactly the
-thread the handler/worker runs on.
+Why this observer is deterministic (previous witness was flaky on Windows CI):
+
+* The observer is a real :class:`~PySide6.QtCore.QObject` (NOT a plain Python
+  class). A plain Python object connected with ``DirectConnection`` to a
+  cross-thread signal is an unreliable oracle: PySide6 must wrap the callable in
+  a functor, and on some platforms the functor delivery of the worker's
+  terminal ``ended`` (emitted as the *last* act of ``_run``, immediately before
+  the method returns) could be deferred or dropped, so ``_run_end`` was never
+  recorded.
+* The worker thread is witnessed by attaching the QObject observer's slots to
+  ``_OperationWorker.started`` / ``ended`` with ``DirectConnection``. A
+  ``DirectConnection`` to a QObject slot is the canonical Qt synchronous
+  mechanism: the slot runs on the EMITTING thread *before* ``emit()`` returns,
+  so it cannot be skipped, reordered, or dropped. Both witnesses are therefore
+  recorded before ``run_operation`` observes the terminal event.
+* Handler/main-thread affinity is witnessed on the CONTROLLER's already-delivered
+  signals (``operation_started`` / ``operation_finished`` / ``worker_ended`` /
+  ``shutdown_finished``) with the default (auto) connection. Those signals are
+  emitted from the main thread, so the observer runs on the main thread. This
+  never depends on cross-thread signal delivery from the worker.
 """
 
 from __future__ import annotations
@@ -71,19 +84,20 @@ def _pump(cond, timeout_ms=20000):
         QtWidgets.QApplication.processEvents()
         if cond():
             return True
-        QtCore.QThread.msleep(5)
+        time.sleep(0.0005)
     return False
 
 
-class _ThreadObserver:
-    """Records the OS thread on which each observed signal is EMITTED.
+class _ThreadObserver(QtCore.QObject):
+    """QObject observer recording the OS thread on which each signal is handled.
 
-    Connected with ``DirectConnection`` so each handler runs synchronously on the
-    emitting thread (the thread the worker/handler actually executes on). Records
-    both ``threading.get_ident()`` and ``QtCore.QThread.currentThread()``.
+    Worker-thread witnesses (``_run_start`` / ``_run_end``) are connected with
+    ``DirectConnection`` so they run synchronously on the worker thread; all
+    other witnesses run on the main thread via the controller's own signals.
     """
 
     def __init__(self):
+        super().__init__()
         self.threads = {}
 
     def _record(self, name):
@@ -91,23 +105,21 @@ class _ThreadObserver:
             threading.get_ident(), QtCore.QThread.currentThread(),
         )
 
-    # _OperationWorker._run (worker thread) — ``started``/``ended`` are emitted
-    # from within ``_run``.
+    # _OperationWorker._run (worker thread) — DirectConnection observers, so
+    # these run synchronously on the emitting worker thread and cannot be skipped.
     def on_worker_started(self, op_id):
         self._record("_run_start")
 
     def on_worker_ended_signal(self):
         self._record("_run_end")
 
-    # WorkerController._on_worker_ended emits ``worker_ended`` as its last act.
+    # WorkerController handlers / relayed signals (main thread).
     def on_controller_worker_ended(self):
         self._record("_on_worker_ended")
 
-    # WorkerController._on_thread_finished emits ``shutdown_finished``.
     def on_shutdown_finished(self):
         self._record("_on_thread_finished")
 
-    # Relayed signals (emitted on the controller/main thread).
     def on_operation_started(self, op_id):
         self._record("operation_started")
 
@@ -126,14 +138,17 @@ def test_worker_and_handler_thread_affinity(qapp, tmp_path):
     try:
         worker_qthread = ctl._thread
 
-        # DirectConnection: run the observer on the EMITTING thread.
         dc = QtCore.Qt.ConnectionType.DirectConnection
+        # Worker-thread witnesses: DirectConnection to a QObject slot -> runs
+        # synchronously on the emitting (worker) thread, cannot be skipped.
         ctl._worker.started.connect(observer.on_worker_started, dc)
         ctl._worker.ended.connect(observer.on_worker_ended_signal, dc)
-        ctl.worker_ended.connect(observer.on_controller_worker_ended, dc)
-        ctl.shutdown_finished.connect(observer.on_shutdown_finished, dc)
-        ctl.operation_started.connect(observer.on_operation_started, dc)
-        ctl.operation_finished.connect(observer.on_operation_finished, dc)
+        # Main-thread witnesses: default (auto) connection on controller signals
+        # that the controller emits from the main thread.
+        ctl.worker_ended.connect(observer.on_controller_worker_ended)
+        ctl.shutdown_finished.connect(observer.on_shutdown_finished)
+        ctl.operation_started.connect(observer.on_operation_started)
+        ctl.operation_finished.connect(observer.on_operation_finished)
 
         res = run_operation(ctl, _preflight_snapshot(fixture), v1.CancellationToken())
         assert not res.timed_out
@@ -171,3 +186,4 @@ def test_worker_and_handler_thread_affinity(qapp, tmp_path):
     finally:
         ctl.shutdown()
         _pump(lambda: ctl.is_finished)
+        ctl.finalize()
