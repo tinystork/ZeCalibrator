@@ -288,6 +288,188 @@ def read_header_candidates(path: str, hdu=0):
     return detect_header_candidates([(c.keyword, c.value) for c in cards])
 
 
+# ---------------------------------------------------------------------------
+# IMAGETYP role candidate evidence + master admissibility (P7-M3B rework)
+# ---------------------------------------------------------------------------
+# Frozen IMAGETYP -> role map (objective 4). Only the explicit FITS IMAGETYP card
+# produces a role candidate; filename/folder/directory layout never do.
+IMAGETYP_ROLE_MAP: Mapping[str, str] = {
+    "DARK": "dark",
+    "BIAS": "bias",
+    "FLAT": "flat",
+    "DARKFLAT": "flat_dark",
+}
+
+_ROLE_TO_IMAGETYP: Mapping[str, str] = {v: k for k, v in IMAGETYP_ROLE_MAP.items()}
+
+# Master-admissibility marker vocabulary (mirrors the additive master admission in
+# ``zecalibrator.io.raw_decoder``; this module is stdlib-only so the vocabulary is
+# duplicated here and must stay in sync).
+_RGB_DEBAYER_INCOMPATIBLE = (
+    "RGB / debayered 3-channel master; ZeCalibrator requires raw 2-D sensor-domain master"
+)
+
+_MASTER_INCOMPATIBLE_KEYWORDS = (
+    "DEBAYER", "DEBAYERED", "DEMOSAIC", "STRETCH", "STRETCHED",
+    "WHITEBAL", "RESAMPLE", "RESAMPLED", "DISPLAY",
+)
+_MASTER_INCOMPATIBLE_TOKENS = (
+    "debayer", "demosaic", "stretch", "white balance", "white-balance",
+    "resample", "display",
+)
+_MASTER_CALIBRATED_KEYWORDS = ("CALIBRAT",)
+_MASTER_NORMALIZED_KEYWORDS = ("NORMALIZE", "NORMALIZED")
+_MASTER_CALIBRATED_TOKENS = ("calibrat",)
+_MASTER_NORMALIZED_TOKENS = ("normaliz",)
+
+
+def _iter_keyword_values(cards):
+    """Yield ``(UPPERCASED keyword, value)`` from card objects or ``(kw, val)`` pairs."""
+    for c in cards:
+        if isinstance(c, (tuple, list)) and len(c) == 2:
+            kw, val = c[0], c[1]
+        else:
+            kw = getattr(c, "keyword", None)
+            val = getattr(c, "value", None)
+        if kw is None:
+            continue
+        yield str(kw).upper(), val
+
+
+def detect_imagetyp_role(cards) -> Optional[str]:
+    """Return the detected master role from a FITS ``IMAGETYP`` card (or ``None``).
+
+    Frozen map: DARK→dark, BIAS→bias, FLAT→flat, DARKFLAT→flat_dark. Multiple
+    *distinct* IMAGETYP values yield ``None`` (never auto-arbitrated). Filename/
+    folder/directory layout never produce a role.
+    """
+    roles: list = []
+    for kw, val in _iter_keyword_values(cards):
+        if kw == "IMAGETYP":
+            role = IMAGETYP_ROLE_MAP.get(str(val).strip().upper())
+            if role is not None and role not in roles:
+                roles.append(role)
+    return roles[0] if len(roles) == 1 else None
+
+
+def _master_calibrated_reason(role, flat_form, origin) -> Optional[str]:
+    if role == "flat":
+        if flat_form in ("corrected_unnormalized", "normalized_response"):
+            return None
+        return (
+            f"calibrated flat master requires flat_form corrected/normalized "
+            f"(got {flat_form!r}); {origin}"
+        )
+    return f"{role or 'unknown'} master with calibrated history is inadmissible; {origin}"
+
+
+def _master_normalized_reason(role, flat_form, origin) -> Optional[str]:
+    if role == "flat":
+        if flat_form == "normalized_response":
+            return None
+        return (
+            f"normalized flat master requires flat_form normalized_response "
+            f"(got {flat_form!r}); {origin}"
+        )
+    return f"{role or 'unknown'} master with normalized history is inadmissible; {origin}"
+
+
+def master_incompatibility(cards, *, role=None, flat_form=None) -> Tuple[str, ...]:
+    """Return the reasons a master is inadmissible (empty tuple = admissible).
+
+    Mirrors the decoder's additive master admission (§8/§9): NAXIS>=3 / debayer /
+    demosaic / stretch / white-balance / resample / display are always
+    incompatible; calibrated/normalized are role/form aware. This reports *why* a
+    master is incompatible without loading pixel arrays.
+    """
+    reasons: list = []
+    for kw, val in _iter_keyword_values(cards):
+        if kw == "NAXIS":
+            try:
+                if int(float(val)) >= 3:
+                    reasons.append(_RGB_DEBAYER_INCOMPATIBLE)
+            except (TypeError, ValueError):
+                pass
+            continue
+        if kw in _MASTER_INCOMPATIBLE_KEYWORDS:
+            reasons.append(f"processed marker {kw!r}")
+            continue
+        if kw in _MASTER_CALIBRATED_KEYWORDS:
+            reason = _master_calibrated_reason(role, flat_form, f"keyword {kw!r}")
+            if reason:
+                reasons.append(reason)
+            continue
+        if kw in _MASTER_NORMALIZED_KEYWORDS:
+            reason = _master_normalized_reason(role, flat_form, f"keyword {kw!r}")
+            if reason:
+                reasons.append(reason)
+            continue
+        if kw in ("HISTORY", "COMMENT"):
+            s = str(val).lower()
+            for token in _MASTER_INCOMPATIBLE_TOKENS:
+                if token in s:
+                    reasons.append(f"processed marker {token!r}")
+                    break
+            if any(t in s for t in _MASTER_CALIBRATED_TOKENS):
+                reason = _master_calibrated_reason(role, flat_form, "HISTORY 'calibrat'")
+                if reason:
+                    reasons.append(reason)
+            if any(t in s for t in _MASTER_NORMALIZED_TOKENS):
+                reason = _master_normalized_reason(role, flat_form, "HISTORY 'normaliz'")
+                if reason:
+                    reasons.append(reason)
+    return tuple(dict.fromkeys(reasons))
+
+
+def detect_role_conflict(selected_role, detected_role) -> Optional[Mapping]:
+    """Return a structured role conflict, or ``None`` when none.
+
+    A user-selected role that contradicts the detected FITS IMAGETYP role is a
+    human conflict (never auto-resolved): selected role / detected role / source
+    / needs confirmation.
+    """
+    if not selected_role or not detected_role:
+        return None
+    if selected_role == detected_role:
+        return None
+    imagetyp = _ROLE_TO_IMAGETYP.get(detected_role, str(detected_role).upper())
+    return {
+        "selected_role": selected_role,
+        "detected_role": detected_role,
+        "source": f"FITS IMAGETYP={imagetyp}",
+        "needs_confirmation": True,
+    }
+
+
+def scan_master_header(path: str, selected_role: Optional[str] = None) -> Mapping:
+    """Read one master header and produce a full scan entry.
+
+    Combines evidence detection (unchanged), IMAGETYP role detection,
+    role-conflict detection and the master-admissibility detector into one pure
+    (no pixel load) summary. ``selected_role`` is an optional user-selected role;
+    when absent the detected IMAGETYP role (if any) is used.
+    """
+    cards = v1.FilesystemSource().read_header(path, hdu=0)
+    card_pairs = [(c.keyword, c.value) for c in cards]
+    candidates, conflicts = detect_header_candidates(card_pairs)
+    detected_role = detect_imagetyp_role(card_pairs)
+    role = selected_role or detected_role
+    conflict = detect_role_conflict(selected_role, detected_role)
+    incompatible = master_incompatibility(card_pairs, role=role)
+    return {
+        "path": path,
+        "selected_role": selected_role,
+        "detected_role": detected_role,
+        "role": role,
+        "conflict": conflict,
+        "incompatible": list(incompatible),
+        "admissible": not incompatible,
+        "status": "COMPLETED",
+        "candidates": {f: fact.to_dict() for f, fact in candidates.items()},
+        "conflicts": {f: [x.to_dict() for x in facts] for f, facts in conflicts.items()},
+    }
+
+
 def evidence_for_fields(candidates: Mapping, confirmed_fields: Mapping[str, bool]) -> Mapping[str, "v1.EvidenceFact"]:
     """Return confirmed evidence facts from detected candidates.
 
@@ -712,6 +894,7 @@ def to_jsonable(value):
 
 __all__ = [
     "EVIDENCE_SOURCE_MAP",
+    "IMAGETYP_ROLE_MAP",
     "REQUIRED_FIELDS_BY_MASTER_TYPE",
     "SUPPORTED_INPUT_EXTENSIONS",
     "USER_ONLY_FIELDS",
@@ -720,6 +903,8 @@ __all__ = [
     "build_declaration",
     "dedup_input_paths",
     "detect_header_candidates",
+    "detect_imagetyp_role",
+    "detect_role_conflict",
     "evidence_for_fields",
     "input_dialog_filter",
     "is_supported_input_file",
@@ -727,6 +912,7 @@ __all__ = [
     "load_json_object",
     "make_managed_record",
     "master_evidence_status",
+    "master_incompatibility",
     "missing_fields_for_master",
     "missing_required_fields",
     "new_batch_id",
@@ -740,5 +926,6 @@ __all__ = [
     "read_header_candidates",
     "required_fields_for_master_type",
     "scan_folder_inputs",
+    "scan_master_header",
     "to_jsonable",
 ]

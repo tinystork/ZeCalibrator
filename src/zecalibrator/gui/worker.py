@@ -572,14 +572,11 @@ class _OperationWorker(QtCore.QObject):
         masters = []
         for path in snap.master_paths:
             try:
-                candidates, conflicts = service.read_header_candidates(path, hdu=0)
-                masters.append({
-                    "path": path,
-                    "master_type": snap.master_type,
-                    "status": "COMPLETED",
-                    "candidates": {f: fact.to_dict() for f, fact in candidates.items()},
-                    "conflicts": {f: [x.to_dict() for x in facts] for f, facts in conflicts.items()},
-                })
+                entry = dict(service.scan_master_header(path, selected_role=snap.master_type))
+                # Keep the legacy ``master_type`` key for the presentation path;
+                # the effective role is also exposed as ``role``.
+                entry["master_type"] = entry.get("role")
+                masters.append(entry)
             except Exception as exc:  # noqa: BLE001 - per-master scan failure
                 masters.append({
                     "path": path,
@@ -588,6 +585,8 @@ class _OperationWorker(QtCore.QObject):
                     "reason": str(exc),
                     "candidates": {},
                     "conflicts": {},
+                    "incompatible": [],
+                    "admissible": False,
                 })
         return {
             "kind": "scan_masters",
@@ -656,6 +655,23 @@ class _OperationWorker(QtCore.QObject):
                 "state": loaded.state,
                 "details": "existing managed ledger preserved (not overwritten)",
             }
+        # Reuse known master: an unchanged record (same content identity + role +
+        # evidence + declaration) is reused without re-asking; never duplicated.
+        for existing in loaded.records:
+            if (
+                existing.content_sha256 == content_sha256
+                and existing.size_bytes == size_bytes
+                and existing.role == role
+                and existing.declaration == declaration
+                and dict(existing.evidence) == evidence
+            ):
+                return {
+                    "kind": "confirm_evidence",
+                    "status": "REUSED",
+                    "record": existing.to_dict(),
+                    "count": len(loaded.records),
+                    "path": path,
+                }
         # Content identity + role is authoritative over path (same bytes+role =
         # same record; same path+new bytes = new record).
         records = [

@@ -405,9 +405,17 @@ def _default_revision(imports) -> str:
 def _fits_shape(source: FilesystemSource, path: str, hdu) -> tuple:
     cards = source.read_header(path, hdu=hdu)
     header = {c.keyword: c.value for c in cards}
+    naxis = int(header.get("NAXIS", 0))
+    if naxis >= 3:
+        # RGB / debayered 3-channel cube: never a usable raw 2-D sensor-domain
+        # master. Reject up front so the index never carries a bogus 2-D shape.
+        raise ValueError(
+            "incompatible: RGB / debayered 3-channel master; "
+            "ZeCalibrator requires raw 2-D sensor-domain master"
+        )
     naxis1 = int(header.get("NAXIS1", 0))
     naxis2 = int(header.get("NAXIS2", 0))
-    if naxis1 < 1 or naxis2 < 1:
+    if naxis != 2 or naxis1 < 1 or naxis2 < 1:
         raise ValueError(f"FITS {path} has no supported 2D plane (NAXIS1/NAXIS2)")
     return (naxis2, naxis1)
 

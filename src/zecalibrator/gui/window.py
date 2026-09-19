@@ -108,6 +108,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._cancel_requested = False
 
         # Managed master ingestion state (P7-M3B).
+        self._master_files: list[str] = []
         self._managed_scan: list[dict] = []
         self._managed_pending: list[dict] = []
         self._active_source: str | None = None  # "managed" | "explicit" | None
@@ -164,9 +165,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self.root_browse_btn, self.index_btn,
             self.additive_combo, self.flat_combo,
             self.standard_additive_combo, self.standard_flat_combo,
-            self.darks_folder_edit, self.darks_browse_btn,
-            self.bias_folder_edit, self.bias_browse_btn,
-            self.flats_folder_edit, self.flats_browse_btn,
+            self.add_masters_folder_btn, self.add_masters_file_btn,
+            self.remove_masters_btn, self.clear_masters_btn,
             self.scan_masters_btn, self.confirm_masters_btn, self.build_managed_btn,
         ]
         self._launch_widgets = [self.preflight_btn, self.calibrate_btn, self.export_btn]
@@ -200,27 +200,23 @@ class MainWindow(QtWidgets.QMainWindow):
 
         masters_box = QtWidgets.QGroupBox("Calibration masters (managed)")
         masters_layout = QtWidgets.QVBoxLayout(masters_box)
-        dark_row = QtWidgets.QHBoxLayout()
-        dark_row.addWidget(QtWidgets.QLabel("Darks folder:"))
-        self.darks_folder_edit = QtWidgets.QLineEdit()
-        dark_row.addWidget(self.darks_folder_edit, 1)
-        self.darks_browse_btn = QtWidgets.QPushButton("Browse…")
-        dark_row.addWidget(self.darks_browse_btn)
-        masters_layout.addLayout(dark_row)
-        bias_row = QtWidgets.QHBoxLayout()
-        bias_row.addWidget(QtWidgets.QLabel("Bias folder:"))
-        self.bias_folder_edit = QtWidgets.QLineEdit()
-        bias_row.addWidget(self.bias_folder_edit, 1)
-        self.bias_browse_btn = QtWidgets.QPushButton("Browse…")
-        bias_row.addWidget(self.bias_browse_btn)
-        masters_layout.addLayout(bias_row)
-        flats_row = QtWidgets.QHBoxLayout()
-        flats_row.addWidget(QtWidgets.QLabel("Flats folder/file:"))
-        self.flats_folder_edit = QtWidgets.QLineEdit()
-        flats_row.addWidget(self.flats_folder_edit, 1)
-        self.flats_browse_btn = QtWidgets.QPushButton("Browse…")
-        flats_row.addWidget(self.flats_browse_btn)
-        masters_layout.addLayout(flats_row)
+        self.masters_files_list = QtWidgets.QListWidget()
+        self.masters_files_list.setSelectionMode(
+            QtWidgets.QAbstractItemView.SelectionMode.ExtendedSelection
+        )
+        masters_layout.addWidget(self.masters_files_list)
+        masters_add_row = QtWidgets.QHBoxLayout()
+        self.add_masters_folder_btn = QtWidgets.QPushButton("Add masters folder…")
+        self.add_masters_file_btn = QtWidgets.QPushButton("Add masters file…")
+        self.remove_masters_btn = QtWidgets.QPushButton("Remove selected")
+        self.clear_masters_btn = QtWidgets.QPushButton("Clear")
+        for b in (
+            self.add_masters_folder_btn, self.add_masters_file_btn,
+            self.remove_masters_btn, self.clear_masters_btn,
+        ):
+            masters_add_row.addWidget(b)
+        masters_add_row.addStretch(1)
+        masters_layout.addLayout(masters_add_row)
         masters_btn_row = QtWidgets.QHBoxLayout()
         self.scan_masters_btn = QtWidgets.QPushButton("Detect masters…")
         self.confirm_masters_btn = QtWidgets.QPushButton("Confirm detected facts")
@@ -465,9 +461,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.export_btn.clicked.connect(self._on_export)
         self.cancel_btn.clicked.connect(self._on_cancel)
         self.audit_link_btn.clicked.connect(self._on_open_manifest)
-        self.darks_browse_btn.clicked.connect(self._on_browse_darks)
-        self.bias_browse_btn.clicked.connect(self._on_browse_bias)
-        self.flats_browse_btn.clicked.connect(self._on_browse_flats)
+        self.add_masters_folder_btn.clicked.connect(self._on_add_masters_folder)
+        self.add_masters_file_btn.clicked.connect(self._on_add_masters_file)
+        self.remove_masters_btn.clicked.connect(self._on_remove_masters)
+        self.clear_masters_btn.clicked.connect(self._on_clear_masters)
         self.scan_masters_btn.clicked.connect(self._on_scan_masters)
         self.confirm_masters_btn.clicked.connect(self._on_confirm_masters)
         self.build_managed_btn.clicked.connect(self._on_build_managed)
@@ -993,65 +990,71 @@ class MainWindow(QtWidgets.QMainWindow):
         self._start_operation(snapshot)
 
     # -- managed master ingestion (P7-M3B) -----------------------------------
-    def _on_browse_darks(self) -> None:
-        folder = QtWidgets.QFileDialog.getExistingDirectory(self, "Select darks folder")
-        if folder:
-            self.darks_folder_edit.setText(folder)
+    def _on_add_masters_folder(self) -> None:
+        folder = QtWidgets.QFileDialog.getExistingDirectory(self, "Select masters folder")
+        if not folder:
+            return
+        try:
+            paths, unsupported = service.scan_folder_inputs(folder)
+        except ValueError as exc:
+            QtWidgets.QMessageBox.warning(self, "Invalid folder", str(exc))
+            return
+        # One folder is scanned once; each file later gets a single role from
+        # IMAGETYP evidence or explicit user confirmation (never triple-indexed).
+        new_paths = service.dedup_input_paths(paths, self._master_files)
+        self._master_files.extend(new_paths)
+        self._refresh_masters_list()
+        self.status_label.setText(
+            presentation.format_folder_add_feedback(len(new_paths), unsupported)
+        )
 
-    def _on_browse_bias(self) -> None:
-        folder = QtWidgets.QFileDialog.getExistingDirectory(self, "Select bias folder")
-        if folder:
-            self.bias_folder_edit.setText(folder)
+    def _on_add_masters_file(self) -> None:
+        paths, _ = QtWidgets.QFileDialog.getOpenFileNames(
+            self, "Select master FITS files", "", service.input_dialog_filter(),
+        )
+        if not paths:
+            return
+        new_paths = service.dedup_input_paths(paths, self._master_files)
+        self._master_files.extend(new_paths)
+        self._refresh_masters_list()
+        self.status_label.setText(
+            presentation.format_folder_add_feedback(len(new_paths), 0)
+        )
 
-    def _on_browse_flats(self) -> None:
-        folder = QtWidgets.QFileDialog.getExistingDirectory(self, "Select flats folder")
-        if folder:
-            self.flats_folder_edit.setText(folder)
+    def _on_remove_masters(self) -> None:
+        rows = sorted({i.row() for i in self.masters_files_list.selectedIndexes()}, reverse=True)
+        for index in rows:
+            if index < len(self._master_files):
+                del self._master_files[index]
+        self._refresh_masters_list()
 
-    def _managed_master_targets(self) -> list:
-        """Collect the selected master files (darks folder, bias folder, flats
-        folder OR single flat file) as ``(path, master_type)`` targets."""
-        targets: list = []
+    def _on_clear_masters(self) -> None:
+        if not self._master_files:
+            return
+        self._master_files.clear()
+        self._managed_scan.clear()
+        self._managed_pending.clear()
+        self.managed_status_label.setText("No managed masters detected.")
+        self._refresh_masters_list()
 
-        def add_folder(edit, role):
-            folder = edit.text().strip()
-            if not folder:
-                return
-            try:
-                paths, _ = service.scan_folder_inputs(folder)
-            except ValueError:
-                return
-            for p in paths:
-                targets.append((p, role))
-
-        add_folder(self.darks_folder_edit, "dark")
-        add_folder(self.bias_folder_edit, "bias")
-        flats = self.flats_folder_edit.text().strip()
-        if flats:
-            if os.path.isdir(flats):
-                add_folder(self.flats_folder_edit, "flat")
-            elif service.is_supported_input_file(flats):
-                targets.append((flats, "flat"))
-        return targets
+    def _refresh_masters_list(self) -> None:
+        self.masters_files_list.clear()
+        for path in self._master_files:
+            item = QtWidgets.QListWidgetItem(Path(path).name)
+            item.setData(QtCore.Qt.ItemDataRole.UserRole, path)
+            item.setToolTip(path)
+            self.masters_files_list.addItem(item)
 
     def _on_scan_masters(self) -> None:
-        targets = self._managed_master_targets()
-        if not targets:
+        if not self._master_files:
             QtWidgets.QMessageBox.information(
                 self, "No masters",
-                "Select a darks folder, bias folder, or flats folder/file first.",
+                "Add a masters folder or master files first.",
             )
             return
         self._managed_scan.clear()
         self._managed_pending.clear()
-        snapshot = service.OperationSnapshot(
-            op_id=service.new_operation_id(), kind="scan_masters",
-            library_spec=None, request=None, policy=None, lights=(),
-            master_paths=tuple(p for p, _ in targets),
-            master_type=None,  # per-file type resolved from the target list
-        )
-        # Scan each role group independently so master_type is known per file.
-        self._scan_targets = targets
+        self._scan_targets = list(self._master_files)
         self._scan_index = 0
         self._scan_results: list[dict] = []
         self._start_scan_next()
@@ -1061,24 +1064,32 @@ class MainWindow(QtWidgets.QMainWindow):
             self._managed_scan = list(self._scan_results)
             self._present_managed_scan()
             return
-        path, role = self._scan_targets[self._scan_index]
+        path = self._scan_targets[self._scan_index]
         self._scan_index += 1
         snapshot = service.OperationSnapshot(
             op_id=service.new_operation_id(), kind="scan_masters",
             library_spec=None, request=None, policy=None, lights=(),
-            master_paths=(path,), master_type=role,
+            master_paths=(path,), master_type=None,
         )
         self._start_operation(snapshot)
 
     def _present_managed_scan(self) -> None:
         detected = sum(1 for m in self._managed_scan if m.get("candidates"))
-        conflicted = sum(1 for m in self._managed_scan if m.get("conflicts"))
+        incompatible = sum(1 for m in self._managed_scan if not m.get("admissible", True))
+        conflicted = sum(1 for m in self._managed_scan if m.get("conflict"))
         self.managed_status_label.setText(
-            f"Detected {len(self._managed_scan)} master(s): {detected} with facts, {conflicted} with conflicts."
+            f"Detected {len(self._managed_scan)} master(s): {detected} with facts, "
+            f"{incompatible} incompatible, {conflicted} role conflict(s)."
         )
         lines = []
         for m in self._managed_scan:
-            lines.append(f"[{m.get('master_type')}] {m.get('path')}")
+            role = m.get("role") or m.get("detected_role")
+            lines.append(f"[{role or 'no role'}] {m.get('path')}")
+            if m.get("incompatible"):
+                for reason in m["incompatible"]:
+                    lines.append("    " + presentation.format_incompatibility(reason))
+            if m.get("conflict"):
+                lines.append("    " + presentation.format_role_conflict(m["conflict"]))
             for field, fact in m.get("candidates", {}).items():
                 lines.append("    " + presentation.format_evidence_fact(fact))
             for field, facts in m.get("conflicts", {}).items():
@@ -1124,6 +1135,39 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._log(f"[managed] invalid value for {field}: {exc}")
         return extra
 
+    def _resolve_role_conflict(self, conflict: dict) -> str | None:
+        """Ask the human to resolve a selected-vs-detected role conflict.
+
+        Never auto-resolves. Returns the chosen role, or ``None`` to skip.
+        """
+        selected = conflict.get("selected_role")
+        detected = conflict.get("detected_role")
+        box = QtWidgets.QMessageBox(self)
+        box.setWindowTitle("Role conflict — needs confirmation")
+        box.setIcon(QtWidgets.QMessageBox.Icon.Warning)
+        box.setText(
+            f"Selected role: {selected}\nDetected role: {detected}\n"
+            f"Source: {conflict.get('source', 'FITS IMAGETYP')}\nNeeds confirmation"
+        )
+        selected_btn = box.addButton(f"Use {selected}", QtWidgets.QMessageBox.ButtonRole.AcceptRole)
+        detected_btn = box.addButton(f"Use {detected}", QtWidgets.QMessageBox.ButtonRole.AcceptRole)
+        box.addButton(QtWidgets.QMessageBox.StandardButton.Cancel)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is selected_btn:
+            return selected
+        if clicked is detected_btn:
+            return detected
+        return None
+
+    def _collect_role(self, path: str) -> str | None:
+        """Ask the human for a master role when IMAGETYP is absent."""
+        roles = ("dark", "bias", "flat", "flat_dark")
+        chosen, ok = QtWidgets.QInputDialog.getItem(
+            self, "Select master role", f"Role for {Path(path).name}:", roles, 0, False,
+        )
+        return chosen if ok else None
+
     def _on_confirm_masters(self) -> None:
         if not self._managed_scan:
             QtWidgets.QMessageBox.information(self, "Nothing to confirm", "Detect masters first.")
@@ -1132,15 +1176,25 @@ class MainWindow(QtWidgets.QMainWindow):
         for m in self._managed_scan:
             if m.get("status") != "COMPLETED":
                 continue
-            if m.get("conflicts"):
-                self._log(f"conflict not auto-resolved: {m.get('path')}")
+            if not m.get("admissible", True):
+                self._log(
+                    f"[managed] incompatible master not indexed: {m.get('path')} — "
+                    f"{'; '.join(m.get('incompatible', ()))}"
+                )
                 continue
+            role = m.get("role")
+            conflict = m.get("conflict")
+            if conflict:
+                role = self._resolve_role_conflict(conflict)
+                if role is None:
+                    self._log(f"[managed] role conflict skipped (not auto-resolved): {m.get('path')}")
+                    continue
+            if not role:
+                role = self._collect_role(m.get("path"))
+                if role is None:
+                    continue
             candidates = m.get("candidates", {})
-            if not candidates:
-                self._log(f"no detected facts for: {m.get('path')}")
-                continue
-            master_type = m.get("master_type")
-            extra = self._collect_user_facts(master_type, candidates)
+            extra = self._collect_user_facts(role, candidates)
             evidence = {
                 field: {
                     "value": fact.get("value"),
@@ -1150,7 +1204,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 for field, fact in candidates.items()
             }
             self._managed_pending.append({
-                "role": master_type,
+                "role": role,
                 "path": m.get("path"),
                 "hdu": 0,
                 "evidence": evidence,
@@ -1164,7 +1218,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self._managed_pending:
             QtWidgets.QMessageBox.information(
                 self, "Nothing to confirm",
-                "No unambiguous detected facts to confirm (conflicts are not auto-resolved).",
+                "No admissible detected masters to confirm (incompatible/conflicts are not auto-resolved).",
             )
             return
         self._confirm_index = 0
@@ -1497,6 +1551,11 @@ class MainWindow(QtWidgets.QMainWindow):
         if summary.get("status") == "PRESERVED":
             self._log(f"[managed] ledger preserved ({summary.get('state')}); not overwritten.")
             self.status_label.setText("Managed ledger preserved (not overwritten).")
+            return
+        if summary.get("status") == "REUSED":
+            self._log(f"[managed] known master reused (unchanged): {summary.get('path')}")
+            self.status_label.setText("Master reused (unchanged).")
+            self._start_confirm_next()
             return
         ev_status = summary.get("evidence_status")
         missing = summary.get("missing", [])

@@ -438,7 +438,8 @@ def _load_masters(plan: CalibrationPlan, *, token, obs):
             flat_notes["flat_scalars_origin"] = "declared"
         elif desc.master_type == "flat" and desc.flat_form == "corrected_unnormalized":
             decoded = _io.decode_fits_from_bytes(
-                image_data, locator.hdu, _declaration_from_descriptor(desc), cancel=token, progress=None
+                image_data, locator.hdu, _declaration_from_descriptor(desc), cancel=token, progress=None,
+                admission="master", role="flat", flat_form="corrected_unnormalized",
             )
             if tuple(decoded.data.shape) != tuple(desc.geometry.shape):
                 raise ValueError(
@@ -455,7 +456,8 @@ def _load_masters(plan: CalibrationPlan, *, token, obs):
             flat_notes["flat_scalars_origin"] = "executed"
         else:
             decoded = _io.decode_fits_from_bytes(
-                image_data, locator.hdu, _declaration_from_descriptor(desc), cancel=token, progress=None
+                image_data, locator.hdu, _declaration_from_descriptor(desc), cancel=token, progress=None,
+                admission="master", role=desc.master_type, flat_form=desc.flat_form,
             )
             if tuple(decoded.data.shape) != tuple(desc.geometry.shape):
                 raise ValueError(

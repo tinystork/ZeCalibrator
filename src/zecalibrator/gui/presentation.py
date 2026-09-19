@@ -353,6 +353,22 @@ def format_conflict(field: str, facts: Sequence[Mapping]) -> str:
     return f"{field}: conflicting detected values ({vals}) — review, not auto-resolved"
 
 
+def format_incompatibility(reason: str) -> str:
+    """Render one master-incompatibility reason (presentation only)."""
+    return f"incompatible: {reason}"
+
+
+def format_role_conflict(conflict: Mapping) -> str:
+    """Render a selected-vs-detected role conflict (never auto-resolved)."""
+    selected = conflict.get("selected_role")
+    detected = conflict.get("detected_role")
+    source = conflict.get("source", "FITS IMAGETYP")
+    return (
+        f"Selected role: {selected} / Detected role: {detected} / "
+        f"Source: {source} / Needs confirmation"
+    )
+
+
 __all__ = [
     "additive_mode_label",
     "additive_modes",
@@ -362,9 +378,11 @@ __all__ = [
     "format_coherent_sets",
     "format_conflict",
     "format_evidence_fact",
+    "format_incompatibility",
     "format_metadata",
     "format_outcome_summary",
     "format_rejection_table",
+    "format_role_conflict",
     "format_folder_add_feedback",
     "human_outcome_label",
     "human_reason_text",

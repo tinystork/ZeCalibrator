@@ -165,6 +165,104 @@ def _check_processed(cards: tuple) -> None:
                     raise DecodeError("PROCESSED_HISTORY", f"{kw} token {token!r}")
 
 
+# ---------------------------------------------------------------------------
+# Master admission (additive; the light path above is byte-for-byte unchanged).
+#
+# A master is by definition a raw 2-D sensor-domain combination (stacked / median
+# / mean / rejection / combination), so those markers are ADMITTED. A master must
+# never be a debayered/colour/geometry-changed/display-processed product, so those
+# markers are ALWAYS rejected. "calibrated"/"normalized" are role/form aware:
+# dark/bias/flat_dark reject them; a flat admits them only with the matching
+# flat_form evidence (corrected_unnormalized / normalized_response).
+# ---------------------------------------------------------------------------
+_MASTER_INCOMPATIBLE_KEYWORDS = (
+    "DEBAYER",
+    "DEBAYERED",
+    "DEMOSAIC",
+    "STRETCH",
+    "STRETCHED",
+    "WHITEBAL",
+    "RESAMPLE",
+    "RESAMPLED",
+    "DISPLAY",
+)
+
+_MASTER_INCOMPATIBLE_TOKENS = (
+    "debayer",
+    "demosaic",
+    "stretch",
+    "white balance",
+    "white-balance",
+    "resample",
+    "display",
+)
+
+_MASTER_CALIBRATED_KEYWORDS = ("CALIBRAT",)
+_MASTER_NORMALIZED_KEYWORDS = ("NORMALIZE", "NORMALIZED")
+_MASTER_CALIBRATED_TOKENS = ("calibrat",)
+_MASTER_NORMALIZED_TOKENS = ("normaliz",)
+
+
+def _reject_master_calibrated(role: Optional[str], flat_form: Optional[str], origin: str) -> None:
+    """Apply the calibrated-history role/form rule (§8/§9)."""
+    if role == "flat":
+        if flat_form in ("corrected_unnormalized", "normalized_response"):
+            return
+        raise DecodeError(
+            "MASTER_PROCESSED",
+            f"calibrated flat master requires flat_form corrected/normalized "
+            f"(got {flat_form!r}); {origin}",
+        )
+    raise DecodeError(
+        "MASTER_PROCESSED",
+        f"{role or 'unknown'} master with calibrated history is inadmissible; {origin}",
+    )
+
+
+def _reject_master_normalized(role: Optional[str], flat_form: Optional[str], origin: str) -> None:
+    """Apply the normalized-history role/form rule (§8/§9)."""
+    if role == "flat":
+        if flat_form == "normalized_response":
+            return
+        raise DecodeError(
+            "MASTER_PROCESSED",
+            f"normalized flat master requires flat_form normalized_response "
+            f"(got {flat_form!r}); {origin}",
+        )
+    raise DecodeError(
+        "MASTER_PROCESSED",
+        f"{role or 'unknown'} master with normalized history is inadmissible; {origin}",
+    )
+
+
+def _check_processed_master(cards: tuple, *, role: Optional[str], flat_form: Optional[str]) -> None:
+    """Master processed-history admission policy (prepared report §8/§9).
+
+    Strictly additive to the light decoder: never weakens the light path. A
+    debayer/demosaic/RGB/stretch/white-balance/resample/display marker is always
+    rejected; stacked/median/mean/rejection/combination are admitted (provenance
+    preserved); calibrated/normalized are role/form aware.
+    """
+    for c in cards:
+        kw = c.keyword.upper()
+        val = c.value
+        if kw in _MASTER_INCOMPATIBLE_KEYWORDS:
+            raise DecodeError("MASTER_INCOMPATIBLE", f"master processed marker keyword {kw!r}")
+        if kw in _MASTER_CALIBRATED_KEYWORDS:
+            _reject_master_calibrated(role, flat_form, f"keyword {kw!r}")
+        if kw in _MASTER_NORMALIZED_KEYWORDS:
+            _reject_master_normalized(role, flat_form, f"keyword {kw!r}")
+        if kw in ("HISTORY", "COMMENT"):
+            s = str(val).lower()
+            for token in _MASTER_INCOMPATIBLE_TOKENS:
+                if token in s:
+                    raise DecodeError("MASTER_INCOMPATIBLE", f"{kw} token {token!r}")
+            if any(t in s for t in _MASTER_CALIBRATED_TOKENS):
+                _reject_master_calibrated(role, flat_form, f"{kw} token 'calibrat'")
+            if any(t in s for t in _MASTER_NORMALIZED_TOKENS):
+                _reject_master_normalized(role, flat_form, f"{kw} token 'normaliz'")
+
+
 def _classify_bunit(raw) -> Optional[str]:
     if raw is None:
         return None
@@ -199,6 +297,9 @@ def decode_fits(
     declaration: Optional[ImportDeclaration] = None,
     cancel=None,
     progress=None,
+    admission: str = "light",
+    role: Optional[str] = None,
+    flat_form: Optional[str] = None,
 ) -> DecodedFrame:
     """Decode a raw FITS sensor plane into native contiguous float32 + metadata.
 
@@ -206,6 +307,11 @@ def decode_fits(
     supplying unknown facts (units/domain/acquisition); it never overrides a
     contrary measured FITS card. ``cancel``/``progress`` are optional Qt-free
     cooperative tokens (checked before read and after decode); they may be None.
+
+    ``admission`` selects the processed-history policy. The default ``"light"``
+    is byte-for-byte the historical strict raw-light policy (unchanged).
+    ``"master"`` applies the additive role/form/provenance-aware master admission
+    policy (``role`` is the master role; ``flat_form`` the flat form evidence).
     """
     if cancel is not None and cancel.is_cancelled():
         from zecalibrator.application.cancellation import OperationCancelled
@@ -241,7 +347,10 @@ def decode_fits(
         header = hdu.header
         cards = collect_cards(header, source=_hdu_source(hdu_key))
 
-        _check_processed(cards)
+        if admission == "master":
+            _check_processed_master(cards, role=role, flat_form=flat_form)
+        else:
+            _check_processed(cards)
 
         normalized, conflicts, malformed = resolve_aliases(cards)
         if conflicts:

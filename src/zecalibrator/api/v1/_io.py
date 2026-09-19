@@ -38,12 +38,14 @@ def read_bytes(path, *, cancel=None) -> bytes:
     return data
 
 
-def decode_fits_from_bytes(data: bytes, hdu, declaration, *, cancel=None, progress=None):
+def decode_fits_from_bytes(data: bytes, hdu, declaration, *, cancel=None, progress=None, admission="light", role=None, flat_form=None):
     """Decode FITS from the exact ``data`` bytes supplied (single-read binding).
 
     The verified bytes are written to a temporary file and decoded from it, so
     the decoded result is always the bytes that were hashed; the temporary file
-    is removed in ``finally`` (bounded, no persistent cache).
+    is removed in ``finally`` (bounded, no persistent cache). ``admission`` /
+    ``role`` / ``flat_form`` forward the additive master admission context to
+    :func:`zecalibrator.io.raw_decoder.decode_fits` (light default unchanged).
     """
     from zecalibrator.io.raw_decoder import decode_fits
 
@@ -53,7 +55,10 @@ def decode_fits_from_bytes(data: bytes, hdu, declaration, *, cancel=None, progre
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(data)
-        return decode_fits(tmp, hdu=hdu, declaration=declaration, cancel=cancel, progress=progress)
+        return decode_fits(
+            tmp, hdu=hdu, declaration=declaration, cancel=cancel, progress=progress,
+            admission=admission, role=role, flat_form=flat_form,
+        )
     finally:
         try:
             os.unlink(tmp)
