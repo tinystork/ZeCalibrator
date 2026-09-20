@@ -40,9 +40,10 @@ class Geometry:
     """Immutable sensor/array geometry.
 
     ``shape`` is the array/ROI ``(ny, nx)`` (always known from the data).
-    ``sensor_dimensions`` (full frame), ``binning``, ``roi_origin`` (``(oy, ox)``
-    binned-pixel), ``roi_extent``, ``orientation`` and ``cfa_phase`` are
-    ``None`` when unknown — never invented defaults.
+    ``roi_extent`` defaults to ``shape`` (structural: the stored extent of a
+    decoded 2-D plane equals its shape). ``sensor_dimensions`` (full frame),
+    ``binning``, ``roi_origin`` (``(oy, ox)`` binned-pixel), ``orientation`` and
+    ``cfa_phase`` are ``None`` when unknown — never invented defaults.
     """
 
     shape: tuple[int, int]

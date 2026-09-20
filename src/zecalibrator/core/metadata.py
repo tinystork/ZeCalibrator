@@ -977,7 +977,7 @@ def build_sensor_metadata(
         sensor_dimensions=sensor_dimensions,
         binning=binning,
         roi_origin=roi_origin,
-        roi_extent=None,
+        roi_extent=shape,
         orientation=orientation,
         cfa_phase=cfa_phase,
     )
