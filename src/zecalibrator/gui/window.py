@@ -102,7 +102,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self._active_generation = 0
         self._close_requested = False
         self._terminal_seen = False
-        self._syncing_modes = False
         self._syncing_theme = False
         self._active_kind = None
         self._cancel_requested = False
@@ -166,12 +165,12 @@ class MainWindow(QtWidgets.QMainWindow):
             self.library_root_edit, self.imports_edit, self.imports_browse_btn,
             self.root_browse_btn, self.index_btn,
             self.additive_combo, self.flat_combo,
-            self.standard_additive_combo, self.standard_flat_combo,
             self.add_masters_folder_btn, self.add_masters_file_btn,
             self.remove_masters_btn, self.clear_masters_btn,
             self.scan_masters_btn, self.confirm_masters_btn, self.build_managed_btn,
         ]
-        self._launch_widgets = [self.preflight_btn, self.calibrate_btn, self.export_btn]
+        self._launch_widgets = [self.preflight_btn, self.calibrate_btn, self.export_btn,
+                                self.advanced_preflight_btn, self.advanced_export_btn]
         self._update_scope_label()
 
     def _build_standard_tab(self) -> None:
@@ -234,22 +233,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.active_source_label = QtWidgets.QLabel("Active calibration source: none")
         layout.addWidget(self.active_source_label)
 
-        modes_box = QtWidgets.QGroupBox("Calibration")
-        modes_layout = QtWidgets.QGridLayout(modes_box)
-        modes_layout.addWidget(QtWidgets.QLabel("Dark:"), 0, 0)
-        self.standard_additive_combo = QtWidgets.QComboBox()
-        for mode in presentation.additive_modes():
-            self.standard_additive_combo.addItem(
-                presentation.standard_additive_mode_label(mode), mode
-            )
-        self.standard_additive_combo.setCurrentIndex(2)  # dark_incl_bias
-        modes_layout.addWidget(self.standard_additive_combo, 0, 1)
-        modes_layout.addWidget(QtWidgets.QLabel("Flat:"), 1, 0)
-        self.standard_flat_combo = QtWidgets.QComboBox()
-        for mode in presentation.flat_modes():
-            self.standard_flat_combo.addItem(presentation.standard_flat_mode_label(mode), mode)
-        modes_layout.addWidget(self.standard_flat_combo, 1, 1)
-        layout.addWidget(modes_box)
+        # Standard has no Dark/Flat choice: ZeCalibrator resolves the scientific
+        # route automatically (see core.routes.enumerate_routes).
+        self.standard_route_label = QtWidgets.QLabel(
+            "Calibration route: resolved automatically from your masters."
+        )
+        self.standard_route_label.setStyleSheet("color: gray;")
+        layout.addWidget(self.standard_route_label)
 
         actions_row = QtWidgets.QHBoxLayout()
         self.preflight_btn = QtWidgets.QPushButton("Verify calibration")
@@ -361,6 +351,15 @@ class MainWindow(QtWidgets.QMainWindow):
         in_memory_row.addWidget(self.calibrate_btn)
         in_memory_row.addStretch(1)
         modes_layout.addLayout(in_memory_row, 3, 0, 1, 2)
+        # Advanced explicit-route actions: dispatch the Advanced additive/flat
+        # combos explicitly (``request=self._request()``), never the auto-route.
+        explicit_row = QtWidgets.QHBoxLayout()
+        self.advanced_preflight_btn = QtWidgets.QPushButton("Verify with selected modes")
+        self.advanced_export_btn = QtWidgets.QPushButton("Export with selected modes")
+        explicit_row.addWidget(self.advanced_preflight_btn)
+        explicit_row.addWidget(self.advanced_export_btn)
+        explicit_row.addStretch(1)
+        modes_layout.addLayout(explicit_row, 5, 0, 1, 2)
         layout.addWidget(modes_box)
         self._update_mode_note()
 
@@ -461,6 +460,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.preflight_btn.clicked.connect(self._on_preflight)
         self.calibrate_btn.clicked.connect(self._on_calibrate_in_memory)
         self.export_btn.clicked.connect(self._on_export)
+        self.advanced_preflight_btn.clicked.connect(self._on_advanced_preflight)
+        self.advanced_export_btn.clicked.connect(self._on_advanced_export)
         self.cancel_btn.clicked.connect(self._on_cancel)
         self.audit_link_btn.clicked.connect(self._on_open_manifest)
         self.add_masters_folder_btn.clicked.connect(self._on_add_masters_folder)
@@ -473,8 +474,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.additive_combo.currentIndexChanged.connect(self._on_mode_changed)
         self.flat_combo.currentIndexChanged.connect(self._on_mode_changed)
-        self.standard_additive_combo.currentIndexChanged.connect(self._on_standard_mode_changed)
-        self.standard_flat_combo.currentIndexChanged.connect(self._on_standard_mode_changed)
         self.theme_combo.currentIndexChanged.connect(self._on_theme_changed)
         self.lights_list.itemSelectionChanged.connect(self._on_selection_changed)
         self.preflight_table.currentCellChanged.connect(self._on_preflight_selection_changed)
@@ -855,44 +854,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._bump_generation()
 
     def _on_mode_changed(self, *_args) -> None:
-        # Canonical (Advanced) combo changed: sync Standard labels, then invalidate once.
-        self._sync_standard_modes()
+        # Advanced combo changed: invalidate cached plans/results once.
         self._update_mode_note()
         self._bump_generation()
-
-    def _on_standard_mode_changed(self, *_args) -> None:
-        """Standard combo changed: forward to the canonical combo (single source of truth).
-
-        Forwarding triggers ``_on_mode_changed`` exactly once (guarded), which is the
-        only place that bumps the generation. This handler never bumps directly.
-        """
-        if self._syncing_modes:
-            return
-        self._syncing_modes = True
-        try:
-            self.additive_combo.setCurrentIndex(
-                self.additive_combo.findData(self.standard_additive_combo.currentData())
-            )
-            self.flat_combo.setCurrentIndex(
-                self.flat_combo.findData(self.standard_flat_combo.currentData())
-            )
-        finally:
-            self._syncing_modes = False
-
-    def _sync_standard_modes(self) -> None:
-        """Reflect the canonical combo values into the Standard presentation combos."""
-        if self._syncing_modes:
-            return
-        self._syncing_modes = True
-        try:
-            self.standard_additive_combo.setCurrentIndex(
-                self.standard_additive_combo.findData(self.additive_combo.currentData())
-            )
-            self.standard_flat_combo.setCurrentIndex(
-                self.standard_flat_combo.findData(self.flat_combo.currentData())
-            )
-        finally:
-            self._syncing_modes = False
 
     def _on_selection_changed(self) -> None:
         self._update_scope_label()
@@ -1340,6 +1304,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self._start_operation(snapshot)
 
     def _on_preflight(self) -> None:
+        # Standard: auto-route (request=None).
+        self._dispatch_preflight(None)
+
+    def _on_advanced_preflight(self) -> None:
+        # Advanced: explicit request from the additive/flat combos.
+        self._dispatch_preflight(self._request())
+
+    def _dispatch_preflight(self, request) -> None:
         if not self._lights:
             QtWidgets.QMessageBox.information(self, "No lights", "Add at least one light frame.")
             return
@@ -1349,7 +1321,9 @@ class MainWindow(QtWidgets.QMainWindow):
         snapshot = service.OperationSnapshot(
             op_id=service.new_operation_id(), kind="preflight",
             library_spec=self._library_spec,
-            request=self._request(), policy=self._policy(),
+            # request=None selects the auto-route resolver in the worker; a
+            # non-None request selects the explicit Advanced path.
+            request=request, policy=self._policy(),
             lights=self._lights_snapshot(self._lights),
         )
         self._start_operation(snapshot)
@@ -1375,6 +1349,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self._start_operation(snapshot)
 
     def _on_export(self) -> None:
+        # Standard: auto-route (request=None).
+        self._dispatch_export(None)
+
+    def _on_advanced_export(self) -> None:
+        # Advanced: explicit request from the additive/flat combos.
+        self._dispatch_export(self._request())
+
+    def _dispatch_export(self, request) -> None:
         if not self._lights:
             QtWidgets.QMessageBox.information(self, "No lights", "Add at least one light frame.")
             return
@@ -1398,7 +1380,9 @@ class MainWindow(QtWidgets.QMainWindow):
         snapshot = service.OperationSnapshot(
             op_id=service.new_operation_id(), kind="export",
             library_spec=self._library_spec,
-            request=self._request(), policy=self._policy(),
+            # request=None selects the auto-route resolver in the worker; a
+            # non-None request selects the explicit Advanced path.
+            request=request, policy=self._policy(),
             lights=self._lights_snapshot(entries),
             destination=destination, batch_id=service.new_batch_id(),
         )

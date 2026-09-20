@@ -139,13 +139,52 @@ def human_reason_text(summary: Mapping) -> str:
 
     This is a presentation mapping/fallback only: it never selects, ranks or
     guesses a candidate, and never exposes exact codes/expected/observed values
-    (those remain in Advanced).
+    (those remain in Advanced). Auto-route reasons (Standard) are mapped to
+    plain-language sentences; indeterminate masters are reported truthfully,
+    never as a formula/mode questionnaire.
+
+    The auto-route-only sentences are **outcome-aware**: a failure sentence is
+    never shown on a resolved/ready (``MATCHED``) row, and an ``AMBIGUOUS`` row
+    reports conflicting/indeterminate master declarations rather than a single
+    bias-required note. The durable ``reason_codes``/``reasons`` audit channels
+    are left unchanged.
     """
     outcome = summary.get("outcome")
+    codes = tuple(summary.get("reason_codes") or ())
     if outcome == "MATCHED":
+        # A resolved route never renders a failure sentence (the audit reasons
+        # may still carry non-blocking/informative notes such as an incompatible
+        # dark with an indeterminate bias state).
         return "A compatible calibration set was found."
     if outcome == "AMBIGUOUS":
+        if "BIAS_STATE_UNKNOWN" in codes or "BIAS_REQUIRED" in codes:
+            return (
+                "Multiple calibration routes are possible: the supplied masters "
+                "have conflicting or indeterminate declarations."
+            )
         return "More than one compatible calibration set was found."
+    # Needs attention (NO_MATCH) or unresolved (None): explain the concrete
+    # reason; the failure sentences apply only here.
+    if "BIAS_STATE_UNKNOWN" in codes:
+        return (
+            "Master dark cannot be used automatically: its processing history "
+            "does not establish whether bias has already been removed."
+        )
+    if "FLAT_UNUSABLE" in codes or "FLAT_ADDITIVE_DEPENDENCY_MISSING" in codes:
+        return (
+            "A flat master was supplied but cannot be used automatically: no "
+            "compatible flat-dark or bias dependency was found."
+        )
+    if "PARTIAL_ADDITIVE" in codes:
+        return (
+            "Only a partial correction is available (no compatible dark master); "
+            "this is not a full calibration."
+        )
+    if "BIAS_REQUIRED" in codes:
+        return (
+            "A bias master is required for this dark master (bias already removed) "
+            "but no compatible bias was found."
+        )
     if outcome == "NO_MATCH":
         role = _unavailable_role(summary.get("reasons", ()))
         if role:

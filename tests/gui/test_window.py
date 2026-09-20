@@ -170,11 +170,19 @@ def test_config_controls_locked_during_active_work(qapp, paths, tmp_path):
 
 
 def test_preflight_details_visible_for_no_match(qapp, paths, tmp_path):
-    """F2/F7: selecting a preflight row shows structured rejection details."""
+    """F2/F7: selecting a preflight row shows structured rejection details.
+
+    Auto-route (Standard) resolves the route automatically; a light with an
+    incompatible exposure yields NEEDS_ATTENTION (NO_MATCH) and its details are
+    visible in the Advanced pane.
+    """
     fixture = make_synth_fixture(tmp_path)
     w = _make_window(qapp, paths, fixture)
     try:
-        w.flat_combo.setCurrentIndex(w.flat_combo.findData("apply"))  # flat -> NO_MATCH
+        # Incompatible exposure -> no compatible dark -> needs attention.
+        decl = json.loads(open(fixture["decl"]).read())
+        decl["exposure_s"] = 11.0
+        w._lights[0].declaration = v1.ImportDeclaration(**decl)
         w._on_preflight()
         assert _pump(lambda: not w._controller.is_active)
         assert w._preflight_summaries
@@ -388,18 +396,12 @@ def test_standard_exposes_human_workflow(qapp, paths):
     _close(w)
 
 
-def test_standard_mode_labels_are_presentation_only(qapp, paths):
-    from zecalibrator.gui import presentation
-
+def test_standard_has_no_dark_flat_choice(qapp, paths):
+    """Standard has no Dark/Flat combos (the route is resolved automatically)."""
     w = MainWindow(paths)
-    labels = [w.standard_additive_combo.itemText(i) for i in range(w.standard_additive_combo.count())]
-    values = [w.standard_additive_combo.itemData(i) for i in range(w.standard_additive_combo.count())]
-    assert labels == ["None", "Bias only", "Standard dark", "Dark already bias-corrected"]
-    assert values == list(presentation.additive_modes())
-    flat_labels = [w.standard_flat_combo.itemText(i) for i in range(w.standard_flat_combo.count())]
-    flat_values = [w.standard_flat_combo.itemData(i) for i in range(w.standard_flat_combo.count())]
-    assert flat_labels == ["None", "Use flat"]
-    assert flat_values == list(presentation.flat_modes())
+    assert not hasattr(w, "standard_additive_combo")
+    assert not hasattr(w, "standard_flat_combo")
+    assert w.standard_route_label is not None
     _close(w)
 
 
@@ -448,40 +450,26 @@ def test_tab_switch_does_not_change_state(qapp, paths, tmp_path):
         _close(w)
 
 
-def test_standard_mode_change_maps_to_advanced_and_request(qapp, paths):
-    w = MainWindow(paths)
-    w.standard_additive_combo.setCurrentIndex(w.standard_additive_combo.findData("bias_only"))
-    assert w.additive_combo.currentData() == "bias_only"
-    assert w._request().additive_mode == "bias_only"
-    w.standard_flat_combo.setCurrentIndex(w.standard_flat_combo.findData("apply"))
-    assert w.flat_combo.currentData() == "apply"
-    assert w._request().flat_mode == "apply"
-    _close(w)
-
-
-def test_advanced_mode_change_maps_to_standard_and_request(qapp, paths):
+def test_advanced_mode_change_updates_request(qapp, paths):
+    """Advanced combos remain independent; no Standard mirror exists anymore."""
     w = MainWindow(paths)
     w.additive_combo.setCurrentIndex(w.additive_combo.findData("dark_bias_removed"))
-    assert w.standard_additive_combo.currentData() == "dark_bias_removed"
     assert w._request().additive_mode == "dark_bias_removed"
     w.flat_combo.setCurrentIndex(w.flat_combo.findData("none"))
-    assert w.standard_flat_combo.currentData() == "none"
     assert w._request().flat_mode == "none"
+    assert not hasattr(w, "standard_additive_combo")
     _close(w)
 
 
 def test_single_generation_bump_per_mode_change(qapp, paths):
     w = MainWindow(paths)
     before = w._generation
-    w.standard_additive_combo.setCurrentIndex(w.standard_additive_combo.findData("bias_only"))
+    w.additive_combo.setCurrentIndex(w.additive_combo.findData("bias_only"))
     assert w._generation == before + 1
-    # Sync reflection must not cause a second invalidation.
-    assert w.additive_combo.currentData() == "bias_only"
 
     before = w._generation
     w.additive_combo.setCurrentIndex(w.additive_combo.findData("dark_incl_bias"))
     assert w._generation == before + 1
-    assert w.standard_additive_combo.currentData() == "dark_incl_bias"
     _close(w)
 
 
@@ -489,14 +477,17 @@ def test_standard_summary_counts_truthful_human_outcomes(qapp, paths, tmp_path):
     fixture = make_synth_fixture(tmp_path)
     w = _make_window(qapp, paths, fixture)
     try:
-        w.flat_combo.setCurrentIndex(w.flat_combo.findData("apply"))  # NO_MATCH
+        # Incompatible exposure -> auto-route needs attention.
+        decl = json.loads(open(fixture["decl"]).read())
+        decl["exposure_s"] = 11.0
+        w._lights[0].declaration = v1.ImportDeclaration(**decl)
         w._on_preflight()
         assert _pump(lambda: not w._controller.is_active)
         assert w._preflight_summaries[0]["outcome"] == "NO_MATCH"
         assert "needs attention" in w.standard_summary_label.text()
         # Human outcome table shows the human label, not the technical token.
         assert w.standard_results_table.item(0, 1).text() == "Needs attention"
-        assert "No compatible" in w.standard_results_table.item(0, 2).text()
+        assert "partial correction" in w.standard_results_table.item(0, 2).text()
     finally:
         _close(w)
 

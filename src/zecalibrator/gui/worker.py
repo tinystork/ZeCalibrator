@@ -53,7 +53,20 @@ from pathlib import Path
 from PySide6 import QtCore
 
 import zecalibrator.api.v1 as v1
+from zecalibrator.api.v1._auto_route import (
+    auto_route_batch,
+    light_constraints_from_sensor_metadata,
+    resolve_route,
+)
 from zecalibrator.gui import service, settings as settings_mod
+
+# Standard auto-route outcome -> public matcher outcome vocabulary (the Standard
+# summary/table reuse the existing MATCHED/NO_MATCH/AMBIGUOUS presentation).
+_ROUTE_OUTCOME_MAP = {
+    "READY": "MATCHED",
+    "NEEDS_ATTENTION": "NO_MATCH",
+    "AMBIGUOUS": "AMBIGUOUS",
+}
 
 # ---------------------------------------------------------------------------
 # Interpreter-teardown safety net (programmatic/embedding callers).
@@ -261,6 +274,13 @@ def _resolve_failed_summary(index: int, light: "service.LightInput", inspection,
     }
 
 
+class _AdapterFailure:
+    """Minimal stand-in for a metadata-adapter failure in the auto-route path."""
+
+    reason_code = "METADATA_ADAPTER"
+    details = "inspected metadata could not be adapted to light constraints"
+
+
 class _OperationWorker(QtCore.QObject):
     """The single worker QObject (lives on the worker thread).
 
@@ -430,23 +450,97 @@ class _OperationWorker(QtCore.QObject):
                     )
                     continue
                 inspection = insp.inspection
-                res = v1.resolve_calibration(
-                    inspection, snap.request, handle, snap.policy,
-                    cancel=token, progress=progress,
-                )
-                if res.operation_status == "CANCELLED":
-                    return {"kind": "preflight", "status": "CANCELLED", "count": index}
-                if res.operation_status == "FAILED":
-                    self._relay(
-                        "preflight", snap.op_id,
-                        (_resolve_failed_summary(index, light, inspection, res), None),
+                if snap.request is None:
+                    summary, plan = self._auto_route_preflight_light(
+                        index, light, inspection, handle, snap
                     )
-                    continue
-                summary, plan = _resolve_summary(index, light, inspection, res.decision)
+                else:
+                    res = v1.resolve_calibration(
+                        inspection, snap.request, handle, snap.policy,
+                        cancel=token, progress=progress,
+                    )
+                    if res.operation_status == "CANCELLED":
+                        return {"kind": "preflight", "status": "CANCELLED", "count": index}
+                    if res.operation_status == "FAILED":
+                        self._relay(
+                            "preflight", snap.op_id,
+                            (_resolve_failed_summary(index, light, inspection, res), None),
+                        )
+                        continue
+                    summary, plan = _resolve_summary(index, light, inspection, res.decision)
                 self._relay("preflight", snap.op_id, (summary, plan))
             return {"kind": "preflight", "status": "COMPLETED", "count": len(snap.lights)}
         finally:
             handle.close()
+
+    # -- Standard auto-route (resolver is application-layer, NOT public api.v1) --
+    def _auto_route_resolve(self, inspection, handle, snap):
+        """Run the application resolver against the library snapshot.
+
+        Returns the :class:`~zecalibrator.application.routes.RouteResolution`, or
+        ``None`` when the inspected metadata cannot be adapted (a truthfully
+        reported failure, never a fabricated light constraint).
+        """
+        try:
+            light = light_constraints_from_sensor_metadata(inspection.metadata)
+        except Exception:  # noqa: BLE001 - adapt failure is reported by the caller
+            return None
+        return resolve_route(light, handle.snapshot, snap.policy)
+
+    def _auto_route_preflight_light(self, index, light, inspection, handle, snap):
+        """Resolve one light via the auto-route resolver and render its summary."""
+        resolution = self._auto_route_resolve(inspection, handle, snap)
+        if resolution is None:
+            return (
+                _resolve_failed_summary(index, light, inspection, _AdapterFailure()),
+                None,
+            )
+        plan = resolution.plan
+        summary = {
+            "index": index,
+            "row_id": light.row_id,
+            "path": light.path,
+            "display": light.display_name,
+            "hdu": light.hdu,
+            "inspect_status": "COMPLETED",
+            "domain_finding": inspection.domain_finding,
+            "shape": list(inspection.shape),
+            "warnings": list(inspection.warnings),
+            "metadata": _metadata_dict(inspection.metadata),
+            "outcome": _ROUTE_OUTCOME_MAP[resolution.outcome],
+            "plan_id": plan.plan_id if plan is not None else None,
+            "reason_codes": [r.code for r in resolution.reasons],
+            "reasons": [_reason_dict(r) for r in resolution.reasons],
+            "rejected_candidates": [],
+            "coherent_sets": [
+                {role: c.candidate_id for role, c in r.masters.items()}
+                for r in resolution.routes
+            ],
+            "selection_decisions": [],
+            "auto_route": True,
+            "route": {
+                "additive_mode": resolution.route.additive_mode if resolution.route else None,
+                "flat_mode": resolution.route.flat_mode if resolution.route else None,
+                "flat_prep_mode": resolution.route.flat_prep_mode if resolution.route else None,
+            },
+            "decision_audit": {
+                "outcome": resolution.outcome,
+                "reasons": [_reason_dict(r) for r in resolution.reasons],
+                "unverified": [_reason_dict(r) for r in resolution.unverified],
+                "routes": [
+                    {
+                        "additive_mode": r.additive_mode,
+                        "flat_mode": r.flat_mode,
+                        "flat_prep_mode": r.flat_prep_mode,
+                        "partial": r.partial,
+                        "masters": {role: c.candidate_id for role, c in r.masters.items()},
+                    }
+                    for r in resolution.routes
+                ],
+            },
+            "plan_audit": service.to_jsonable(plan.to_dict()) if plan is not None else None,
+        }
+        return summary, plan
 
     def _calibrate_in_memory(self, snap, token, progress) -> dict:
         light = snap.lights[0]
@@ -476,6 +570,8 @@ class _OperationWorker(QtCore.QObject):
         }
 
     def _export(self, snap, token, progress) -> dict:
+        if snap.request is None:
+            return self._standard_export(snap, token, progress)
         frames = [light.to_source() for light in snap.lights]
         options = v1.BatchOptions(destination=snap.destination, batch_id=snap.batch_id)
         opened = v1.open_library(snap.library_spec, cancel=token, progress=progress)
@@ -496,6 +592,92 @@ class _OperationWorker(QtCore.QObject):
             for item in v1.calibrate_batch(
                 frames, snap.request, handle, snap.policy, options,
                 cancel=token, progress=progress,
+            ):
+                d = item.to_dict()
+                items.append(d)
+                self._relay("batch_item", snap.op_id, d)
+        except v1.OperationCancelled:
+            cancelled = True
+        except v1.BatchManifestError as exc:
+            # Items were already yielded and delivered; retain them and report the
+            # manifest finalization failure truthfully (never discard the items).
+            manifest_error = str(exc)
+        finally:
+            handle.close()
+
+        manifest = None
+        manifest_exists = False
+        manifest_audit = None
+        if snap.destination is not None:
+            manifest = os.path.join(snap.destination, f"zecalibrator_batch_{snap.batch_id}.json")
+            manifest_exists = os.path.exists(manifest)
+            if manifest_exists:
+                try:
+                    with open(manifest, "rb") as f:
+                        manifest_audit = json.loads(f.read().decode("utf-8"))
+                except Exception:  # noqa: BLE001 - audit is best-effort
+                    manifest_audit = None
+
+        if manifest_error is not None:
+            status = "FAILED"
+            reason_code = "MANIFEST_WRITE_FAILED"
+            details = manifest_error
+        elif cancelled:
+            status = "CANCELLED"
+            reason_code = "CANCELLED"
+            details = "cancellation requested"
+        elif any(i["disposition"] == "FAILED" for i in items):
+            status = "PARTIAL"
+            reason_code = None
+            details = ""
+        else:
+            status = "COMPLETED"
+            reason_code = None
+            details = ""
+
+        return {
+            "kind": "export",
+            "status": status,
+            "reason_code": reason_code,
+            "details": details,
+            "batch_id": snap.batch_id,
+            "destination": snap.destination,
+            "manifest": manifest,
+            "manifest_exists": manifest_exists,
+            "manifest_audit": manifest_audit,
+            "items": items,
+            "total_inputs": len(snap.lights),
+            "input_displays": [light.display_name for light in snap.lights],
+        }
+
+    def _standard_export(self, snap, token, progress) -> dict:
+        """Standard auto-route export: per light, inspect -> auto-route -> calibrate.
+
+        Mirrors the explicit ``_export`` shape (same batch item dicts, same
+        transactional output writer and manifest) but resolves each light's
+        scientific route automatically (no explicit ``CalibrationRequest``).
+        The orchestration (resolve/calibrate/write/manifest) lives in the private
+        ``zecalibrator.api.v1._auto_route.auto_route_batch`` facade.
+        """
+        frames = [light.to_source() for light in snap.lights]
+        options = v1.BatchOptions(destination=snap.destination, batch_id=snap.batch_id)
+        opened = v1.open_library(snap.library_spec, cancel=token, progress=progress)
+        if opened.operation_status == "CANCELLED":
+            return {"kind": "export", "status": "CANCELLED", "batch_id": snap.batch_id,
+                    "items": [], "total_inputs": len(snap.lights)}
+        if opened.operation_status != "OPENED":
+            return {
+                "kind": "export", "status": "FAILED",
+                "reason_code": opened.reason_code, "details": opened.details,
+                "batch_id": snap.batch_id, "items": [], "total_inputs": len(snap.lights),
+            }
+        handle = opened.handle
+        items = []
+        cancelled = False
+        manifest_error = None
+        try:
+            for item in auto_route_batch(
+                frames, handle, snap.policy, options, cancel=token, progress=progress
             ):
                 d = item.to_dict()
                 items.append(d)

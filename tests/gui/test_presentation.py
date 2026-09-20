@@ -91,6 +91,42 @@ def test_human_reason_text_never_guesses_a_candidate():
         "This image could not be inspected."
 
 
+def test_human_reason_text_matched_ignores_auto_route_failure_codes():
+    # F1: a READY row must never render a failure sentence even when an
+    # incompatible dark's indeterminate bias_state is recorded in the audit
+    # reasons.
+    summary = {
+        "outcome": "MATCHED",
+        "reason_codes": ["BIAS_STATE_UNKNOWN"],
+        "reasons": [{"code": "BIAS_STATE_UNKNOWN", "role": "dark", "field": "bias_state"}],
+    }
+    assert presentation.human_reason_text(summary) == "A compatible calibration set was found."
+    assert "cannot be used" not in presentation.human_reason_text(summary)
+
+
+def test_human_reason_text_ambiguous_reports_conflicting_declarations():
+    # S2: an AMBIGUOUS row with a bias-required note is reported as conflicting
+    # master declarations, not a single bias-required failure sentence.
+    summary = {
+        "outcome": "AMBIGUOUS",
+        "reason_codes": ["BIAS_REQUIRED"],
+        "reasons": [{"code": "BIAS_REQUIRED", "role": "bias", "parent": "dark"}],
+    }
+    text = presentation.human_reason_text(summary)
+    assert "Multiple calibration routes are possible" in text
+    assert "conflicting or indeterminate declarations" in text
+
+
+def test_human_reason_text_needs_attention_keeps_failure_sentences():
+    # The auto-route failure sentences still apply for a needs-attention row.
+    assert presentation.human_reason_text(
+        {"outcome": "NO_MATCH", "reason_codes": ["BIAS_STATE_UNKNOWN"], "reasons": []}
+    ) == (
+        "Master dark cannot be used automatically: its processing history "
+        "does not establish whether bias has already been removed."
+    )
+
+
 def test_human_reason_text_names_only_unavailable_role():
     # The fallback names a *missing* required role, never a chosen candidate.
     assert presentation.human_reason_text({
