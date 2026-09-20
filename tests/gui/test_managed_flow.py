@@ -155,7 +155,12 @@ def test_empty_managed_library_never_ready(qapp, paths, monkeypatch):
             "revision": "fp", "candidate_count": 0, "needs_attention": [],
             "reason_code": None, "details": "",
         })
-        assert "needs attention" in w.library_human_status.text()
+        # R3D-D: the empty case is reported with a concrete human reason, never
+        # the forbidden technical wording.
+        text = w.managed_status_label.text()
+        assert "Needs attention" in text
+        for forbidden in ("no usable masters", "candidate_count", "not prepared", "library not prepared"):
+            assert forbidden not in text.lower()
         assert w._library_spec is None
         assert w._ensure_library() is False
         assert warned, "Verify/export readiness must be refused for an empty library"
@@ -178,6 +183,7 @@ def test_managed_build_wires_exact_library_spec(qapp, paths):
         )
         w._managed_spec = spec
         w._set_active_source("managed")
+        w._session_selection = [("sha", "dark")]
         w._handle_build_managed({
             "kind": "build_managed_library", "status": "COMPLETED",
             "revision": "fp", "candidate_count": 1, "needs_attention": [],
@@ -185,7 +191,7 @@ def test_managed_build_wires_exact_library_spec(qapp, paths):
         })
         assert w._library_spec is spec
         assert w._library_spec.index_path == spec.index_path
-        assert "Library ready" in w.library_human_status.text()
+        assert "Ready to calibrate" in w.managed_status_label.text()
         assert w._ensure_library() is True, "ready managed library must satisfy _ensure_library()"
     finally:
         _shutdown(w)
@@ -230,7 +236,7 @@ def test_add_masters_auto_flow_detects_confirms_builds(qapp, paths, tmp_path, mo
             and w._auto_flow_active is False
         )
         assert w._library_spec is not None, "auto-flow must wire the managed LibrarySpec"
-        assert "Library ready" in w.library_human_status.text()
+        assert "Ready to calibrate" in w.managed_status_label.text()
         assert w._ensure_library() is True
         # R3D-C: the Standard auto-flow must never show a modal dialog.
         assert prompts == [], f"unexpected modal prompts in auto-flow: {prompts}"
@@ -239,16 +245,18 @@ def test_add_masters_auto_flow_detects_confirms_builds(qapp, paths, tmp_path, mo
 
 
 # ---------------------------------------------------------------------------
-# F6: auto-prepare is skipped when the confirmed set has incomplete evidence
+# F6 / R3D-D: a Bayer dark missing the CFA geometry facts is still INDEXED
+# (admission != compatibility); it reaches the managed session index, never
+# dropped upstream of the R3D-C matcher.
 # ---------------------------------------------------------------------------
-def test_auto_flow_skips_prepare_when_incomplete_evidence(qapp, paths, tmp_path, monkeypatch):
+def test_auto_flow_indexes_bayer_dark_missing_geometry(qapp, paths, tmp_path, monkeypatch):
     from .conftest import wait_idle
 
     w = MainWindow(paths)
     assert wait_idle(w)
     try:
-        # A Bayer dark missing the CFA geometry facts (orientation/roi_origin)
-        # stays incomplete under the auto-flow (no questionnaire to fill them).
+        # A Bayer dark missing orientation/roi_origin stays indexable under the
+        # auto-flow (no questionnaire; the missing geometry is UNVERIFIED at match).
         dark = _write_dark(tmp_path / "dark.fits")
         monkeypatch.setattr(
             QtWidgets.QFileDialog, "getOpenFileNames",
@@ -261,9 +269,16 @@ def test_auto_flow_skips_prepare_when_incomplete_evidence(qapp, paths, tmp_path,
             and not w._confirm_batch_active
             and w._auto_flow_active is False
         )
-        # Not fully admissible -> no managed library is prepared/wired.
-        assert w._library_spec is None
-        assert "needs attention" in w.library_human_status.text()
+        # Admitted-and-incomplete masters are now indexed (never dropped).
+        assert w._library_spec is not None
+        assert "Ready to calibrate" in w.managed_status_label.text()
+        opened = v1.open_library(w._library_spec)
+        assert opened.operation_status == "OPENED"
+        handle = opened.handle
+        try:
+            assert sum(len(cs) for cs in handle.snapshot.candidates.values()) == 1
+        finally:
+            handle.close()
     finally:
         _shutdown(w)
 

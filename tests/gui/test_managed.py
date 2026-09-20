@@ -272,7 +272,10 @@ def test_worker_confirm_load_and_build_managed(controller, tmp_path):
     assert s3["candidate_count"] == 1
 
 
-def test_worker_build_excludes_insufficient_evidence_master(controller, tmp_path):
+def test_worker_build_indexes_insufficient_evidence_master(controller, tmp_path):
+    """R3D-D: ADMISSION != COMPATIBILITY — a header-only dark (missing necessary
+    matching fields) is still INDEXED; ``needs_attention`` is informational only,
+    never an ingestion filter."""
     from .conftest import run_operation
 
     dark = _write_dark_with_cards(tmp_path / "dark.fits")
@@ -299,9 +302,10 @@ def test_worker_build_excludes_insufficient_evidence_master(controller, tmp_path
     build = _snapshot("build_managed_library", ledger_dir=ledger_dir, managed_spec=spec)
     r2 = run_operation(controller, build, v1.CancellationToken())
     s2 = r2.finished_summary()
-    # The insufficient-evidence master is excluded from the ready index and
-    # reported truthfully (never silently a usable library).
-    assert s2["candidate_count"] == 0
+    # The insufficient-evidence master is now INDEXED (admission != compatibility);
+    # its incomplete evidence is reported as an informational diagnostic, never a
+    # drop.
+    assert s2["candidate_count"] == 1
     assert len(s2["needs_attention"]) == 1
     assert "detector_model" in s2["needs_attention"][0]["missing"]
     assert "detector_instance_id" not in s2["needs_attention"][0]["missing"]
@@ -390,14 +394,12 @@ def test_window_exactly_one_active_source(qapp, tmp_path):
     w._set_active_source("managed")
     assert w._active_source == "managed"
     assert w._library_spec is None
-    assert "managed" in w.active_source_label.text()
 
     # Explicit source clears the managed scan/pending state.
     w._managed_scan = [{"path": "x"}]
     w._set_active_source("explicit")
     assert w._active_source == "explicit"
     assert w._managed_scan == []
-    assert "explicit" in w.active_source_label.text()
 
     w._set_active_source(None)
     assert w._active_source is None

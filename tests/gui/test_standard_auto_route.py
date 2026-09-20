@@ -68,14 +68,16 @@ def test_standard_has_no_dark_flat_combos(qapp, paths):
     try:
         assert not hasattr(w, "standard_additive_combo")
         assert not hasattr(w, "standard_flat_combo")
-        # The Standard tab shows lights, masters, active source, actions, summary.
+        # The Standard tab shows lights, masters, the single action, summary.
         assert w.lights_list is not None
         assert w.masters_files_list is not None
-        assert w.active_source_label is not None
-        assert w.preflight_btn.text() == "Verify calibration"
+        assert w.managed_status_label is not None
         assert w.export_btn.text() == "Calibrate / Export…"
         assert w.standard_summary_label is not None
-        assert "auto" in w.standard_route_label.text().lower()
+        # R3D-D one-step: no Verify/route/source technical labels in Standard.
+        assert not hasattr(w, "preflight_btn")
+        assert not hasattr(w, "standard_route_label")
+        assert not hasattr(w, "active_source_label")
     finally:
         _close(w)
 

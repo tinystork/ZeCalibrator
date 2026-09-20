@@ -930,19 +930,21 @@ class _OperationWorker(QtCore.QObject):
         if snap.session_selection is not None:
             keys = set(snap.session_selection)
             records = [r for r in records if (r.content_sha256, r.role) in keys]
-        ready = []
+        # R3D-D: ADMISSION != COMPATIBILITY. Index EVERY session-selected + admitted
+        # record; unknown/incomplete metadata is preserved (UNKNOWN/UNVERIFIED) and
+        # resolved by the single compatibility authority (the R3D-C matcher), never
+        # dropped here. ``master_evidence_status`` is informational only — it feeds
+        # the ``needs_attention`` diagnostics and is NEVER an ingestion filter.
         attention = []
         for r in records:
             status, missing = service.master_evidence_status(r.role, r.declaration)
-            if status == "ready":
-                ready.append(r)
-            else:
+            if status != "ready":
                 attention.append({
                     "role": r.role,
                     "path": r.last_seen_path,
                     "missing": list(missing),
                 })
-        built = v1.build_managed_library(snap.managed_spec, ready)
+        built = v1.build_managed_library(snap.managed_spec, records)
         return {
             "kind": "build_managed_library",
             "status": built.status,

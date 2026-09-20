@@ -115,8 +115,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self._confirm_queue: list[dict] = []
         self._confirm_batch_active: bool = False
         self._session_selection: list[tuple[str, str]] = []
-        self._confirmed_ready: list[bool] = []
+        self._confirmed_ready: list[bool] = []  # diagnostic only (never a gate)
         self._auto_flow_active: bool = False
+        self._master_attention_notes: list[str] = []
+        self._export_after_preflight: bool = False
+        self._preflight_is_standard: bool = False
+        self._standard_route_generation: int = -1
 
         self._build_ui()
         self._wire_controller()
@@ -169,12 +173,12 @@ class MainWindow(QtWidgets.QMainWindow):
             self.remove_masters_btn, self.clear_masters_btn,
             self.scan_masters_btn, self.confirm_masters_btn, self.build_managed_btn,
         ]
-        self._launch_widgets = [self.preflight_btn, self.calibrate_btn, self.export_btn,
+        self._launch_widgets = [self.calibrate_btn, self.export_btn,
                                 self.advanced_preflight_btn, self.advanced_export_btn]
         self._update_scope_label()
 
     def _build_standard_tab(self) -> None:
-        """Standard (nominal) workflow: human-first, progressive disclosure."""
+        """Standard (nominal) one-step workflow: human-first, auto-route, no technical controls."""
         page = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(page)
 
@@ -196,10 +200,7 @@ class MainWindow(QtWidgets.QMainWindow):
         inputs_layout.addWidget(self.lights_count_label)
         layout.addWidget(inputs_box)
 
-        self.library_human_status = QtWidgets.QLabel("Library unavailable")
-        layout.addWidget(self.library_human_status)
-
-        masters_box = QtWidgets.QGroupBox("Calibration masters (managed)")
+        masters_box = QtWidgets.QGroupBox("Calibration masters")
         masters_layout = QtWidgets.QVBoxLayout(masters_box)
         self.masters_files_list = QtWidgets.QListWidget()
         self.masters_files_list.setSelectionMode(
@@ -218,33 +219,12 @@ class MainWindow(QtWidgets.QMainWindow):
             masters_add_row.addWidget(b)
         masters_add_row.addStretch(1)
         masters_layout.addLayout(masters_add_row)
-        masters_btn_row = QtWidgets.QHBoxLayout()
-        self.scan_masters_btn = QtWidgets.QPushButton("Detect masters…")
-        self.confirm_masters_btn = QtWidgets.QPushButton("Confirm detected facts")
-        self.build_managed_btn = QtWidgets.QPushButton("Build managed library")
-        for b in (self.scan_masters_btn, self.confirm_masters_btn, self.build_managed_btn):
-            masters_btn_row.addWidget(b)
-        masters_btn_row.addStretch(1)
-        masters_layout.addLayout(masters_btn_row)
-        self.managed_status_label = QtWidgets.QLabel("No managed masters detected.")
+        self.managed_status_label = QtWidgets.QLabel("Add calibration masters to begin.")
         masters_layout.addWidget(self.managed_status_label)
         layout.addWidget(masters_box)
 
-        self.active_source_label = QtWidgets.QLabel("Active calibration source: none")
-        layout.addWidget(self.active_source_label)
-
-        # Standard has no Dark/Flat choice: ZeCalibrator resolves the scientific
-        # route automatically (see core.routes.enumerate_routes).
-        self.standard_route_label = QtWidgets.QLabel(
-            "Calibration route: resolved automatically from your masters."
-        )
-        self.standard_route_label.setStyleSheet("color: gray;")
-        layout.addWidget(self.standard_route_label)
-
         actions_row = QtWidgets.QHBoxLayout()
-        self.preflight_btn = QtWidgets.QPushButton("Verify calibration")
         self.export_btn = QtWidgets.QPushButton("Calibrate / Export…")
-        actions_row.addWidget(self.preflight_btn)
         actions_row.addWidget(self.export_btn)
         actions_row.addStretch(1)
         layout.addLayout(actions_row)
@@ -327,6 +307,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self.library_status = QtWidgets.QLabel("No library opened.")
         library_layout.addWidget(self.library_status)
         layout.addWidget(library_box)
+
+        managed_box = QtWidgets.QGroupBox("Managed masters")
+        managed_layout = QtWidgets.QVBoxLayout(managed_box)
+        managed_row = QtWidgets.QHBoxLayout()
+        self.scan_masters_btn = QtWidgets.QPushButton("Detect masters…")
+        self.confirm_masters_btn = QtWidgets.QPushButton("Confirm detected facts")
+        self.build_managed_btn = QtWidgets.QPushButton("Build managed library")
+        for b in (self.scan_masters_btn, self.confirm_masters_btn, self.build_managed_btn):
+            managed_row.addWidget(b)
+        managed_row.addStretch(1)
+        managed_layout.addLayout(managed_row)
+        layout.addWidget(managed_box)
 
         modes_box = QtWidgets.QGroupBox("Calibration details")
         modes_layout = QtWidgets.QGridLayout(modes_box)
@@ -457,7 +449,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.root_browse_btn.clicked.connect(self._on_browse_root)
         self.imports_browse_btn.clicked.connect(self._on_browse_imports)
         self.index_btn.clicked.connect(self._on_index_library)
-        self.preflight_btn.clicked.connect(self._on_preflight)
         self.calibrate_btn.clicked.connect(self._on_calibrate_in_memory)
         self.export_btn.clicked.connect(self._on_export)
         self.advanced_preflight_btn.clicked.connect(self._on_advanced_preflight)
@@ -717,40 +708,41 @@ class MainWindow(QtWidgets.QMainWindow):
         # Theme is a presentation preference only; never bumps scientific generation.
         self._settings = dataclasses.replace(self._settings, appearance_theme=theme_name)
 
-    # -- library human status ----------------------------------------------
-    _LIBRARY_HUMAN = {
-        "ready": "Library ready",
-        "unavailable": "Library unavailable",
-        "attention": "Library needs attention",
+    # -- Standard human status (single human-readable state) --------------
+    _ROLE_HUMAN_CAPITAL = {
+        "dark": "Dark", "bias": "Bias", "flat": "Flat", "flat_dark": "Dark flat",
     }
 
-    def _set_library_human_status(self, state: str, detail: str = "") -> None:
-        base = self._LIBRARY_HUMAN.get(state, "Library unavailable")
-        self.library_human_status.setText(f"{base}{' — ' + detail if detail else ''}")
+    def _human_role_list(self, roles) -> str:
+        return " · ".join(self._ROLE_HUMAN_CAPITAL.get(r, r) for r in roles)
+
+    def _set_standard_human_status(self, state: str, detail: str = "") -> None:
+        if state == "ready":
+            text = "Ready to calibrate" + (f" — {detail}" if detail else "")
+        elif state in ("attention", "unavailable"):
+            text = "Needs attention" + (f" — {detail}" if detail else "")
+        else:
+            text = detail or "Add calibration masters to begin."
+        self.managed_status_label.setText(text)
 
     # -- exactly-one-active calibration source (managed vs explicit) ----------
     def _set_active_source(self, source: str | None) -> None:
         """Set exactly one active calibration source and clear the other.
 
         Selecting the managed source clears the explicit library spec (and vice
-        versa) so the two never mix silently; the active source is visible in the
-        Standard tab.
+        versa) so the two never mix silently.
         """
         if source == "managed":
             self._active_source = "managed"
             self._library_spec = None
             self.library_index_edit.clear()
             self.library_root_edit.clear()
-            self.active_source_label.setText("Active calibration source: managed masters")
         elif source == "explicit":
             self._active_source = "explicit"
             self._managed_scan.clear()
             self._managed_pending.clear()
-            self.managed_status_label.setText("No managed masters detected.")
-            self.active_source_label.setText("Active calibration source: explicit library")
         else:
             self._active_source = None
-            self.active_source_label.setText("Active calibration source: none")
 
     # -- Standard summary (human outcomes) ----------------------------------
     def _reset_standard_summary(self) -> None:
@@ -1007,7 +999,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self._master_files.clear()
         self._managed_scan.clear()
         self._managed_pending.clear()
-        self.managed_status_label.setText("No managed masters detected.")
         self._refresh_masters_list()
         self._invalidate_managed_source()
 
@@ -1024,13 +1015,13 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._active_source == "managed":
             self._active_source = None
             self._library_spec = None
-            self.active_source_label.setText("Active calibration source: none")
-            self._set_library_human_status("unavailable")
         self._managed_spec = None
         self._session_selection.clear()
+        self._master_attention_notes.clear()
         self._confirm_queue.clear()
         self._confirm_batch_active = False
         self._auto_flow_active = False
+        self._set_standard_human_status(None, "")
 
     def _auto_detect_masters(self) -> None:
         """F6: adding masters auto-detects (one scan) then auto-confirms/builds."""
@@ -1054,6 +1045,7 @@ class MainWindow(QtWidgets.QMainWindow):
         """Detect the complete master set in ONE worker op (no GUI-side chaining)."""
         self._managed_scan.clear()
         self._managed_pending.clear()
+        self._master_attention_notes.clear()
         self._confirm_queue.clear()
         self._confirm_batch_active = False
         self._session_selection.clear()
@@ -1068,11 +1060,12 @@ class MainWindow(QtWidgets.QMainWindow):
         detected = sum(1 for m in self._managed_scan if m.get("candidates"))
         incompatible = sum(1 for m in self._managed_scan if not m.get("admissible", True))
         conflicted = sum(1 for m in self._managed_scan if m.get("conflict"))
-        self.managed_status_label.setText(
+        # Scan facts are rendered into the Advanced details pane; the Standard
+        # human status label is left for the (auto) flow's terminal human state.
+        lines = [
             f"Detected {len(self._managed_scan)} master(s): {detected} with facts, "
-            f"{incompatible} incompatible, {conflicted} role conflict(s)."
-        )
-        lines = []
+            f"{incompatible} incompatible, {conflicted} role conflict(s).",
+        ]
         for m in self._managed_scan:
             role = m.get("role") or m.get("detected_role")
             lines.append(f"[{role or 'no role'}] {m.get('path')}")
@@ -1192,13 +1185,18 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         self._managed_pending.clear()
         self._confirmed_ready.clear()
+        self._master_attention_notes.clear()
         for m in self._managed_scan:
             if m.get("status") != "COMPLETED":
                 continue
             if not m.get("admissible", True):
+                reasons = "; ".join(m.get("incompatible", ())) or "incompatible"
+                self._master_attention_notes.append(
+                    f"{Path(m.get('path')).name} is incompatible: {reasons}"
+                )
                 self._log(
                     f"[managed] incompatible master not indexed: {m.get('path')} — "
-                    f"{'; '.join(m.get('incompatible', ()))}"
+                    f"{reasons}"
                 )
                 continue
             role = m.get("role")
@@ -1210,12 +1208,18 @@ class MainWindow(QtWidgets.QMainWindow):
                 # undeterminable role is reported as a non-modal per-master
                 # needs-attention note (never a questionnaire).
                 if conflict:
+                    self._master_attention_notes.append(
+                        f"declared and detected master roles disagree: {Path(m.get('path')).name}"
+                    )
                     self._log(
                         f"[managed] needs attention — declared and detected "
                         f"master roles disagree: {m.get('path')}"
                     )
                     continue
                 if not role:
+                    self._master_attention_notes.append(
+                        f"master role could not be determined: {Path(m.get('path')).name}"
+                    )
                     self._log(
                         f"[managed] needs attention — master role could not be "
                         f"determined: {m.get('path')}"
@@ -1255,10 +1259,7 @@ class MainWindow(QtWidgets.QMainWindow):
             })
         if not self._managed_pending:
             if self._auto_flow_active:
-                self.managed_status_label.setText(
-                    "No admissible detected masters to confirm "
-                    "(incompatible/conflicts are not auto-resolved)."
-                )
+                self._set_standard_human_status("attention", self._first_attention_note())
             else:
                 QtWidgets.QMessageBox.information(
                     self, "Nothing to confirm",
@@ -1268,6 +1269,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self._confirm_queue = list(self._managed_pending)
         self._confirm_batch_active = True
         self._dispatch_next_confirm()
+
+    def _first_attention_note(self) -> str:
+        """Return the first concrete human attention note (or a safe fallback)."""
+        if self._master_attention_notes:
+            return self._master_attention_notes[0]
+        return "add compatible calibration masters."
 
     def _dispatch_next_confirm(self) -> None:
         """Dispatch the next queued confirm; the queue is drained on ``worker_ended``
@@ -1286,25 +1293,15 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         if self._confirm_batch_active:
             self._confirm_batch_active = False
-            self.managed_status_label.setText(
-                f"Confirmed {len(self._managed_pending)} master(s)."
-            )
             self._finish_confirm_flow()
 
     def _finish_confirm_flow(self) -> None:
-        """After the confirm queue drains, auto-prepare the managed library when the
-        confirmed set is fully admissible (F6); otherwise report attention."""
+        """After the confirm queue drains, ALWAYS prepare the managed library when
+        at least one admitted master is pending (R3D-D). Missing/incomplete
+        evidence is indexed (UNKNOWN/UNVERIFIED) and resolved by the R3D-C
+        matcher, never dropped here. ``_confirmed_ready`` is diagnostic only."""
         if self._auto_flow_active and self._managed_pending:
-            if all(self._confirmed_ready):
-                self._on_build_managed()
-            else:
-                self.managed_status_label.setText(
-                    f"Confirmed {len(self._managed_pending)} master(s); "
-                    "auto-prepare skipped (incomplete evidence)."
-                )
-                self._set_library_human_status(
-                    "attention", "some masters need evidence before the library can be prepared"
-                )
+            self._on_build_managed()
         self._auto_flow_active = False
 
     def _on_build_managed(self) -> None:
@@ -1337,6 +1334,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self._ensure_library():
             return
         self._bump_generation()
+        self._preflight_is_standard = request is None
         snapshot = service.OperationSnapshot(
             op_id=service.new_operation_id(), kind="preflight",
             library_spec=self._library_spec,
@@ -1368,19 +1366,60 @@ class MainWindow(QtWidgets.QMainWindow):
         self._start_operation(snapshot)
 
     def _on_export(self) -> None:
-        # Standard: auto-route (request=None).
-        self._dispatch_export(None)
+        # Standard one-step: the single scientific action. No manual Verify/
+        # preflight step — the auto-route is resolved internally when stale.
+        if not self._lights:
+            QtWidgets.QMessageBox.information(self, "No images", "Add at least one image to calibrate.")
+            return
+        if self._library_spec is None:
+            reason = self._first_attention_note() if self._master_attention_notes else "add calibration masters first."
+            self._set_standard_human_status("attention", reason)
+            self.status_label.setText("Calibration not ready.")
+            QtWidgets.QMessageBox.warning(self, "Calibration not ready", reason)
+            return
+        if self._standard_route_generation != self._generation:
+            # Auto-route not yet resolved (or stale): run it internally first,
+            # then continue automatically if at least one light is READY.
+            self._export_after_preflight = True
+            self._dispatch_preflight(None)
+            return
+        # Auto-route already resolved for the current configuration.
+        if not self._standard_route_ready():
+            self._set_standard_human_status("attention", self._first_blocking_human_reason())
+            self.status_label.setText("Calibration not ready.")
+            return
+        self._prompt_destination_and_export(None)
 
     def _on_advanced_export(self) -> None:
         # Advanced: explicit request from the additive/flat combos.
-        self._dispatch_export(self._request())
-
-    def _dispatch_export(self, request) -> None:
         if not self._lights:
             QtWidgets.QMessageBox.information(self, "No lights", "Add at least one light frame.")
             return
         if not self._ensure_library():
             return
+        self._prompt_destination_and_export(self._request())
+
+    def _standard_route_ready(self) -> bool:
+        """True when the current auto-route resolved at least one READY light."""
+        return any(
+            s.get("outcome") == "MATCHED" and s.get("auto_route")
+            for s in self._preflight_summaries
+        )
+
+    def _first_blocking_human_reason(self) -> str:
+        for summary in self._preflight_summaries:
+            if summary.get("outcome") != "MATCHED":
+                return presentation.human_reason_text(summary)
+        return "no compatible calibration set was found."
+
+    def _continue_export_after_preflight(self) -> None:
+        if self._standard_route_ready():
+            self._prompt_destination_and_export(None)
+        else:
+            self._set_standard_human_status("attention", self._first_blocking_human_reason())
+            self.status_label.setText("Calibration not ready.")
+
+    def _prompt_destination_and_export(self, request) -> None:
         selected = self._selected_rows()
         entries = [self._lights[i] for i in selected] if selected else list(self._lights)
         start_dir = self._settings.last_output_dir or ""
@@ -1510,13 +1549,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 f"Library opened: revision={summary.get('revision')!r} "
                 f"roles={summary.get('roles')} counts={summary.get('candidate_counts')}"
             )
-            detail = Path(self._library_spec.index_path).name if self._library_spec else ""
-            self._set_library_human_status("ready", detail)
         else:
             self.library_status.setText(
                 f"Library open failed: {summary.get('reason_code')} {summary.get('details')}"
             )
-            self._set_library_human_status("unavailable", summary.get("reason_code") or "open failed")
             self._log(f"library open FAILED [{summary.get('reason_code')}]: {summary.get('details')}")
 
     def _handle_index_finished(self, summary: dict) -> None:
@@ -1528,18 +1564,17 @@ class MainWindow(QtWidgets.QMainWindow):
             )
             for diag in diagnostics:
                 self._log(f"index diagnostic: {diag}")
-            if diagnostics:
-                self._set_library_human_status("attention", f"{len(diagnostics)} diagnostic(s)")
-            else:
-                self._set_library_human_status("ready")
         else:
             self.library_status.setText(
                 f"Indexing {summary.get('status')}: {summary.get('reason_code')} {summary.get('details')}"
             )
-            self._set_library_human_status("unavailable", summary.get("reason_code") or "index failed")
             self._log(f"indexing FAILED [{summary.get('reason_code')}]: {summary.get('details')}")
 
     def _handle_preflight_finished(self, summary: dict) -> None:
+        if self._preflight_is_standard:
+            # Record the generation for which the Standard auto-route was resolved
+            # (used by the one-step export to decide stale-vs-valid).
+            self._standard_route_generation = self._generation
         status = summary.get("status")
         if status == "FAILED":
             self.status_label.setText(
@@ -1681,42 +1716,32 @@ class MainWindow(QtWidgets.QMainWindow):
         candidate_count = summary.get("candidate_count", 0)
         status = summary.get("status")
         if status in ("REUSED", "COMPLETED"):
+            for a in attention:
+                self._log(
+                    f"[managed] informational — {a.get('role')} {a.get('path')}: "
+                    f"insufficient evidence ({', '.join(a.get('missing', ())) or '(none)'})"
+                )
             if candidate_count == 0:
-                # F4: an empty managed library is never Ready; refuse Verify/export.
+                # Nothing was indexable: never Ready; refuse Verify/export with a
+                # concrete human reason (never "no usable masters"/"candidate_count=0").
                 self._library_spec = None
-                self.managed_status_label.setText(
-                    f"Managed library {status}: no usable masters (needs attention — not prepared)."
-                )
-                self._set_library_human_status("attention", "no usable masters — not prepared")
-                for a in attention:
-                    self._log(
-                        f"[managed] needs attention — {a.get('role')} {a.get('path')}: "
-                        f"insufficient evidence ({', '.join(a.get('missing', ())) or '(none)'})"
-                    )
+                self._set_standard_human_status("attention", self._first_attention_note())
+                self.status_label.setText("Calibration not ready.")
             else:
-                # F5: wire the exact managed LibrarySpec so _ensure_library()/Verify/
-                # export use it; a ready managed state never coexists with a
-                # _ensure_library() failure.
+                # Wire the exact managed LibrarySpec so _ensure_library()/export use
+                # it; a ready managed state never coexists with an empty library.
                 self._library_spec = self._managed_spec
-                self.managed_status_label.setText(
-                    f"Managed library {status}: revision={summary.get('revision')!r} "
-                    f"candidates={candidate_count}"
-                )
-                if attention:
-                    self._set_library_human_status("attention", f"{len(attention)} master(s) insufficient evidence")
-                    for a in attention:
-                        self._log(
-                            f"[managed] needs attention — {a.get('role')} {a.get('path')}: "
-                            f"insufficient evidence ({', '.join(a.get('missing', ())) or '(none)'})"
-                        )
-                else:
-                    self._set_library_human_status("ready", "managed")
+                roles = sorted({role for _sha, role in self._session_selection})
+                detail = self._human_role_list(roles) if roles else "masters"
+                self._set_standard_human_status("ready", detail)
+                self.status_label.setText("Masters ready.")
         else:
             self._library_spec = None
-            self.managed_status_label.setText(
+            self._set_standard_human_status("attention", "calibration masters could not be prepared")
+            self.status_label.setText(
                 f"Managed library {status}: {summary.get('reason_code')} {summary.get('details')}"
             )
-            self._set_library_human_status("unavailable", summary.get('reason_code') or "managed build failed")
+            self._log(f"[managed] build FAILED [{summary.get('reason_code')}]: {summary.get('details')}")
 
     def _on_operation_failed(self, op_id: str, reason_code: str, details: str) -> None:
         if not self._is_current(op_id):
@@ -1734,6 +1759,9 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         if self._confirm_batch_active:
             self._dispatch_next_confirm()
+        elif self._export_after_preflight:
+            self._export_after_preflight = False
+            self._continue_export_after_preflight()
 
     # ------------------------------------------------- detail rendering
     def _on_preflight_selection_changed(self, current_row: int, *_args) -> None:

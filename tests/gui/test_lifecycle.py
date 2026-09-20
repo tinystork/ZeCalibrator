@@ -145,7 +145,7 @@ def test_generic_worker_exception_recovery_same_window(qapp, paths, tmp_path):
         assert _pump(lambda: not w._controller.is_active)
         assert "Failed" in w.status_label.text()
         assert "injected worker crash" in w.details_view.toPlainText()
-        assert w.preflight_btn.isEnabled()
+        assert w.export_btn.isEnabled()
     finally:
         v1_mod.inspect_frame = real_inspect
 

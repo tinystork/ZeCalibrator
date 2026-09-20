@@ -382,11 +382,15 @@ def test_standard_exposes_human_workflow(qapp, paths):
     # F2: the explicit SQLite chooser is NOT in Standard; Standard exposes the
     # managed Calibration masters flow only.
     assert not hasattr(w, "choose_library_btn")
-    assert w.scan_masters_btn.text() == "Detect masters…"
-    assert w.confirm_masters_btn.text() == "Confirm detected facts"
-    assert w.build_managed_btn.text() == "Build managed library"
-    assert w.preflight_btn.text() == "Verify calibration"
+    # R3D-D: Standard is a ONE-STEP workflow — add masters (user intent) + the
+    # single scientific action (Calibrate / Export). No technical buttons.
+    assert w.add_masters_folder_btn.text() == "Add masters folder…"
+    assert w.add_masters_file_btn.text() == "Add masters file…"
+    assert w.remove_masters_btn.text() == "Remove selected"
+    assert w.clear_masters_btn.text() == "Clear"
     assert w.export_btn.text() == "Calibrate / Export…"
+    assert w.managed_status_label is not None
+    assert not hasattr(w, "preflight_btn")
     assert w.lights_count_label.text() == "0 images selected"
     # Lifecycle footer is globally reachable (Cancel/progress/status exist in the
     # footer below the top-level tabs, outside any single tab page).
@@ -397,11 +401,15 @@ def test_standard_exposes_human_workflow(qapp, paths):
 
 
 def test_standard_has_no_dark_flat_choice(qapp, paths):
-    """Standard has no Dark/Flat combos (the route is resolved automatically)."""
+    """Standard has no Dark/Flat combos and no technical route/source labels
+    (the route is resolved automatically)."""
     w = MainWindow(paths)
     assert not hasattr(w, "standard_additive_combo")
     assert not hasattr(w, "standard_flat_combo")
-    assert w.standard_route_label is not None
+    assert not hasattr(w, "standard_route_label")
+    assert not hasattr(w, "active_source_label")
+    assert not hasattr(w, "library_human_status")
+    assert not hasattr(w, "preflight_btn")
     _close(w)
 
 
