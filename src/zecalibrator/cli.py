@@ -137,6 +137,7 @@ def _build_processing(value):
     norm = obj.get("normalization")
     return v1.ProcessingProvenance(
         source=obj["source"],
+        additive_history_state=obj.get("additive_history_state", "unknown"),
         additive_correction_history=tuple(obj.get("additive_correction_history", ())),
         normalization=_build_norm_provenance(norm) if norm is not None else None,
         acquisition_profile=None,

@@ -12,7 +12,9 @@ and artifact identity).
 
 ## 1. Schema and versioning
 
-- Specified record schema: `zecalibrator.provenance.v1` (JSON-compatible).
+- Specified provenance-projection schema: `zecalibrator.provenance.v2`
+  (P7-M3B R3D-A; see §9.1 old-data rule). This is distinct from the record
+  *document* schema (`schema_version`), which remains `zecalibrator.provenance.v1`.
 - Specified library index schema: `zecalibrator.library.v1`.
 - Specified matching-policy version: `zecalibrator.match.v1`.
 - Specified digest canonicalization scheme: `zecalibrator.digest.v1` (§2.4).
@@ -324,7 +326,18 @@ The selected license is GPL-3.0-or-later; this record is not publication approva
 
 ## 9. Versioning summary
 
-`zecalibrator.provenance.v1` is the specified schema target. Breaking schema changes require a new
-major; additive optional fields must not change semantics of existing required
-fields. Immutability of committed records is a hard requirement (Interop Rule
-16).
+`zecalibrator.provenance.v2` is the current specified schema target (bumped from
+`v1` by P7-M3B R3D-A D1d). Breaking schema changes require a new major; additive
+optional fields must not change semantics of existing required fields.
+Immutability of committed records is a hard requirement (Interop Rule 16).
+
+### 9.1 Old-data rule (v1 -> v2)
+
+`ProcessingProvenance` gained the explicit discriminator `additive_history_state`
+(`"unknown"` | `"known"`). Legacy records WITHOUT that key read back as
+`"unknown"`, never a fabricated known-empty state. A legacy record carrying a
+non-empty `additive_correction_history` but no state is rejected at
+reconstruction (NO compatibility bypass). Because `additive_history_state` joins
+the hashed descriptor projection and `VersionSet.provenance_schema` joins the
+plan projection, old descriptor/plan ids may fail strict re-verification against
+a v2 schema — that is expected and accepted for this pre-beta branch.

@@ -214,6 +214,7 @@ def _descriptor(m):
         mask_identity=m["mask_identity"],
         processing_provenance=ProcessingProvenance(
             source=pp.get("source", "synthetic_fixture"),
+            additive_history_state=pp.get("additive_history_state", "unknown"),
             additive_correction_history=tuple(pp.get("additive_correction_history", ())),
             normalization=_normalization_from(pp.get("normalization")),
             acquisition_profile=_profile(),

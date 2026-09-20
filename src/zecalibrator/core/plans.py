@@ -29,7 +29,11 @@ from zecalibrator.core.descriptors import (
 from zecalibrator.core.digests import plan_digest
 
 MATCH_POLICY_VERSION = "zecalibrator.match.v1"
-PROVENANCE_SCHEMA_VERSION = "zecalibrator.provenance.v1"
+# R3D-A D1d: ProcessingProvenance gained the explicit additive-history-state
+# discriminator, a breaking change to the provenance projection (and therefore
+# to ``descriptor_id``/``plan_id``). Bumped v1 -> v2; old data is NOT silently
+# reinterpreted (see PROVENANCE.md §9).
+PROVENANCE_SCHEMA_VERSION = "zecalibrator.provenance.v2"
 LIBRARY_SCHEMA_VERSION = "zecalibrator.library.v1"
 DIGEST_SCHEMA_VERSION = "zecalibrator.digest.v1"
 SCIENCE_CONTRACT_VERSION = "1.0"

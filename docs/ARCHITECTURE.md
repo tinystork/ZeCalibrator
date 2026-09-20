@@ -49,7 +49,7 @@ unsupported/unadvertised until a future gate.
 | product version target | `0.1.0` | |
 | public API version target | `1.0` | independent of product version |
 | consumer compatibility range | `>=1,<2` + capabilities | |
-| provenance schema | `zecalibrator.provenance.v1` | |
+| provenance schema | `zecalibrator.provenance.v2` | |
 | library index schema | `zecalibrator.library.v1` | specified |
 | matching-policy version | `zecalibrator.match.v1` | specified |
 | science-contract version | `1.0` | specified |
@@ -441,7 +441,7 @@ same-version-but-different-threshold policy produces a **different** plan digest
 | --- | --- | --- | --- |
 | science_contract | `str` | required | `"1.0"` |
 | decoder | `str` | required | decoder/domain contract version |
-| provenance_schema | `str` | required | `"zecalibrator.provenance.v1"` |
+| provenance_schema | `str` | required | `"zecalibrator.provenance.v2"` (P7-M3B R3D-A D1d) |
 | matching_policy | `str` | required | `"zecalibrator.match.v1"` |
 
 #### `ExecutionOptions`

@@ -51,7 +51,6 @@ from .models import (
     FitsInputIdentity,
     FrameSource,
     MasterDescriptor,
-    PROVENANCE_SCHEMA,
     ProvenanceRecord,
 )
 
@@ -123,7 +122,7 @@ def _wrap(
         api_version="1.0",
         product_version=_version.__version__,
         decoder_version="1.0",
-        provenance_schema=PROVENANCE_SCHEMA,
+        provenance_schema=plan.versions.provenance_schema,
         matching_policy=plan.versions.matching_policy,
         science_contract=plan.versions.science_contract,
         backend="cpu",

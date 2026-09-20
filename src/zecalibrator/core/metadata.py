@@ -175,6 +175,313 @@ def _freeze(value):
     return value
 
 
+# ---------------------------------------------------------------------------
+# Producer fingerprint + acquisition evidence (R3D-A, acquisition facts ONLY)
+# ---------------------------------------------------------------------------
+
+# Canonical acquisition fact fields (align with ImportDeclaration/SensorMetadata;
+# acquisition facts only — no processing-state derivation).
+ACQUISITION_FACT_FIELDS: tuple[str, ...] = (
+    "detector_model",
+    "gain",
+    "gain_e_per_adu",
+    "offset",
+    "temperature_actual",
+    "temperature_setpoint",
+    "exposure_s",
+    "binning",
+    "frame_type",
+    "filter",
+    "readout_mode",
+    "cfa_pattern",
+    "cfa_offset",
+    "roi_origin",
+)
+
+CANONICAL_FACT_CONFIDENCES: tuple[str, ...] = ("explicit", "ambiguous", "unverified")
+PRODUCER_KEYS: tuple[str, ...] = ("generic", "siril", "asiair", "nina", "sharpcap", "indi")
+
+# ``gain`` and ``gain_e_per_adu`` are DISTINCT fields with a REQUIRED semantic
+# domain: ``gain`` is producer-gain units (never comparable across producers),
+# ``gain_e_per_adu`` (EGAIN) is electrons per ADU.
+_GAIN_SEMANTIC_DOMAIN = "producer_gain_units"
+_EGAIN_SEMANTIC_DOMAIN = "electrons_per_adu"
+_GAIN_FIELD_SEMANTIC_DOMAINS: Mapping[str, str] = MappingProxyType({
+    "gain": _GAIN_SEMANTIC_DOMAIN,
+    "gain_e_per_adu": _EGAIN_SEMANTIC_DOMAIN,
+})
+
+
+@dataclass(frozen=True)
+class CanonicalFact:
+    """One acquisition canonical fact with producer provenance (R3D-A).
+
+    ``confidence`` is ``"explicit"`` (recognized card mapping), ``"ambiguous"``
+    (conflicting/partial), or ``"unverified"``. ``semantic_domain`` is REQUIRED
+    on the gain facts: ``"producer_gain_units"`` for ``gain`` and
+    ``"electrons_per_adu"`` for ``gain_e_per_adu``; the two are never compared.
+    """
+
+    field: str
+    value: object
+    source_keyword: object  # str (single keyword) or tuple[str, ...] (pair)
+    producer: str
+    producer_version: Optional[str] = None
+    semantic_domain: Optional[str] = None
+    confidence: str = "explicit"
+
+    def __post_init__(self) -> None:
+        if self.confidence not in CANONICAL_FACT_CONFIDENCES:
+            raise ValueError(
+                f"CanonicalFact.confidence must be one of {CANONICAL_FACT_CONFIDENCES}, "
+                f"got {self.confidence!r}"
+            )
+        if self.field == "gain" and self.semantic_domain != _GAIN_SEMANTIC_DOMAIN:
+            raise ValueError(
+                f"CanonicalFact gain requires semantic_domain={_GAIN_SEMANTIC_DOMAIN!r}, "
+                f"got {self.semantic_domain!r}"
+            )
+        if self.field == "gain_e_per_adu" and self.semantic_domain != _EGAIN_SEMANTIC_DOMAIN:
+            raise ValueError(
+                f"CanonicalFact gain_e_per_adu requires semantic_domain={_EGAIN_SEMANTIC_DOMAIN!r}, "
+                f"got {self.semantic_domain!r}"
+            )
+        object.__setattr__(self, "field", _freeze(self.field))
+        object.__setattr__(self, "value", _freeze(self.value))
+        object.__setattr__(self, "source_keyword", _freeze(self.source_keyword))
+        object.__setattr__(self, "producer", _freeze(self.producer))
+        object.__setattr__(self, "producer_version", _freeze(self.producer_version))
+        object.__setattr__(self, "semantic_domain", _freeze(self.semantic_domain))
+        object.__setattr__(self, "confidence", _freeze(self.confidence))
+
+    def to_dict(self) -> Mapping[str, object]:
+        return {
+            "field": self.field,
+            "value": self.value,
+            "source_keyword": self.source_keyword,
+            "producer": self.producer,
+            "producer_version": self.producer_version,
+            "semantic_domain": self.semantic_domain,
+            "confidence": self.confidence,
+        }
+
+
+# Acquisition keyword spec kinds: a scalar field may list alias keywords (first
+# present wins); a pair field requires BOTH keywords and yields a 2-tuple.
+_ACQ_SCALAR = "scalar"
+_ACQ_PAIR = "pair"
+
+# Approved per-producer keyword -> canonical acquisition field map (R3D-A).
+# ``siril`` is the only real-verified producer; every other producer mapping is
+# a documented foundation table, not a field-verified fingerprint.
+_PRODUCER_KEYWORD_MAPS: Mapping[str, Mapping[str, tuple]] = MappingProxyType({
+    "generic": {
+        "detector_model": (_ACQ_SCALAR, ("INSTRUME",)),
+        "gain": (_ACQ_SCALAR, ("GAIN",)),
+        "gain_e_per_adu": (_ACQ_SCALAR, ("EGAIN",)),
+        "offset": (_ACQ_SCALAR, ("OFFSET",)),
+        "temperature_actual": (_ACQ_SCALAR, ("CCD-TEMP",)),
+        "temperature_setpoint": (_ACQ_SCALAR, ("SET-TEMP",)),
+        "exposure_s": (_ACQ_SCALAR, ("EXPTIME", "EXPOSURE")),
+        "binning": (_ACQ_PAIR, ("XBINNING", "YBINNING")),
+        "frame_type": (_ACQ_SCALAR, ("IMAGETYP",)),
+        "filter": (_ACQ_SCALAR, ("FILTER",)),
+        "readout_mode": (_ACQ_SCALAR, ("READOUTM",)),
+        "cfa_pattern": (_ACQ_SCALAR, ("BAYERPAT",)),
+        "cfa_offset": (_ACQ_PAIR, ("XBAYROFF", "YBAYROFF")),
+        "roi_origin": (_ACQ_PAIR, ("XORGSUBF", "YORGSUBF")),
+    },
+    "siril": {
+        "detector_model": (_ACQ_SCALAR, ("INSTRUME",)),
+        "gain": (_ACQ_SCALAR, ("GAIN",)),
+        "offset": (_ACQ_SCALAR, ("OFFSET",)),
+        "temperature_actual": (_ACQ_SCALAR, ("CCD-TEMP",)),
+        "temperature_setpoint": (_ACQ_SCALAR, ("SET-TEMP",)),
+        "exposure_s": (_ACQ_SCALAR, ("EXPTIME",)),
+        "binning": (_ACQ_PAIR, ("XBINNING", "YBINNING")),
+        "frame_type": (_ACQ_SCALAR, ("IMAGETYP",)),
+        "filter": (_ACQ_SCALAR, ("FILTER",)),
+        "cfa_pattern": (_ACQ_SCALAR, ("BAYERPAT",)),
+        "cfa_offset": (_ACQ_PAIR, ("XBAYROFF", "YBAYROFF")),
+    },
+    "asiair": {
+        "detector_model": (_ACQ_SCALAR, ("INSTRUME",)),
+        "gain": (_ACQ_SCALAR, ("GAIN",)),
+        "gain_e_per_adu": (_ACQ_SCALAR, ("EGAIN",)),
+        "offset": (_ACQ_SCALAR, ("OFFSET",)),
+        "temperature_actual": (_ACQ_SCALAR, ("CCD-TEMP",)),
+        "temperature_setpoint": (_ACQ_SCALAR, ("SET-TEMP",)),
+        "exposure_s": (_ACQ_SCALAR, ("EXPTIME", "EXPOSURE")),
+        "binning": (_ACQ_PAIR, ("XBINNING", "YBINNING")),
+        "frame_type": (_ACQ_SCALAR, ("IMAGETYP",)),
+        "filter": (_ACQ_SCALAR, ("FILTER",)),
+        "cfa_pattern": (_ACQ_SCALAR, ("BAYERPAT",)),
+        "cfa_offset": (_ACQ_SCALAR, ("XBAYROFF",)),
+        "roi_origin": (_ACQ_PAIR, ("XORGSUBF", "YORGSUBF")),
+    },
+    "nina": {
+        "detector_model": (_ACQ_SCALAR, ("INSTRUME",)),
+        "gain": (_ACQ_SCALAR, ("GAIN",)),
+        "gain_e_per_adu": (_ACQ_SCALAR, ("EGAIN",)),
+        "offset": (_ACQ_SCALAR, ("OFFSET",)),
+        "temperature_actual": (_ACQ_SCALAR, ("CCD-TEMP",)),
+        "temperature_setpoint": (_ACQ_SCALAR, ("SET-TEMP",)),
+        "exposure_s": (_ACQ_SCALAR, ("EXPTIME",)),
+        "binning": (_ACQ_PAIR, ("XBINNING", "YBINNING")),
+        "frame_type": (_ACQ_SCALAR, ("IMAGETYP",)),
+        "filter": (_ACQ_SCALAR, ("FILTER",)),
+        "readout_mode": (_ACQ_SCALAR, ("READOUTM",)),
+        "cfa_pattern": (_ACQ_SCALAR, ("BAYERPAT",)),
+        "cfa_offset": (_ACQ_PAIR, ("XBAYROFF", "YBAYROFF")),
+        "roi_origin": (_ACQ_PAIR, ("XORGSUBF", "YORGSUBF")),
+    },
+    "sharpcap": {
+        "detector_model": (_ACQ_SCALAR, ("INSTRUME",)),
+        "gain": (_ACQ_SCALAR, ("GAIN",)),
+        "offset": (_ACQ_SCALAR, ("BLKLEVEL",)),
+        "temperature_actual": (_ACQ_SCALAR, ("CCD-TEMP",)),
+        "exposure_s": (_ACQ_SCALAR, ("EXPTIME",)),
+        "binning": (_ACQ_PAIR, ("XBINNING", "YBINNING")),
+        "frame_type": (_ACQ_SCALAR, ("IMAGETYP",)),
+        "filter": (_ACQ_SCALAR, ("FILTER",)),
+        "cfa_pattern": (_ACQ_SCALAR, ("BAYERPAT", "COLORTYP")),
+        "cfa_offset": (_ACQ_PAIR, ("BAYOFFX", "BAYOFFY")),
+    },
+    "indi": {
+        "detector_model": (_ACQ_SCALAR, ("INSTRUME",)),
+        "gain": (_ACQ_SCALAR, ("GAIN",)),
+        "offset": (_ACQ_SCALAR, ("OFFSET",)),
+        "temperature_actual": (_ACQ_SCALAR, ("CCD-TEMP",)),
+        "exposure_s": (_ACQ_SCALAR, ("EXPTIME",)),
+        "binning": (_ACQ_PAIR, ("XBINNING", "YBINNING")),
+        "frame_type": (_ACQ_SCALAR, ("IMAGETYP",)),
+        "filter": (_ACQ_SCALAR, ("FILTER",)),
+        "cfa_pattern": (_ACQ_SCALAR, ("BAYERPAT",)),
+    },
+})
+
+
+@dataclass(frozen=True)
+class ProducerAdapter:
+    """A producer fingerprint -> acquisition keyword map (R3D-A foundation)."""
+
+    name: str
+    keyword_map: Mapping[str, tuple]
+
+
+_PRODUCER_REGISTRY: Mapping[str, ProducerAdapter] = MappingProxyType({
+    name: ProducerAdapter(name=name, keyword_map=MappingProxyType(dict(map_)))
+    for name, map_ in _PRODUCER_KEYWORD_MAPS.items()
+})
+
+
+def _card_keyword(card: CardRecord) -> str:
+    return _strip_hierarch(card.keyword).upper()
+
+
+def _first_card_value(cards, keyword: str) -> object:
+    target = keyword.upper()
+    for c in cards:
+        if _card_keyword(c) == target:
+            return c.value
+    return None
+
+
+def _has_keyword(cards, keyword: str) -> bool:
+    target = keyword.upper()
+    return any(_card_keyword(c) == target for c in cards)
+
+
+def _contains_any(values, token: str) -> bool:
+    return any(
+        isinstance(v, str) and token in v
+        for v in values
+        if v is not None
+    )
+
+
+def detect_producer(cards) -> str:
+    """Return the producer key for an ordered FITS card sequence, else ``"generic"``.
+
+    Distinctive-token match on the dedicated producer cards
+    (``PROGRAM``/``CREATOR``/``SWCREATE``, plus the explicit INDI ``CCD_*``
+    cards), never free-text guessing, never ``INSTRUME``/camera brand. A
+    producer that cannot be established is ``"generic"`` (fallback).
+    """
+    program = _first_card_value(cards, "PROGRAM")
+    creator = _first_card_value(cards, "CREATOR")
+    swcreate = _first_card_value(cards, "SWCREATE")
+    if isinstance(program, str) and program.startswith("Siril"):
+        return "siril"
+    if isinstance(creator, str) and creator.startswith("ZWO ASIAIR"):
+        return "asiair"
+    if _contains_any((swcreate, creator), "N.I.N.A"):
+        return "nina"
+    if _contains_any((swcreate, creator), "SharpCap"):
+        return "sharpcap"
+    for kw in ("CCD_GAIN", "CCD_OFFSET", "CCD_TEMPERATURE", "CCD_FRAME_TYPE", "CCD_CFA"):
+        if _has_keyword(cards, kw):
+            return "indi"
+    return "generic"
+
+
+def extract_acquisition_facts(cards, producer: Optional[str] = None) -> tuple[CanonicalFact, ...]:
+    """Extract acquisition-only canonical facts for a producer (auto-detected).
+
+    Never derives processing state. Scalar fields take the first present alias
+    keyword; pair fields require both keywords. ``gain`` facts carry the REQUIRED
+    ``semantic_domain`` (producer-gain units vs electrons-per-ADU); ``gain`` and
+    ``gain_e_per_adu`` are distinct fields and are never compared.
+    """
+    key = producer if producer is not None else detect_producer(cards)
+    adapter = _PRODUCER_REGISTRY.get(key)
+    if adapter is None:
+        key = "generic"
+        adapter = _PRODUCER_REGISTRY["generic"]
+    facts: list[CanonicalFact] = []
+    for field, (kind, keywords) in adapter.keyword_map.items():
+        semantic_domain = _GAIN_FIELD_SEMANTIC_DOMAINS.get(field)
+        if kind == _ACQ_PAIR:
+            if len(keywords) < 2:
+                continue
+            v0 = _first_card_value(cards, keywords[0])
+            v1 = _first_card_value(cards, keywords[1])
+            if v0 is None or v1 is None:
+                continue
+            facts.append(CanonicalFact(
+                field=field,
+                value=(v0, v1),
+                source_keyword=tuple(keywords),
+                producer=key,
+                semantic_domain=semantic_domain,
+                confidence="explicit",
+            ))
+        else:
+            for kw in keywords:
+                v = _first_card_value(cards, kw)
+                if v is not None:
+                    facts.append(CanonicalFact(
+                        field=field,
+                        value=v,
+                        source_keyword=kw,
+                        producer=key,
+                        semantic_domain=semantic_domain,
+                        confidence="explicit",
+                    ))
+                    break
+    return tuple(facts)
+
+
+def history_cards(cards) -> tuple[CardRecord, ...]:
+    """Return the ordered HISTORY cards exactly as collected (never merged).
+
+    The FITS standard gives no license to merge arbitrary consecutive HISTORY
+    records, so no generic concatenation is performed. The ``generic`` adapter
+    NEVER reconstructs a split statement.
+    """
+    return tuple(c for c in cards if _card_keyword(c) == "HISTORY")
+
+
 @dataclass(frozen=True)
 class CardRecord:
     """One original header card, in its original position.
@@ -342,6 +649,11 @@ class SensorMetadata:
     @property
     def cfa_phase(self) -> Optional[str]:
         return self.geometry.cfa_phase
+
+    @property
+    def history_cards(self) -> tuple[CardRecord, ...]:
+        """Ordered HISTORY cards exactly as collected (never merged)."""
+        return history_cards(self.original_cards)
 
 
 def _canonical(value):
@@ -662,9 +974,14 @@ def build_sensor_metadata(
 
 
 __all__ = [
+    "ACQUISITION_FACT_FIELDS",
     "FIELD_BY_KEYWORD",
+    "CANONICAL_FACT_CONFIDENCES",
+    "CanonicalFact",
     "FactProvenance",
     "FitsStandardAdapter",
+    "ProducerAdapter",
+    "PRODUCER_KEYS",
     "CardRecord",
     "ConflictDiagnostic",
     "ImportDeclaration",
@@ -672,6 +989,9 @@ __all__ = [
     "SensorMetadata",
     "build_sensor_metadata",
     "collect_cards",
+    "detect_producer",
+    "extract_acquisition_facts",
+    "history_cards",
     "resolve_aliases",
     "resolve_aliases_with_provenance",
 ]

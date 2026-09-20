@@ -36,6 +36,10 @@ PHYSICAL_UNITS: tuple[str, ...] = ("ADU", "dimensionless")
 BIAS_STATES: tuple[str, ...] = ("included", "removed", "not_applicable", "unknown")
 FLAT_FORMS: tuple[str, ...] = ("raw_response", "corrected_unnormalized", "normalized_response")
 PROCESSING_SOURCES: tuple[str, ...] = ("synthetic_fixture", "user_import", "observed")
+# Discriminated additive-processing-history state (P7-M3B R3D-A D1d).
+# ``unknown`` means "no information about whether additive corrections were
+# applied"; ``known`` means the history is authoritative (possibly empty).
+ADDITIVE_HISTORY_STATES: tuple[str, ...] = ("unknown", "known")
 # Discriminated DQ state (P7-M3B, R1). ``no_source_dq`` is a structural state:
 # ``mask_identity=None`` and no source-mask payload; never a fabricated hex64.
 DQ_STATES: tuple[str, ...] = ("source_mask", "no_source_dq")
@@ -189,9 +193,17 @@ class AcquisitionProfileEvidence:
         }
 @dataclass(frozen=True)
 class ProcessingProvenance:
-    """Structured processing evidence describing what was done before import."""
+    """Structured processing evidence describing what was done before import.
+
+    ``additive_history_state`` is the explicit UNKNOWN vs KNOWN discriminator
+    (P7-M3B R3D-A D1d): ``"unknown"`` means no information about whether
+    additive corrections were applied (history MUST be empty); ``"known"``
+    means the history is authoritative (empty or a validated tuple of
+    non-empty strings). The two are never conflated.
+    """
 
     source: str
+    additive_history_state: str = "unknown"
     additive_correction_history: tuple[str, ...] = ()
     normalization: Optional[NormalizationProvenance] = None
     acquisition_profile: Optional[AcquisitionProfileEvidence] = None
@@ -199,14 +211,37 @@ class ProcessingProvenance:
     def __post_init__(self) -> None:
         if self.source not in PROCESSING_SOURCES:
             raise ValueError(f"processing source must be one of {PROCESSING_SOURCES}, got {self.source!r}")
+        if self.additive_history_state not in ADDITIVE_HISTORY_STATES:
+            raise ValueError(
+                f"additive_history_state must be one of {ADDITIVE_HISTORY_STATES}, got {self.additive_history_state!r}"
+            )
+        hist = _freeze(self.additive_correction_history)
+        # HARD INVARIANT (never normalized silently): ``unknown`` requires an
+        # empty history; a non-empty history with ``unknown`` is rejected at
+        # construction AND deserialization.
+        if self.additive_history_state == "unknown":
+            if hist:
+                raise ValueError(
+                    "additive_history_state='unknown' requires an empty "
+                    f"additive_correction_history, got {hist!r}"
+                )
+        else:  # known
+            for entry in hist:
+                if not isinstance(entry, str) or not entry.strip():
+                    raise ValueError(
+                        "additive_correction_history entries must be non-empty strings, "
+                        f"got {entry!r}"
+                    )
         object.__setattr__(self, "source", _freeze(self.source))
-        object.__setattr__(self, "additive_correction_history", _freeze(self.additive_correction_history))
+        object.__setattr__(self, "additive_history_state", _freeze(self.additive_history_state))
+        object.__setattr__(self, "additive_correction_history", hist)
 
     def to_dict(self) -> Mapping[str, object]:
         norm = self.normalization.to_dict() if self.normalization is not None else None
         profile = self.acquisition_profile.to_dict() if self.acquisition_profile is not None else None
         return {
             "source": self.source,
+            "additive_history_state": self.additive_history_state,
             "additive_correction_history": list(self.additive_correction_history),
             "normalization": dict(norm) if norm is not None else None,
             "acquisition_profile": dict(profile) if profile is not None else None,
@@ -630,9 +665,13 @@ def _profile_from_dict(value) -> Optional[AcquisitionProfileEvidence]:
 
 
 def _processing_from_dict(value) -> ProcessingProvenance:
-    _reject_unknown_keys(value, frozenset({"source", "additive_correction_history", "normalization", "acquisition_profile"}), "processing_provenance")
+    _reject_unknown_keys(value, frozenset({"source", "additive_history_state", "additive_correction_history", "normalization", "acquisition_profile"}), "processing_provenance")
+    # Legacy records without ``additive_history_state`` read back as "unknown"
+    # (never a fabricated known-empty); a legacy non-empty history with no state
+    # therefore fails the invariant at reconstruction (NO compatibility bypass).
     return ProcessingProvenance(
         source=value["source"],
+        additive_history_state=value.get("additive_history_state", "unknown"),
         additive_correction_history=tuple(value.get("additive_correction_history", ())),
         normalization=_norm_from_dict(value.get("normalization")),
         acquisition_profile=_profile_from_dict(value.get("acquisition_profile")),
@@ -760,6 +799,7 @@ class DescriptorSnapshot:
 
 __all__ = [
     "ACQUISITION_PROFILE_SCHEMA",
+    "ADDITIVE_HISTORY_STATES",
     "Acquisition",
     "AcquisitionProfileEvidence",
     "BIAS_STATES",

@@ -163,6 +163,7 @@
         "mask_identity": "2323232323232323232323232323232323232323232323232323232323232323",
         "processing_provenance": {
           "source": "synthetic_fixture",
+          "additive_history_state": "known",
           "additive_correction_history": [
             "bias_removed"
           ],
@@ -203,6 +204,7 @@
         "mask_identity": "2424242424242424242424242424242424242424242424242424242424242424",
         "processing_provenance": {
           "source": "synthetic_fixture",
+          "additive_history_state": "known",
           "additive_correction_history": [],
           "normalization": null
         },

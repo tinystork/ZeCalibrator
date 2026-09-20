@@ -261,6 +261,7 @@ def test_normalized_cfa_flat_four_scalars_matched():
     sc = NormalizationScalars(g1=1.0, r=1.0, b=1.0, g2=1.0)
     pp = ProcessingProvenance(
         source="synthetic_fixture",
+        additive_history_state="known",
         additive_correction_history=("flat_dark_subtracted",),
         normalization=__import__("zecalibrator.core.descriptors", fromlist=["NormalizationProvenance"]).NormalizationProvenance(
             algorithm="cfa-median-per-plane", population="cfa-4-plane", scalars=sc
@@ -290,6 +291,7 @@ def test_normalized_cfa_flat_single_scalar_rejected():
     sc = NormalizationScalars(mono=1.0)
     pp = ProcessingProvenance(
         source="synthetic_fixture",
+        additive_history_state="known",
         additive_correction_history=("flat_dark_subtracted",),
         normalization=NormalizationProvenance(algorithm="median", population="mono-valid", scalars=sc),
     )
@@ -312,7 +314,7 @@ def test_normalized_cfa_flat_single_scalar_rejected():
 
 def test_corrected_unnormalized_flat_needs_no_additive_binding():
     lt = light(geometry=geo(cfa_phase="GRBG"), optical=type(light().optical)(filter="NONE", optical_train_id="TRAIN"))
-    pp = ProcessingProvenance(source="synthetic_fixture", additive_correction_history=("flat_dark_subtracted",))
+    pp = ProcessingProvenance(source="synthetic_fixture", additive_history_state="known", additive_correction_history=("flat_dark_subtracted",))
     flat = descriptor(
         "flat", "not_applicable", exposure_s=1.0, flat_form="corrected_unnormalized",
         filter="NONE", optical_train_id="TRAIN", processing=pp, geometry=geo(cfa_phase="GRBG"),

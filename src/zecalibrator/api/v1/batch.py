@@ -37,7 +37,7 @@ from zecalibrator.application.batch import (
 )
 from zecalibrator.application.cancellation import CancellationToken, OperationCancelled
 from zecalibrator.core.digests import canonical_json, sha256_hex
-from zecalibrator.core.plans import SCIENCE_CONTRACT_VERSION
+from zecalibrator.core.plans import PROVENANCE_SCHEMA_VERSION, SCIENCE_CONTRACT_VERSION
 from zecalibrator.io.batch_manifest import (
     BatchManifestError,
     build_batch_manifest,
@@ -68,7 +68,6 @@ from .models import (
     LibrarySpec,
     MasterImportSpec,
     MatchPolicy,
-    PROVENANCE_SCHEMA,
     _identity_to_dict,
 )
 
@@ -94,8 +93,14 @@ def _validate_batch_args(frames, request, library, policy, options):
     return options
 
 
-def _process_one(idx, frame, request, library, policy, destination, token):
-    """Process one frame into a :class:`BatchItem` (raises on cancellation)."""
+def _process_one(idx, frame, request, library, policy, destination, token, plan_schema_holder=None):
+    """Process one frame into a :class:`BatchItem` (raises on cancellation).
+
+    ``plan_schema_holder`` is an optional mutable mapping; when a plan is
+    resolved, its ``provenance_schema`` (the plan/provenance-projection schema,
+    ``plan.versions.provenance_schema``) is recorded so the batch manifest can
+    mirror it (single source of truth = the plan's ``VersionSet``).
+    """
     try:
         inspection_result = inspect_frame(frame, cancel=token)
     except OperationCancelled:
@@ -165,6 +170,8 @@ def _process_one(idx, frame, request, library, policy, destination, token):
             reason_details=resolve_result.details,
         )
     plan = resolve_result.plan
+    if plan_schema_holder is not None:
+        plan_schema_holder["provenance_schema"] = plan.versions.provenance_schema
 
     try:
         result = calibrate_frame(frame, plan, ExecutionOptions(), cancel=token)
@@ -231,7 +238,7 @@ def _write_output(result, input_identity, plan_id, destination, token):
     logical_id = output_logical_id(_identity_to_dict(input_identity), plan_id)
     header_fields = {
         "ZECALCAL": "zecalibrator",
-        "HIERARCH ZECALSCHEMA": PROVENANCE_SCHEMA,
+        "HIERARCH ZECALSCHEMA": result.provenance.plan.versions.provenance_schema,
         "HIERARCH ZECALPLAN": plan_id[:16],
         "HIERARCH ZECALSTAT": result.status,
     }
@@ -263,6 +270,7 @@ def _batch_generator(frames, request, library, policy, options, token, obs):
 
     manifest_inputs = []
     manifest_items = []
+    plan_schema_holder = {}
     cancelled = False
 
     emit_batch_progress(obs, "batch_start", 0, total)
@@ -272,7 +280,7 @@ def _batch_generator(frames, request, library, policy, options, token, obs):
             frame_id = frame_display_id(frame)
             emit_batch_progress(obs, "frame_start", idx, total, frame_id=frame_id)
 
-            item = _process_one(idx, frame, request, library, policy, destination, token)
+            item = _process_one(idx, frame, request, library, policy, destination, token, plan_schema_holder)
 
             manifest_inputs.append({"index": idx, "identity": _identity_to_dict(item.input_identity)})
             manifest_items.append(item.to_dict())
@@ -299,7 +307,9 @@ def _batch_generator(frames, request, library, policy, options, token, obs):
                 product_version=_version.__version__,
                 science_contract=SCIENCE_CONTRACT_VERSION,
                 matching_policy=policy.version,
-                provenance_schema=PROVENANCE_SCHEMA,
+                provenance_schema=plan_schema_holder.get(
+                    "provenance_schema", PROVENANCE_SCHEMA_VERSION
+                ),
                 decoder_version=_DECODER_VERSION,
                 commit_state="CANCELLED" if cancelled else "COMMITTED",
                 batch_status=batch_status,
@@ -483,6 +493,7 @@ def _descriptor_from_spec(
     else:
         processing = ProcessingProvenance(
             source=proc_source,
+            additive_history_state="unknown",
             acquisition_profile=AcquisitionProfileEvidence(
                 source=decl.source,
                 identity=decl.identity,

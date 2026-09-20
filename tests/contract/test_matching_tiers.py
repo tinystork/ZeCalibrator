@@ -155,7 +155,7 @@ def test_temperature_unknown_does_not_block_bias():
 
 def test_temperature_unknown_does_not_block_flat():
     pp = ProcessingProvenance(
-        source="synthetic_fixture", additive_correction_history=("flat_dark_subtracted",)
+        source="synthetic_fixture", additive_history_state="known", additive_correction_history=("flat_dark_subtracted",)
     )
     lt = light(
         acquisition=acquisition(temperature_c=None),
@@ -223,6 +223,7 @@ def test_cfa_conditional_unknown_unverified_for_mono(field):
 def _mono_flat(optical_train_id, filter_="NONE"):
     pp = ProcessingProvenance(
         source="synthetic_fixture",
+        additive_history_state="known",
         additive_correction_history=("flat_dark_subtracted",),
     )
     return descriptor(

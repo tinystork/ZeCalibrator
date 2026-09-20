@@ -188,7 +188,7 @@ def test_wrong_role_dark_used_as_bias_rejects():
 
 # --- M5: flat qualification evidence ----------------------------------------
 def _flat_with_validity(valid, total):
-    pp = ProcessingProvenance(source="synthetic_fixture", additive_correction_history=("flat_dark_subtracted",))
+    pp = ProcessingProvenance(source="synthetic_fixture", additive_history_state="known", additive_correction_history=("flat_dark_subtracted",))
     return descriptor(
         "flat", "not_applicable", exposure_s=1.0, flat_form="corrected_unnormalized",
         filter="NONE", optical_train_id="SYNTH-TRAIN-1", processing=pp,
@@ -234,7 +234,7 @@ def test_flat_91_of_100_matches():
 
 def test_flat_unknown_saturation_rejects():
     lt, dk = _flat_dark_matching_setup()
-    pp = ProcessingProvenance(source="synthetic_fixture", additive_correction_history=("flat_dark_subtracted",))
+    pp = ProcessingProvenance(source="synthetic_fixture", additive_history_state="known", additive_correction_history=("flat_dark_subtracted",))
     flat = descriptor(
         "flat", "not_applicable", exposure_s=1.0, flat_form="corrected_unnormalized",
         filter="NONE", optical_train_id="SYNTH-TRAIN-1", processing=pp,
@@ -247,7 +247,7 @@ def test_flat_unknown_saturation_rejects():
 
 def test_flat_missing_illumination_rejects():
     lt, dk = _flat_dark_matching_setup()
-    pp = ProcessingProvenance(source="synthetic_fixture", additive_correction_history=("flat_dark_subtracted",))
+    pp = ProcessingProvenance(source="synthetic_fixture", additive_history_state="known", additive_correction_history=("flat_dark_subtracted",))
     ve = ValidityEvidence(saturation_limit_known=True, valid_normalization_count={"mono": 95}, total_normalization_count={"mono": 100}, quality_policy_state="qualified", illumination=None, exposure_quality="qualified")
     flat = descriptor("flat", "not_applicable", exposure_s=1.0, flat_form="corrected_unnormalized", filter="NONE", optical_train_id="SYNTH-TRAIN-1", processing=pp, validity=ve)
     r = match_calibration(lt, request("dark_incl_bias", "apply"), pool(dark=[candidate("d1", dk)], flat=[candidate("f1", flat)]), policy())
@@ -262,6 +262,7 @@ def test_flat_conflicting_normalization_rejects():
     sc2 = NormalizationScalars(g1=2.0, r=1.0, b=1.0, g2=1.0)
     pp = ProcessingProvenance(
         source="synthetic_fixture",
+        additive_history_state="known",
         additive_correction_history=("flat_dark_subtracted",),
         normalization=NormalizationProvenance(algorithm="cfa-median-per-plane", population="cfa-4-plane", scalars=sc2),
     )
@@ -280,7 +281,7 @@ def test_flat_conflicting_normalization_rejects():
 def test_profile_tamper_changes_descriptor_id():
     flat = descriptor("flat", "not_applicable", exposure_s=1.0, flat_form="corrected_unnormalized",
                       filter="NONE", optical_train_id="SYNTH-TRAIN-1",
-                      processing=ProcessingProvenance(source="synthetic_fixture", additive_correction_history=("flat_dark_subtracted",), acquisition_profile=profile(bias_exposure_max_s=0.01, short_flat_profile=False)))
+                      processing=ProcessingProvenance(source="synthetic_fixture", additive_history_state="known", additive_correction_history=("flat_dark_subtracted",), acquisition_profile=profile(bias_exposure_max_s=0.01, short_flat_profile=False)))
     d = dict(flat.to_dict())
     tampered = dict(d)
     tampered["processing_provenance"]["acquisition_profile"]["bias_exposure_max_s"] = 999

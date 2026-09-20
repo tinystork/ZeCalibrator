@@ -233,7 +233,7 @@ def _flat_descriptor(content_sha256="f" * 64, size_bytes=16, mask_identity="f" *
         size_bytes=size_bytes,
         hdu=0,
         mask_identity=mask_identity,
-        processing_provenance=v1.ProcessingProvenance(source="synthetic_fixture"),
+        processing_provenance=v1.ProcessingProvenance(source="synthetic_fixture", additive_history_state="known"),
         validity_evidence=_flat_validity(),
         flat_form="raw_response",
         optical_train_id="SYNTH-TRAIN-1",
@@ -484,6 +484,22 @@ def test_provenance_and_result_roundtrip():
     assert prov.operation_id
     assert prov.input_dtype == "float32"
     assert prov.input_units == "ADU"
+
+
+def test_record_provenance_schema_mirrors_plan_versions_v2():
+    # F1: the execution record's ``provenance_schema`` FIELD is the plan/
+    # provenance-projection schema, mirroring ``plan.versions.provenance_schema``
+    # (v2) — while ``schema_version`` (record-document schema) stays v1.
+    plan = _control_plan()
+    result = calibrate_frame(_array_source(np.full(SHAPE, 100.0)), plan, ExecutionOptions())
+    rec = result.provenance
+    assert rec.plan.versions.provenance_schema == "zecalibrator.provenance.v2"
+    assert rec.provenance_schema == rec.plan.versions.provenance_schema
+    assert rec.provenance_schema == "zecalibrator.provenance.v2"
+    # The embedded plan digest carries the v2 provenance schema.
+    assert rec.plan.plan_digest_dict()["versions"]["provenance_schema"] == "zecalibrator.provenance.v2"
+    # The record *document* schema is a distinct axis and stays v1.
+    assert rec.schema_version == "zecalibrator.provenance.v1"
 
 
 def test_failed_result_roundtrip_is_lossless():
@@ -934,6 +950,7 @@ def _normalized_flat_descriptor(content_sha256, size_bytes, mask_identity, cfa="
         mask_identity=mask_identity,
         processing_provenance=v1.ProcessingProvenance(
             source="synthetic_fixture",
+            additive_history_state="known",
             additive_correction_history=("bias_removed",),
             normalization=v1.NormalizationProvenance(
                 algorithm="cfa-median-per-plane", population=population, scalars=scalars
@@ -963,7 +980,7 @@ def _corrected_flat_descriptor(content_sha256, size_bytes, mask_identity, cfa="m
         hdu=0,
         mask_identity=mask_identity,
         processing_provenance=v1.ProcessingProvenance(
-            source="synthetic_fixture", additive_correction_history=("bias_removed",)
+            source="synthetic_fixture", additive_history_state="known", additive_correction_history=("bias_removed",)
         ),
         validity_evidence=validity,
         flat_form="corrected_unnormalized",
@@ -1353,6 +1370,7 @@ def _short_flat_descriptor(content_sha256, size_bytes, mask_identity):
         mask_identity=mask_identity,
         processing_provenance=v1.ProcessingProvenance(
             source="synthetic_fixture",
+            additive_history_state="known",
             acquisition_profile=v1.AcquisitionProfileEvidence(
                 source="synthetic_fixture", identity="SYNTH-BASE-1", version="1.0",
                 bias_exposure_max_s=0.01, short_flat_profile=True,
@@ -1398,6 +1416,7 @@ def _raw_flat_with_bias_range(content_sha256, size_bytes, mask_identity):
         mask_identity=mask_identity,
         processing_provenance=v1.ProcessingProvenance(
             source="synthetic_fixture",
+            additive_history_state="known",
             acquisition_profile=v1.AcquisitionProfileEvidence(
                 source="synthetic_fixture", identity="SYNTH-BASE-1", version="1.0",
                 bias_exposure_max_s=0.01, short_flat_profile=False,
@@ -1483,7 +1502,7 @@ def test_calibrate_frame_corrected_flat_no_saturation_screen(tmp_path):
         hdu=0,
         mask_identity=hashlib.sha256(mb).hexdigest(),
         processing_provenance=v1.ProcessingProvenance(
-            source="synthetic_fixture", additive_correction_history=("bias_removed",)
+            source="synthetic_fixture", additive_history_state="known", additive_correction_history=("bias_removed",)
         ),
         validity_evidence=_flat_validity(),
         flat_form="corrected_unnormalized",

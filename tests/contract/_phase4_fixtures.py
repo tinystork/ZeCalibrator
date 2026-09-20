@@ -153,6 +153,7 @@ def descriptor(
     if processing is None:
         processing = ProcessingProvenance(
             source="synthetic_fixture",
+            additive_history_state="known",
             acquisition_profile=acquisition_profile,
         )
     if validity is None and master_type == "flat":

@@ -433,6 +433,7 @@ def _normalization_coherence_reasons(desc: MasterDescriptor) -> list[Reason]:
     reasons: list[Reason] = []
     ff = desc.flat_form
     hist = desc.processing_provenance.additive_correction_history
+    hist_state = desc.processing_provenance.additive_history_state
     norm = desc.processing_provenance.normalization
     scalars = desc.normalization_scalars
 
@@ -458,7 +459,10 @@ def _normalization_coherence_reasons(desc: MasterDescriptor) -> list[Reason]:
         if not hist:
             reasons.append(Reason("UNDOCUMENTED_PROCESSING", "processing_provenance.additive_correction_history", role="flat"))
     elif ff == "raw_response":
-        if scalars is not None or norm is not None or hist:
+        # R3D-A D1d: a raw flat must declare a KNOWN empty additive history.
+        # ``not hist`` alone is insufficient — ``additive_history_state ==
+        # "unknown"`` means "no information", which cannot certify a raw flat.
+        if scalars is not None or norm is not None or hist or hist_state != "known":
             reasons.append(Reason("UNDOCUMENTED_PROCESSING", "processing_provenance", role="flat"))
 
     return reasons
