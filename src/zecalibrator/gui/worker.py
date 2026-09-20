@@ -527,6 +527,7 @@ class _OperationWorker(QtCore.QObject):
                 "outcome": resolution.outcome,
                 "reasons": [_reason_dict(r) for r in resolution.reasons],
                 "unverified": [_reason_dict(r) for r in resolution.unverified],
+                "contract_defaults": [dict(d) for d in resolution.contract_defaults],
                 "routes": [
                     {
                         "additive_mode": r.additive_mode,

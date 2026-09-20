@@ -170,6 +170,11 @@ def human_reason_text(summary: Mapping) -> str:
             "Master dark cannot be used automatically: its processing history "
             "does not establish whether bias has already been removed."
         )
+    if "FLAT_UNSUPPORTED_RAW" in codes:
+        return (
+            "A raw (unprocessed) flat master was supplied, which cannot be used "
+            "automatically in Standard; a ready-to-use flat is required."
+        )
     if "FLAT_UNUSABLE" in codes or "FLAT_ADDITIVE_DEPENDENCY_MISSING" in codes:
         return (
             "A flat master was supplied but cannot be used automatically: no "

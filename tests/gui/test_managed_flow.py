@@ -45,7 +45,7 @@ def _pump(cond, timeout_ms=20000):
     return False
 
 
-def _write_dark(path, *, imagetyp="DARK", value=10.0):
+def _write_dark(path, *, imagetyp="DARK", value=10.0, bayerpat="RGGB"):
     data = np.full(SHAPE, value, dtype=np.float32)
     cards = [
         ("IMAGETYP", imagetyp),
@@ -54,7 +54,7 @@ def _write_dark(path, *, imagetyp="DARK", value=10.0):
         ("GAIN", 100.0),
         ("OFFSET", 50.0),
         ("INSTRUME", "SYNTH-CFA"),
-        ("BAYERPAT", "RGGB"),
+        ("BAYERPAT", bayerpat),
         ("XBINNING", 1),
         ("YBINNING", 1),
     ]
@@ -193,6 +193,7 @@ def test_managed_build_wires_exact_library_spec(qapp, paths):
 
 # ---------------------------------------------------------------------------
 # F6: bounded Standard auto-flow — add masters -> detect -> confirm -> prepare
+# (R3D-C: no modal dialogs; role auto-detected from IMAGETYP; facts auto-derived).
 # ---------------------------------------------------------------------------
 def test_add_masters_auto_flow_detects_confirms_builds(qapp, paths, tmp_path, monkeypatch):
     from .conftest import wait_idle
@@ -200,12 +201,26 @@ def test_add_masters_auto_flow_detects_confirms_builds(qapp, paths, tmp_path, mo
     w = MainWindow(paths)
     assert wait_idle(w)
     try:
-        dark = _write_dark(tmp_path / "dark.fits")
+        # A mono dark carries every necessary fact in the header, so the
+        # auto-flow confirms it without any user questionnaire.
+        dark = _write_dark(tmp_path / "dark.fits", bayerpat="mono")
         monkeypatch.setattr(
             QtWidgets.QFileDialog, "getOpenFileNames",
             staticmethod(lambda *a, **k: ([dark], "")),
         )
-        monkeypatch.setattr(w, "_collect_user_facts", lambda role, candidates: dict(_FULL_EXTRA))
+        prompts = []
+        real_information = QtWidgets.QMessageBox.information
+        real_warning = QtWidgets.QMessageBox.warning
+        real_exec = QtWidgets.QDialog.exec
+        monkeypatch.setattr(
+            QtWidgets.QMessageBox, "information",
+            staticmethod(lambda *a, **k: prompts.append("information") or real_information(*a, **k)),
+        )
+        monkeypatch.setattr(
+            QtWidgets.QMessageBox, "warning",
+            staticmethod(lambda *a, **k: prompts.append("warning") or real_warning(*a, **k)),
+        )
+        monkeypatch.setattr(QtWidgets.QDialog, "exec", lambda self: prompts.append("dialog"))
 
         w._on_add_masters_file()
         # auto-flow: detect -> confirm -> auto-prepare; wait until fully settled.
@@ -217,6 +232,8 @@ def test_add_masters_auto_flow_detects_confirms_builds(qapp, paths, tmp_path, mo
         assert w._library_spec is not None, "auto-flow must wire the managed LibrarySpec"
         assert "Library ready" in w.library_human_status.text()
         assert w._ensure_library() is True
+        # R3D-C: the Standard auto-flow must never show a modal dialog.
+        assert prompts == [], f"unexpected modal prompts in auto-flow: {prompts}"
     finally:
         _shutdown(w)
 
@@ -230,13 +247,13 @@ def test_auto_flow_skips_prepare_when_incomplete_evidence(qapp, paths, tmp_path,
     w = MainWindow(paths)
     assert wait_idle(w)
     try:
+        # A Bayer dark missing the CFA geometry facts (orientation/roi_origin)
+        # stays incomplete under the auto-flow (no questionnaire to fill them).
         dark = _write_dark(tmp_path / "dark.fits")
         monkeypatch.setattr(
             QtWidgets.QFileDialog, "getOpenFileNames",
             staticmethod(lambda *a, **k: ([dark], "")),
         )
-        # No user facts supplied -> required fields stay missing -> not ready.
-        monkeypatch.setattr(w, "_collect_user_facts", lambda role, candidates: {})
 
         w._on_add_masters_file()
         assert _pump(
@@ -247,5 +264,76 @@ def test_auto_flow_skips_prepare_when_incomplete_evidence(qapp, paths, tmp_path,
         # Not fully admissible -> no managed library is prepared/wired.
         assert w._library_spec is None
         assert "needs attention" in w.library_human_status.text()
+    finally:
+        _shutdown(w)
+
+
+# ---------------------------------------------------------------------------
+# R3D-C: the Standard auto-flow reports role problems as NON-MODAL per-master
+# needs-attention notes (never a dialog).
+# ---------------------------------------------------------------------------
+def test_auto_flow_no_modal_for_undetermined_role(qapp, paths, tmp_path, monkeypatch):
+    from .conftest import wait_idle
+    from zecalibrator.gui import service
+
+    w = MainWindow(paths)
+    assert wait_idle(w)
+    try:
+        m = tmp_path / "norole.fits"
+        # A mono dark header with NO IMAGETYP -> role undeterminable.
+        data = np.full(SHAPE, 10.0, dtype=np.float32)
+        write_fits_array(
+            m, data, bunit="ADU",
+            header_cards=[
+                ("EXPTIME", 300.0), ("CCD-TEMP", 20.0), ("GAIN", 100.0),
+                ("OFFSET", 50.0), ("INSTRUME", "SYNTH-CFA"), ("BAYERPAT", "mono"),
+                ("XBINNING", 1), ("YBINNING", 1),
+            ],
+        )
+        w._managed_scan = [service.scan_master_header(str(m))]
+        assert w._managed_scan[0].get("role") is None
+
+        prompts = []
+        monkeypatch.setattr(QtWidgets.QDialog, "exec", lambda self: prompts.append("dialog"))
+        monkeypatch.setattr(
+            QtWidgets.QInputDialog, "getItem",
+            staticmethod(lambda *a, **k: prompts.append("getItem") or ("dark", True)),
+        )
+
+        w._auto_flow_active = True
+        w._collect_and_dispatch_confirms()
+        # No master was confirmed (role could not be determined) and no modal.
+        assert w._managed_pending == []
+        assert prompts == [], f"unexpected modal prompts for undetermined role: {prompts}"
+    finally:
+        _shutdown(w)
+
+
+def test_auto_flow_no_modal_for_role_conflict(qapp, paths, tmp_path, monkeypatch):
+    from .conftest import wait_idle
+    from zecalibrator.gui import service
+
+    w = MainWindow(paths)
+    assert wait_idle(w)
+    try:
+        m = tmp_path / "conflict.fits"
+        _write_dark(m, bayerpat="mono")
+        # Synthesize a selected-vs-detected role conflict (as if the user had
+        # pre-selected a conflicting role); the auto-flow must not prompt.
+        entry = service.scan_master_header(str(m), selected_role="bias")
+        assert entry.get("conflict") is not None
+        w._managed_scan = [entry]
+
+        prompts = []
+        monkeypatch.setattr(QtWidgets.QDialog, "exec", lambda self: prompts.append("dialog"))
+        monkeypatch.setattr(
+            QtWidgets.QMessageBox, "warning",
+            staticmethod(lambda *a, **k: prompts.append("warning")),
+        )
+
+        w._auto_flow_active = True
+        w._collect_and_dispatch_confirms()
+        assert w._managed_pending == []
+        assert prompts == [], f"unexpected modal prompts for role conflict: {prompts}"
     finally:
         _shutdown(w)

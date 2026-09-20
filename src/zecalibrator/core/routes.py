@@ -66,7 +66,6 @@ from zecalibrator.core.matching import (
     _candidate_compatibility,
     _collapse_duplicates,
     _dedup_unverified,
-    _flat_dependency_options,
     _role_of,
     _sorted_candidates,
     _split_reasons,
@@ -82,7 +81,14 @@ OUTCOME_AMBIGUOUS = "AMBIGUOUS"
 BIAS_STATE_UNKNOWN = "BIAS_STATE_UNKNOWN"
 BIAS_REQUIRED = "BIAS_REQUIRED"
 FLAT_UNUSABLE = "FLAT_UNUSABLE"
+FLAT_UNSUPPORTED_RAW = "FLAT_UNSUPPORTED_RAW"
 PARTIAL_ADDITIVE = "PARTIAL_ADDITIVE"
+
+# Semantic source for a Standard-contract-default assignment (R3D-C). A supplied
+# master whose bias_state/flat_form was assigned by the contract (derivable from
+# ``additive_history_state == "unknown"``) is recorded honestly with this source
+# — never claimed as FITS evidence.
+STANDARD_MASTER_CONTRACT = "standard_master_contract"
 
 _INDETERMINATE_BIAS_STATES = ("unknown", "not_applicable")
 
@@ -109,11 +115,13 @@ class RouteEnumeration:
     routes: Tuple[Route, ...]
     reasons: Tuple[Reason, ...]
     unverified: Tuple[Reason, ...]
+    contract_defaults: Tuple[Mapping[str, object], ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "routes", tuple(self.routes))
         object.__setattr__(self, "reasons", tuple(self.reasons))
         object.__setattr__(self, "unverified", tuple(self.unverified))
+        object.__setattr__(self, "contract_defaults", tuple(self.contract_defaults))
 
 
 def _hashable(value):
@@ -149,6 +157,7 @@ def _compatible_candidates(
     check_optical: bool,
     expected_units: str,
     flat_extra: bool,
+    standard_contract: bool = False,
 ) -> Tuple[list, list, list]:
     """Return ``(compatible, blocking_reasons, unverified)`` for one role.
 
@@ -173,6 +182,7 @@ def _compatible_candidates(
             check_optical=check_optical,
             expected_units=expected_units,
             flat_extra=flat_extra,
+            standard_contract=standard_contract,
         )
         blocking, unv = _split_reasons(reasons)
         if blocking:
@@ -183,15 +193,48 @@ def _compatible_candidates(
     return compatible, blocking_reasons, unverified
 
 
-def _flat_prep_from_deps(deps: Mapping[str, Candidate]) -> str:
-    """Map a ``_flat_dependency_options`` dependency binding to a flat-prep mode."""
-    if "flat_dark" in deps:
-        if deps["flat_dark"].descriptor.bias_state == "removed":
-            return "flat_dark_bias_removed"
-        return "flat_dark_incl_bias"
-    if "bias_flat" in deps:
-        return "bias_only_flat"
-    return "already_normalized"  # unreachable for raw_response dependencies
+def _contract_default_records(desc, role: str) -> list[dict]:
+    """Honest audit records for a Standard-contract-default semantic assignment.
+
+    A session-supplied master whose ``additive_history_state == "unknown"``
+    carries the Standard master contract semantics: the recorded
+    ``bias_state``/``flat_form`` is a *contract default*, never FITS evidence.
+    The audit records the semantic source (``standard_master_contract``) and the
+    precise note that processing provenance from FITS is unavailable.
+    """
+    if desc.processing_provenance.additive_history_state != "unknown":
+        return []
+    if role in ("dark", "flat_dark") and desc.bias_state == "included":
+        return [{
+            "role": role,
+            "field": "bias_state",
+            "value": "included",
+            "source": STANDARD_MASTER_CONTRACT,
+            "provenance_note": "processing provenance from FITS = unavailable",
+        }]
+    if role == "flat" and desc.flat_form == "corrected_unnormalized":
+        return [{
+            "role": role,
+            "field": "flat_form",
+            "value": "corrected_unnormalized",
+            "source": STANDARD_MASTER_CONTRACT,
+            "provenance_note": "processing provenance from FITS = unavailable",
+        }]
+    return []
+
+
+def _flat_filter_unrelated(light: LightConstraints, desc) -> bool:
+    """S1: a flat is unrelated to the light when its filter is KNOWN and differs.
+
+    Standard enumerates a conventional third-party master flat; a flat for a
+    different filter is not a candidate for this light and must never force
+    NEEDS_ATTENTION (nor pollute the audit). The rule is deliberately minimal:
+    only a KNOWN-and-different filter is excluded; an unknown filter on either
+    side stays candidate-relevant (conservative).
+    """
+    lf = light.optical.filter
+    mf = desc.filter
+    return mf is not None and lf is not None and mf != lf
 
 
 def enumerate_routes(
@@ -205,6 +248,7 @@ def enumerate_routes(
     """
     reasons: list[Reason] = []
     unverified: list[Reason] = []
+    contract_defaults: list[dict] = []
 
     light_exposure = light.acquisition.exposure_s
     light_bias_range = light.acquisition.bias_exposure_max_s
@@ -214,16 +258,28 @@ def enumerate_routes(
         light, candidates, "dark", policy,
         check=_CHECK_DARK_EXPOSURE, reference_exposure=light_exposure, reference_bias_range=None,
         check_filter=False, check_optical=False, expected_units="ADU", flat_extra=False,
+        standard_contract=True,
     )
     compatible_biases, bias_reject, bias_unv = _compatible_candidates(
         light, candidates, "bias", policy,
         check=_CHECK_BIAS_RANGE, reference_exposure=None, reference_bias_range=light_bias_range,
         check_filter=False, check_optical=False, expected_units="ADU", flat_extra=False,
+        standard_contract=True,
     )
     reasons.extend(dark_reject)
     reasons.extend(bias_reject)
     unverified.extend(dark_unv)
     unverified.extend(bias_unv)
+
+    # Standard-contract-default semantic source audit (R3D-C): a supplied
+    # dark/flat_dark/flat whose bias_state/flat_form was assigned by the
+    # contract (unknown additive history) is recorded honestly — never claimed
+    # as FITS evidence.
+    for role in ("dark", "flat_dark", "flat"):
+        for c in _collapse_duplicates(candidates.get(role, ())):
+            if _role_of(c.descriptor) != role:
+                continue
+            contract_defaults.extend(_contract_default_records(c.descriptor, role))
 
     # A dark with an indeterminate bias state is surfaced truthfully regardless of
     # its scientific compatibility (its processing history cannot establish
@@ -288,14 +344,22 @@ def enumerate_routes(
     compatible_flats = []
     flat_reject = []
     flat_unv = []
+    flat_supplied = False
     for c in _sorted_candidates(_collapse_duplicates(candidates.get("flat", ()))):
         if _role_of(c.descriptor) != "flat":
             continue
+        if _flat_filter_unrelated(light, c.descriptor):
+            # S1: an unrelated flat (known-and-different filter) is not a
+            # candidate for this light; never counted as "supplied", never
+            # forces NEEDS_ATTENTION, never pollutes the audit.
+            continue
+        flat_supplied = True
         expected_units = "dimensionless" if c.descriptor.flat_form == "normalized_response" else "ADU"
         rs = _candidate_compatibility(
             light, c.descriptor, policy=policy,
             check=_CHECK_NONE, reference_exposure=None, reference_bias_range=None,
             check_filter=True, check_optical=True, expected_units=expected_units, flat_extra=True,
+            standard_contract=True,
         )
         blocking, unv = _split_reasons(rs)
         if blocking:
@@ -309,7 +373,13 @@ def enumerate_routes(
     flat_options: list[tuple[str, Optional[str], dict]] = []
     flat_ambiguous = False
     if not compatible_flats:
-        flat_options.append(("none", None, {}))
+        if flat_supplied:
+            # R3D-C: a flat was supplied but every candidate was rejected
+            # (incompatible). The rejection reasons are already blocking in
+            # ``reasons``; never silently fall back to ``flat none``.
+            flat_options = []
+        else:
+            flat_options.append(("none", None, {}))
     else:
         flat_forms = {f.descriptor.flat_form for f in compatible_flats}
         if len(flat_forms) > 1:
@@ -319,15 +389,10 @@ def enumerate_routes(
             if ff in ("normalized_response", "corrected_unnormalized"):
                 flat_options.append(("apply", "already_normalized", {"flat": f}))
             elif ff == "raw_response":
-                opts, recs, struct, _audit, unv = _flat_dependency_options(
-                    f.descriptor, f, candidates, policy
-                )
-                unverified.extend(unv)
-                for rec in recs:
-                    reasons.extend(rec.reasons)
-                reasons.extend(struct)
-                for deps in opts:
-                    flat_options.append(("apply", _flat_prep_from_deps(deps), {"flat": f, **deps}))
+                # R3D-C Standard: a raw flat is unsupported (flat-master
+                # construction from raw stacks is future/Advanced). Never
+                # auto-construct a flat_dark dependency here.
+                reasons.append(Reason(FLAT_UNSUPPORTED_RAW, "flat_form", role="flat", observed=ff))
             else:
                 reasons.append(Reason("UNDOCUMENTED_PROCESSING", "flat_form", role="flat", observed=ff))
 
@@ -364,17 +429,19 @@ def enumerate_routes(
 
     reasons = _dedup_reasons(reasons)
     unverified = _dedup_unverified(unverified)
-    return RouteEnumeration(outcome, tuple(routes), tuple(reasons), tuple(unverified))
+    return RouteEnumeration(outcome, tuple(routes), tuple(reasons), tuple(unverified), tuple(contract_defaults))
 
 
 __all__ = [
     "BIAS_REQUIRED",
     "BIAS_STATE_UNKNOWN",
+    "FLAT_UNSUPPORTED_RAW",
     "FLAT_UNUSABLE",
     "OUTCOME_AMBIGUOUS",
     "OUTCOME_NEEDS_ATTENTION",
     "OUTCOME_READY",
     "PARTIAL_ADDITIVE",
+    "STANDARD_MASTER_CONTRACT",
     "Route",
     "RouteEnumeration",
     "enumerate_routes",

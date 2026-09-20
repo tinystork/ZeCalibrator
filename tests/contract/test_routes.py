@@ -24,10 +24,12 @@ from zecalibrator.application.routes import resolve_route
 from zecalibrator.core.descriptors import ProcessingProvenance
 from zecalibrator.core.routes import (
     BIAS_STATE_UNKNOWN,
+    FLAT_UNSUPPORTED_RAW,
     FLAT_UNUSABLE,
     OUTCOME_AMBIGUOUS,
     OUTCOME_NEEDS_ATTENTION,
     OUTCOME_READY,
+    STANDARD_MASTER_CONTRACT,
     enumerate_routes,
 )
 
@@ -169,7 +171,7 @@ def test_flat_supplied_but_unusable_needs_attention():
 
 
 # ---------------------------------------------------------------------------
-# 10. raw flat + flat_dark -> correct flat-prep route.
+# 10. raw flat is unsupported in Standard -> NEEDS_ATTENTION, never auto flat_dark.
 # ---------------------------------------------------------------------------
 def test_raw_flat_with_flat_dark_prep():
     lt = light()
@@ -189,13 +191,14 @@ def test_raw_flat_with_flat_dark_prep():
         ),
         policy(),
     )
-    assert res.outcome == OUTCOME_READY
-    assert res.route.flat_prep_mode == "flat_dark_incl_bias"
-    assert set(res.plan.masters) == {"dark", "flat", "flat_dark"}
+    # Standard never auto-constructs a flat_dark from a raw flat.
+    assert res.outcome == OUTCOME_NEEDS_ATTENTION
+    assert res.plan is None
+    assert any(r.code == FLAT_UNSUPPORTED_RAW for r in res.reasons)
 
 
 # ---------------------------------------------------------------------------
-# 11. raw flat + qualified bias -> correct flat-prep route (bias_only_flat).
+# 11. raw flat + qualified bias is still unsupported in Standard.
 # ---------------------------------------------------------------------------
 def test_raw_flat_with_qualified_bias_prep():
     lt = light()
@@ -215,9 +218,9 @@ def test_raw_flat_with_qualified_bias_prep():
         ),
         policy(),
     )
-    assert res.outcome == OUTCOME_READY
-    assert res.route.flat_prep_mode == "bias_only_flat"
-    assert set(res.plan.masters) == {"dark", "flat", "bias_flat"}
+    assert res.outcome == OUTCOME_NEEDS_ATTENTION
+    assert res.plan is None
+    assert any(r.code == FLAT_UNSUPPORTED_RAW for r in res.reasons)
 
 
 # ---------------------------------------------------------------------------
@@ -226,27 +229,19 @@ def test_raw_flat_with_qualified_bias_prep():
 def test_flat_dark_never_a_direct_light_correction():
     lt = light()
     dk = descriptor("dark", "included", exposure_s=10.0)
-    flat = descriptor(
-        "flat", "not_applicable", flat_form="raw_response",
-        filter="NONE", optical_train_id="SYNTH-TRAIN-1",
-        processing=_raw_flat_proc(), exposure_s=1.0,
-    )
     fd = descriptor("flat_dark", "included", exposure_s=1.0)
+    # A flat_dark placed in the dark pool is rejected by role semantics; only
+    # the genuine dark is ever a direct light correction. In Standard, flat_dark
+    # is a flat-preparation dependency only (raw flats are unsupported).
     res = resolve_route(
         lt,
-        snapshot(
-            dark=[candidate("d1", dk)],
-            flat=[candidate("f1", flat)],
-            flat_dark=[candidate("fd1", fd)],
-        ),
+        snapshot(dark=[candidate("d1", dk), candidate("fd1", fd)]),
         policy(),
     )
     assert res.outcome == OUTCOME_READY
-    # The dark role is the genuine dark; flat_dark is only the flat dependency.
+    assert res.route.additive_mode == "dark_incl_bias"
     assert res.route.masters["dark"].descriptor.master_type == "dark"
-    assert res.route.masters["flat_dark"].descriptor.master_type == "flat_dark"
     assert res.route.masters["dark"].descriptor.descriptor_id == dk.descriptor_id
-    assert res.route.masters["flat_dark"].descriptor.descriptor_id == fd.descriptor_id
 
 
 # ---------------------------------------------------------------------------
@@ -281,28 +276,27 @@ def test_single_complete_route_ready_matched():
 def test_plan_records_exact_effective_modes_and_dependency():
     lt = light()
     dk = descriptor("dark", "included", exposure_s=10.0)
-    flat = descriptor(
-        "flat", "not_applicable", flat_form="raw_response",
-        filter="NONE", optical_train_id="SYNTH-TRAIN-1",
-        processing=_raw_flat_proc(), exposure_s=1.0,
+    pp = ProcessingProvenance(
+        source="synthetic_fixture",
+        additive_history_state="known",
+        additive_correction_history=("flat_dark_subtracted",),
     )
-    fd = descriptor("flat_dark", "included", exposure_s=1.0)
+    flat = descriptor(
+        "flat", "not_applicable", flat_form="corrected_unnormalized",
+        filter="NONE", optical_train_id="SYNTH-TRAIN-1",
+        processing=pp, exposure_s=1.0,
+    )
     res = resolve_route(
         lt,
-        snapshot(
-            dark=[candidate("d1", dk)],
-            flat=[candidate("f1", flat)],
-            flat_dark=[candidate("fd1", fd)],
-        ),
+        snapshot(dark=[candidate("d1", dk)], flat=[candidate("f1", flat)]),
         policy(),
     )
     plan = res.plan
     assert plan.request.additive_mode == "dark_incl_bias"
     assert plan.request.flat_mode == "apply"
-    assert set(plan.masters) == {"dark", "flat", "flat_dark"}
+    assert set(plan.masters) == {"dark", "flat"}
     assert plan.masters["dark"].descriptor_id == dk.descriptor_id
     assert plan.masters["flat"].descriptor_id == flat.descriptor_id
-    assert plan.masters["flat_dark"].descriptor_id == fd.descriptor_id
 
 
 # ---------------------------------------------------------------------------

@@ -239,7 +239,8 @@ def test_siril_witness_needs_attention_not_silent_route(tmp_path):
     imports = [
         v1.MasterImportSpec(
             path="siril_dark.fits", master_type="dark", hdu=0,
-            declaration=v1.ImportDeclaration(**_SIRIL_BASE),  # no gain/offset/temp
+            # no gain/offset/temperature; exposure present so the dark can route.
+            declaration=v1.ImportDeclaration(**_SIRIL_BASE, exposure_s=10.0),
             dq_state="no_source_dq",
         ),
         v1.MasterImportSpec(
@@ -273,10 +274,19 @@ def test_siril_witness_needs_attention_not_silent_route(tmp_path):
     assert resolution.outcome == OUTCOME_NEEDS_ATTENTION
     assert resolution.plan is None  # never a silent route
     codes = {r.code for r in resolution.reasons}
-    # Processing provenance / bias state not established.
-    assert BIAS_STATE_UNKNOWN in codes
-    # Gain incompatibility (flat GAIN=456 vs light 120 / dark gain absent).
-    assert "GAIN_MISMATCH" in codes or any(
-        r.code == "MISSING_REQUIRED_FIELD" and r.field == "acquisition.gain"
-        for r in resolution.reasons
-    )
+    # The dark routes as bias-included (bias_state defaults to "included" under
+    # the Standard master contract); it is NOT rejected for missing
+    # gain/temperature, and never reported as an indeterminate bias state.
+    assert BIAS_STATE_UNKNOWN not in codes
+    missing_fields = {
+        r.field for r in resolution.reasons if r.code == "MISSING_REQUIRED_FIELD"
+    }
+    assert "acquisition.gain" not in missing_fields
+    assert "acquisition.offset" not in missing_fields
+    assert "acquisition.temperature_c" not in missing_fields
+    # The flat's known GAIN_MISMATCH (456 vs 120) stays blocking.
+    assert "GAIN_MISMATCH" in codes
+    # The dark's missing acquisition facts are recorded as non-blocking
+    # UNVERIFIED notes (never a blocking rejection).
+    unverified_fields = {r.field for r in resolution.unverified}
+    assert "acquisition.gain" in unverified_fields

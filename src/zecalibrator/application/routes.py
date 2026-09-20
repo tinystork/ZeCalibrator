@@ -53,11 +53,13 @@ class RouteResolution:
     unverified: Tuple[Reason, ...]
     route: Optional[Route]  # the single resolved READY route (or None)
     routes: Tuple[Route, ...]  # every enumerated route (for AMBIGUOUS)
+    contract_defaults: Tuple[Mapping[str, object], ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "reasons", tuple(self.reasons))
         object.__setattr__(self, "unverified", tuple(self.unverified))
         object.__setattr__(self, "routes", tuple(self.routes))
+        object.__setattr__(self, "contract_defaults", tuple(self.contract_defaults))
 
 
 def resolve_route(
@@ -80,13 +82,20 @@ def resolve_route(
     outcome = enumeration.outcome
     reasons = enumeration.reasons
     unverified = enumeration.unverified
+    contract_defaults = enumeration.contract_defaults
 
     if enumeration.outcome == OUTCOME_READY and len(enumeration.routes) == 1:
         route = enumeration.routes[0]
         request = CalibrationRequest(
             additive_mode=route.additive_mode, flat_mode=route.flat_mode
         )
-        result = match_calibration(light, request, snapshot.candidates, policy)
+        # The Standard final match_calibration binding uses the same relaxed
+        # Standard-contract tiers as the enumerator (missing gain/offset/temp/
+        # orientation/roi_origin are UNVERIFIED non-blocking; known mismatches
+        # stay blocking; the contract-flat coherence default is accepted).
+        result = match_calibration(
+            light, request, snapshot.candidates, policy, standard_contract=True
+        )
         unverified = _merge_unverified(enumeration.unverified, result.unverified)
         if result.outcome == OUTCOME_MATCHED and result.plan is not None:
             plan = result.plan
@@ -100,7 +109,10 @@ def resolve_route(
                 else OUTCOME_AMBIGUOUS
             )
 
-    return RouteResolution(outcome, request, plan, reasons, unverified, route, enumeration.routes)
+    return RouteResolution(
+        outcome, request, plan, reasons, unverified, route, enumeration.routes,
+        contract_defaults,
+    )
 
 
 def _merge_unverified(*groups) -> Tuple[Reason, ...]:

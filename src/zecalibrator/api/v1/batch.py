@@ -430,6 +430,23 @@ def _fits_shape(source: FilesystemSource, path: str, hdu) -> tuple:
     return (naxis2, naxis1)
 
 
+def _explicit_bias_removed(spec: MasterImportSpec) -> bool:
+    """True when the import provenance explicitly proves bias removal (R3D-C).
+
+    ``additive_history_state == "known"`` together with ``"bias_removed"`` in
+    the additive-correction history yields a bias-removed master (membership,
+    not singleton-tuple equality); any other provenance (including ``unknown``
+    history) does not.
+    """
+    pp = spec.processing_provenance
+    if pp is None:
+        return False
+    return (
+        pp.additive_history_state == "known"
+        and "bias_removed" in tuple(pp.additive_correction_history)
+    )
+
+
 def _descriptor_from_spec(
     spec: MasterImportSpec, *, shape, content_sha256, size_bytes, mask_identity
 ):
@@ -476,10 +493,22 @@ def _descriptor_from_spec(
         bias_state = spec.bias_state
     elif spec.master_type in ("bias", "flat"):
         bias_state = "not_applicable"
+    elif _explicit_bias_removed(spec):
+        bias_state = "removed"
     else:
-        bias_state = "unknown"
+        # Standard master contract (R3D-C): supplying a dark/flat_dark carries
+        # the contract semantics that bias is included (the additive response
+        # includes bias) unless the provenance explicitly proves bias removal.
+        bias_state = "included"
 
-    flat_form = spec.flat_form if spec.master_type == "flat" else None
+    if spec.master_type == "flat":
+        # Standard master contract (R3D-C): a supplied flat is a ready-to-use
+        # master flat (already the multiplicative response) unless the import
+        # explicitly declares a different form. ZeCalibrator normalizes it at
+        # execution; no scalars are invented here.
+        flat_form = spec.flat_form if spec.flat_form is not None else "corrected_unnormalized"
+    else:
+        flat_form = None
     if spec.master_type == "flat" and flat_form == "normalized_response":
         pixel_domain = "normalized_response"
         physical_units = "dimensionless"

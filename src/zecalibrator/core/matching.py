@@ -196,6 +196,47 @@ def _disambiguator_reasons(light, master, code: str, field: str, *, unknown=_unk
     return []
 
 
+def _standard_optional_reasons(light, master, code: str, field: str, *, numeric: bool = False) -> list[Reason]:
+    """Standard auto-route tier (R3D-C): a session-supplied master fact that is
+    missing on either side is UNVERIFIED (non-blocking, recorded in the audit);
+    both known + different is a blocking mismatch.
+
+    This is the relaxed tier for ``gain``/``offset``/``orientation``/
+    ``roi_origin`` under the Standard master contract: the act of supplying a
+    master carries contract semantics, so a missing acquisition fact no longer
+    hard-rejects; a genuine comparable contradiction still does.
+    """
+    lu = _unknown(light)
+    mu = _unknown(master)
+    if lu or mu:
+        return [Reason(_UNVERIFIED, field, expected=light, observed=master, blocking=False)]
+    if numeric:
+        if not _finite(light) or not _finite(master):
+            return [Reason(_UNVERIFIED, field, expected=light, observed=master, blocking=False)]
+        if float(light) != float(master):
+            return [Reason(code, field, expected=light, observed=master, blocking=True)]
+        return []
+    if light != master:
+        return [Reason(code, field, expected=light, observed=master, blocking=True)]
+    return []
+
+
+def _standard_temperature_reasons(light, master, policy: MatchPolicy) -> list[Reason]:
+    """Standard auto-route temperature tier (R3D-C): missing -> UNVERIFIED
+    (non-blocking); both known + out-of-tolerance -> blocking TEMPERATURE_MISMATCH."""
+    field = "acquisition.temperature_c"
+    if _unknown(light) or _unknown(master):
+        return [Reason(_UNVERIFIED, field, expected=light, observed=master, blocking=False)]
+    if not _finite(light) or not _finite(master):
+        return [Reason(_UNVERIFIED, field, expected=light, observed=master, blocking=False)]
+    lt, mt = float(light), float(master)
+    tol = policy.temperature_tolerance
+    bound = max(tol.absolute, tol.relative * max(abs(lt), abs(mt)))
+    if abs(lt - mt) > bound:
+        return [Reason("TEMPERATURE_MISMATCH", field, expected=light, observed=master)]
+    return []
+
+
 def _split_reasons(reasons: Iterable[Reason]) -> tuple[list[Reason], list[Reason]]:
     """Partition reasons into ``(blocking, unverified)``."""
     blocking: list[Reason] = []
@@ -231,7 +272,7 @@ def _dedup_unverified(reasons: Iterable[Reason]) -> list[Reason]:
 # ---------------------------------------------------------------------------
 # Per-field compatibility reasons
 # ---------------------------------------------------------------------------
-def _geometry_reasons(light: Geometry, master: Geometry) -> list[Reason]:
+def _geometry_reasons(light: Geometry, master: Geometry, *, standard_contract: bool = False) -> list[Reason]:
     reasons: list[Reason] = []
 
     def req(code, field, lv, mv, blocking=True):
@@ -260,7 +301,11 @@ def _geometry_reasons(light: Geometry, master: Geometry) -> list[Reason]:
 
     lo = light.orientation
     mo = master.orientation
-    if cfa_applies:
+    if standard_contract:
+        # R3D-C: missing orientation is UNVERIFIED (non-blocking) in Standard;
+        # a known contradiction stays blocking.
+        reasons += _standard_optional_reasons(lo, mo, "GEOMETRY_MISMATCH", "geometry.orientation")
+    elif cfa_applies:
         if lo is None or mo is None:
             req(_MISSING, "geometry.orientation", lo, mo)
         elif lo != mo:
@@ -270,7 +315,10 @@ def _geometry_reasons(light: Geometry, master: Geometry) -> list[Reason]:
 
     lroi = light.roi_origin
     mroi = master.roi_origin
-    if cfa_applies:
+    if standard_contract:
+        # R3D-C: missing roi_origin is UNVERIFIED (non-blocking) in Standard.
+        reasons += _standard_optional_reasons(lroi, mroi, "ROI_ORIGIN_MISMATCH", "geometry.roi_origin")
+    elif cfa_applies:
         if lroi is None or mroi is None:
             req(_MISSING, "geometry.roi_origin", lroi, mroi)
         elif lroi != mroi:
@@ -399,10 +447,16 @@ def _units_reason(desc: MasterDescriptor, expected_units: str) -> list[Reason]:
     return []
 
 
-def _acquisition_reasons(light: Acquisition, master: Acquisition, policy: MatchPolicy) -> list[Reason]:
+def _acquisition_reasons(light: Acquisition, master: Acquisition, policy: MatchPolicy, *, standard_contract: bool = False) -> list[Reason]:
     reasons: list[Reason] = []
-    reasons += _numeric_reason(light.gain, master.gain, "GAIN_MISMATCH", "acquisition.gain")  # necessary
-    reasons += _numeric_reason(light.offset, master.offset, "OFFSET_MISMATCH", "acquisition.offset")  # necessary
+    if standard_contract:
+        # R3D-C: missing gain/offset on a session-supplied master is UNVERIFIED
+        # (non-blocking); a known comparable mismatch stays blocking.
+        reasons += _standard_optional_reasons(light.gain, master.gain, "GAIN_MISMATCH", "acquisition.gain", numeric=True)
+        reasons += _standard_optional_reasons(light.offset, master.offset, "OFFSET_MISMATCH", "acquisition.offset", numeric=True)
+    else:
+        reasons += _numeric_reason(light.gain, master.gain, "GAIN_MISMATCH", "acquisition.gain")  # necessary
+        reasons += _numeric_reason(light.offset, master.offset, "OFFSET_MISMATCH", "acquisition.offset")  # necessary
     reasons += _disambiguator_reasons(light.readout_mode, master.readout_mode, "READOUT_MISMATCH", "acquisition.readout_mode")
     reasons += _disambiguator_reasons(light.adc_mode, master.adc_mode, "ADC_MISMATCH", "acquisition.adc_mode")
     return reasons
@@ -429,7 +483,7 @@ def _scalars_match_phase(desc: MasterDescriptor) -> bool:
     return False
 
 
-def _normalization_coherence_reasons(desc: MasterDescriptor) -> list[Reason]:
+def _normalization_coherence_reasons(desc: MasterDescriptor, *, standard_contract: bool = False) -> list[Reason]:
     reasons: list[Reason] = []
     ff = desc.flat_form
     hist = desc.processing_provenance.additive_correction_history
@@ -457,7 +511,13 @@ def _normalization_coherence_reasons(desc: MasterDescriptor) -> list[Reason]:
         if scalars is not None or norm is not None:
             reasons.append(Reason("UNDOCUMENTED_PROCESSING", "processing_provenance", role="flat"))
         if not hist:
-            reasons.append(Reason("UNDOCUMENTED_PROCESSING", "processing_provenance.additive_correction_history", role="flat"))
+            # R3D-C Standard master contract: a ``corrected_unnormalized`` flat
+            # with ``additive_history_state == "unknown"`` is the ready-to-use
+            # contract master flat (already the multiplicative response,
+            # normalized at execution). The strict explicit path still requires
+            # a documented additive history.
+            if not (standard_contract and hist_state == "unknown"):
+                reasons.append(Reason("UNDOCUMENTED_PROCESSING", "processing_provenance.additive_correction_history", role="flat"))
     elif ff == "raw_response":
         # R3D-A D1d: a raw flat must declare a KNOWN empty additive history.
         # ``not hist`` alone is insufficient — ``additive_history_state ==
@@ -468,37 +528,49 @@ def _normalization_coherence_reasons(desc: MasterDescriptor) -> list[Reason]:
     return reasons
 
 
-def _flat_evidence_reasons(desc: MasterDescriptor, policy: MatchPolicy) -> list[Reason]:
+def _flat_evidence_reasons(desc: MasterDescriptor, policy: MatchPolicy, *, standard_contract: bool = False) -> list[Reason]:
     reasons: list[Reason] = []
     ve = desc.validity_evidence
 
+    # Known failure (explicit failed policy) is ALWAYS blocking.
     if ve.quality_policy_state != "qualified":
         reasons.append(Reason("QUALITY_POLICY_PENDING", "validity_evidence.quality_policy_state", role="flat"))
+
+    def missing(code: str, field: str, *, expected=None, observed=None) -> None:
+        """Missing-evidence branch: blocking in strict mode, UNVERIFIED (non-
+        blocking, recorded) under the Standard master contract (F1)."""
+        if standard_contract:
+            reasons.append(Reason(_UNVERIFIED, field, role="flat", expected=expected, observed=observed, blocking=False))
+        else:
+            reasons.append(Reason(code, field, role="flat", expected=expected, observed=observed))
+
     if not ve.saturation_limit_known:
-        reasons.append(Reason(_MISSING, "validity_evidence.saturation_limit_known", role="flat", expected=True, observed=ve.saturation_limit_known))
+        missing(_MISSING, "validity_evidence.saturation_limit_known", expected=True, observed=ve.saturation_limit_known)
     if desc.acquisition.saturation_evidence != "qualified":
-        reasons.append(Reason(_MISSING, "acquisition.saturation_evidence", role="flat", expected="qualified", observed=desc.acquisition.saturation_evidence))
+        missing(_MISSING, "acquisition.saturation_evidence", expected="qualified", observed=desc.acquisition.saturation_evidence)
     if not ve.illumination:
-        reasons.append(Reason(_MISSING, "validity_evidence.illumination", role="flat"))
+        missing(_MISSING, "validity_evidence.illumination")
     if not ve.exposure_quality:
-        reasons.append(Reason(_MISSING, "validity_evidence.exposure_quality", role="flat"))
+        missing(_MISSING, "validity_evidence.exposure_quality")
 
     valid = ve.valid_normalization_count
     total = ve.total_normalization_count
     if valid is None or total is None:
-        reasons.append(Reason(_MISSING, "validity_evidence.valid_normalization_count", role="flat"))
+        missing(_MISSING, "validity_evidence.valid_normalization_count")
     else:
         for p in _required_planes(desc):
             v = valid.get(p)
             t = total.get(p)
             if v is None or t is None:
-                reasons.append(Reason(_MISSING, f"validity_evidence.valid_normalization_count.{p}", role="flat"))
+                missing(_MISSING, f"validity_evidence.valid_normalization_count.{p}")
             elif t <= 0 or v <= 0:
+                # Known failure (zero/negative valid population) is ALWAYS blocking.
                 reasons.append(Reason("FLAT_UNUSABLE", f"validity_evidence.{p}", role="flat", expected=">0 valid", observed=(v, t)))
             elif 100.0 * v / t < policy.flat_quality_policy.threshold_pct:
+                # Known failure (below-threshold valid fraction) is ALWAYS blocking.
                 reasons.append(Reason("SATURATED_FLAT", f"validity_evidence.{p}", role="flat", expected=f">= {policy.flat_quality_policy.threshold_pct}%", observed=f"{100.0 * v / t:.2f}%"))
 
-    reasons += _normalization_coherence_reasons(desc)
+    reasons += _normalization_coherence_reasons(desc, standard_contract=standard_contract)
     return reasons
 
 
@@ -517,15 +589,19 @@ def _candidate_compatibility(
     check_optical: bool,
     expected_units: str,
     flat_extra: bool,
+    standard_contract: bool = False,
 ) -> list[Reason]:
     reasons: list[Reason] = []
-    reasons += _geometry_reasons(reference.geometry, desc.geometry)
+    reasons += _geometry_reasons(reference.geometry, desc.geometry, standard_contract=standard_contract)
     reasons += _detector_reasons(reference.detector, desc.detector)
-    reasons += _acquisition_reasons(reference.acquisition, desc.acquisition, policy)
+    reasons += _acquisition_reasons(reference.acquisition, desc.acquisition, policy, standard_contract=standard_contract)
 
     if check in (_CHECK_DARK_EXPOSURE, _CHECK_FLATDARK_EXPOSURE):
         reasons += _exposure_reason(reference_exposure, desc.acquisition.exposure_s, policy)
-        reasons += _temperature_reason(reference.acquisition.temperature_c, desc.acquisition.temperature_c, policy)
+        if standard_contract:
+            reasons += _standard_temperature_reasons(reference.acquisition.temperature_c, desc.acquisition.temperature_c, policy)
+        else:
+            reasons += _temperature_reason(reference.acquisition.temperature_c, desc.acquisition.temperature_c, policy)
     elif check in (_CHECK_BIAS_RANGE, _CHECK_FLATBIAS_RANGE):
         reasons += _bias_exposure_reason(desc.acquisition.exposure_s, reference_bias_range)
 
@@ -537,7 +613,7 @@ def _candidate_compatibility(
         reasons += _disambiguator_reasons(reference.optical.optical_train_id, desc.optical_train_id, "OPTICAL_TRAIN_MISMATCH", "optical.optical_train_id")
 
     if flat_extra:
-        reasons += _flat_evidence_reasons(desc, policy)
+        reasons += _flat_evidence_reasons(desc, policy, standard_contract=standard_contract)
 
     seen = set()
     out = []
@@ -700,6 +776,7 @@ def match_calibration(
     policy: MatchPolicy,
     *,
     manual_selection: Optional[Mapping[str, str]] = None,
+    standard_contract: bool = False,
 ) -> MatchResult:
     roles = request.required_roles
 
@@ -751,6 +828,7 @@ def match_calibration(
                 light, c.descriptor, policy=policy,
                 check=check, reference_exposure=ref_exposure, reference_bias_range=ref_bias_range,
                 check_filter=False, check_optical=False, expected_units="ADU", flat_extra=False,
+                standard_contract=standard_contract,
             )
             blocking, unv = _split_reasons(reasons)
             if blocking:
@@ -778,6 +856,7 @@ def match_calibration(
                 light, c.descriptor, policy=policy,
                 check=_CHECK_NONE, reference_exposure=None, reference_bias_range=None,
                 check_filter=True, check_optical=True, expected_units=expected_units, flat_extra=True,
+                standard_contract=standard_contract,
             )
             blocking, unv = _split_reasons(reasons)
             if blocking:

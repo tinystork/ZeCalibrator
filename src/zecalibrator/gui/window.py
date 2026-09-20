@@ -1203,17 +1203,36 @@ class MainWindow(QtWidgets.QMainWindow):
                 continue
             role = m.get("role")
             conflict = m.get("conflict")
-            if conflict:
-                role = self._resolve_role_conflict(conflict)
-                if role is None:
-                    self._log(f"[managed] role conflict skipped (not auto-resolved): {m.get('path')}")
-                    continue
-            if not role:
-                role = self._collect_role(m.get("path"))
-                if role is None:
-                    continue
             candidates = m.get("candidates", {})
-            extra = self._collect_user_facts(role, candidates)
+            if self._auto_flow_active:
+                # Standard auto-flow (R3D-C): no modal dialogs. The role is
+                # auto-detected from IMAGETYP; a role conflict or an
+                # undeterminable role is reported as a non-modal per-master
+                # needs-attention note (never a questionnaire).
+                if conflict:
+                    self._log(
+                        f"[managed] needs attention — declared and detected "
+                        f"master roles disagree: {m.get('path')}"
+                    )
+                    continue
+                if not role:
+                    self._log(
+                        f"[managed] needs attention — master role could not be "
+                        f"determined: {m.get('path')}"
+                    )
+                    continue
+                extra = {}
+            else:
+                if conflict:
+                    role = self._resolve_role_conflict(conflict)
+                    if role is None:
+                        self._log(f"[managed] role conflict skipped (not auto-resolved): {m.get('path')}")
+                        continue
+                if not role:
+                    role = self._collect_role(m.get("path"))
+                    if role is None:
+                        continue
+                extra = self._collect_user_facts(role, candidates)
             evidence = {
                 field: {
                     "value": fact.get("value"),
