@@ -136,7 +136,7 @@ def test_compatible_flat_automatically_requested():
     )
     assert res.outcome == OUTCOME_READY
     assert res.route.flat_mode == "apply"
-    assert res.route.flat_prep_mode == "already_normalized"
+    assert res.route.flat_prep_mode == "normalize_only"
     assert "flat" in res.plan.masters
 
 

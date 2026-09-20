@@ -13,7 +13,8 @@ A :class:`Route` is a fully-resolved scientific choice:
   (``control`` / ``bias_only`` / ``dark_incl_bias`` / ``dark_bias_removed``).
 * ``flat_mode`` — ``none`` or ``apply``.
 * ``flat_prep_mode`` — how a flat is prepared (``already_normalized`` /
-  ``flat_dark_incl_bias`` / ``flat_dark_bias_removed`` / ``bias_only_flat``).
+  ``normalize_only`` / ``flat_dark_incl_bias`` / ``flat_dark_bias_removed`` /
+  ``bias_only_flat``).
 * ``masters`` — the exact chosen :class:`~zecalibrator.core.plans.Candidate`
   per role, including flat dependency roles ``flat_dark`` / ``bias_flat``.
 
@@ -36,8 +37,10 @@ Flat classification:
 
 * no compatible flat                    -> flat ``none``.
 * compatible flat(s) determine preparation from ``flat_form``:
-  ``normalized_response`` / ``corrected_unnormalized`` -> ``already_normalized``
-  (flat quality evidence required via ``_flat_evidence_reasons``);
+  ``normalized_response`` -> ``already_normalized`` (flat quality evidence
+  required via ``_flat_evidence_reasons``);
+  ``corrected_unnormalized`` -> ``normalize_only`` (additive correction already
+  occurred; executor normalizes directly, no flat_dark/bias_flat, no proof);
   ``raw_response`` -> reuse ``_flat_dependency_options`` for flat_dark/bias
   dependencies (``flat_dark_incl_bias`` / ``flat_dark_bias_removed`` /
   ``bias_only_flat``); zero dependencies => ``NEEDS_ATTENTION`` (flat supplied
@@ -386,8 +389,13 @@ def enumerate_routes(
             flat_ambiguous = True
         for f in compatible_flats:
             ff = f.descriptor.flat_form
-            if ff in ("normalized_response", "corrected_unnormalized"):
+            if ff == "normalized_response":
                 flat_options.append(("apply", "already_normalized", {"flat": f}))
+            elif ff == "corrected_unnormalized":
+                # R3D-E F3: the additive flat correction has ALREADY occurred;
+                # the executor normalizes the corrected-but-unnormalized flat
+                # directly (no flat_dark/bias_flat, no normalization proof).
+                flat_options.append(("apply", "normalize_only", {"flat": f}))
             elif ff == "raw_response":
                 # R3D-C Standard: a raw flat is unsupported (flat-master
                 # construction from raw stacks is future/Advanced). Never

@@ -88,6 +88,12 @@ def inspect_frame(
 
     # FitsFrameSource
     effective_declaration = declaration if declaration is not None else source.declaration
+    if effective_declaration is None:
+        # R3D-E F1: a Standard light supplied as "Image to calibrate" carries no
+        # import declaration; build the standard_light_contract so the strict
+        # decoder's raw-domain evidence requirement is satisfied without
+        # weakening its processed-history/units/structural checks.
+        effective_declaration = _io.standard_light_contract()
     try:
         data = _io.read_bytes(source.path, cancel=token)
         whole_fits_sha256 = _io.sha256_bytes(data)

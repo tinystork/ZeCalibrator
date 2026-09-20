@@ -514,7 +514,16 @@ def test_known_incompatibility_blocks_at_route_level(tmp_path):
         ),
         v1.MasterImportSpec(
             path="flat.fits", master_type="flat", hdu=0,
-            declaration=v1.ImportDeclaration(**_SIRIL_BASE, gain=456.0, offset=50.0, exposure_s=10.0),
+            declaration=v1.ImportDeclaration(
+                **{
+                    **_SIRIL_BASE, "gain": 456.0, "offset": 50.0,
+                    "exposure_s": 10.0,
+                    # R3D-E F4: a prepared flat's gain/offset no longer block;
+                    # a CFA-phase contradiction is a genuine structural
+                    # incompatibility that STILL blocks at route level.
+                    "cfa_phase": "RGGB",
+                }
+            ),
             flat_form="corrected_unnormalized", dq_state="no_source_dq",
         ),
     ]
@@ -533,7 +542,10 @@ def test_known_incompatibility_blocks_at_route_level(tmp_path):
     assert resolution.outcome == OUTCOME_NEEDS_ATTENTION
     assert resolution.plan is None  # never a silent route
     codes = {r.code for r in resolution.reasons}
-    assert "GAIN_MISMATCH" in codes
+    assert "CFA_PHASE_MISMATCH" in codes
+    # F4: the flat's gain mismatch (456 vs 120) must NOT be the blocking reason
+    # for a prepared flat.
+    assert "GAIN_MISMATCH" not in codes
 
 
 # ---------------------------------------------------------------------------

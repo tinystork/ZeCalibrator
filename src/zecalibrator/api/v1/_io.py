@@ -21,6 +21,99 @@ from zecalibrator.core.precision import (
     measure_float32_roundoff,
 )
 
+# R3D-E F1: the Standard light import contract source string.
+STANDARD_LIGHT_CONTRACT_SOURCE = "standard_light_contract"
+
+
+def standard_light_contract():
+    """The Standard light import contract (R3D-E F1).
+
+    A raw 2-D sensor/CFA light supplied as "Image to calibrate" carries no
+    import declaration; the Standard application layer therefore builds this
+    minimal ``domain=raw``/``units=ADU`` declaration (source
+    ``standard_light_contract``) so the strict decoder's raw-domain evidence
+    requirement is satisfied WITHOUT weakening its processed-history / units /
+    structural checks. All acquisition/geometry facts still come from the FITS
+    header, never from this contract.
+    """
+    from zecalibrator.core.metadata import ImportDeclaration
+
+    return ImportDeclaration(
+        source=STANDARD_LIGHT_CONTRACT_SOURCE,
+        identity="standard-light",
+        version="1",
+        domain="raw",
+        units="ADU",
+    )
+
+
+def convert_normalized_real_master(decoded, *, role):
+    """Convert a producer-qualified ``normalized_real [0,1]`` master ×65535 at input.
+
+    R3D-E F2 (owner rule): the pixel storage domain is inferred ONLY from the
+    conjunction of three explicit facts, never from Siril stacking HISTORY
+    strings, never from ``BITPIX < 0`` alone, never from pixel statistics:
+
+    1. a recognized producer (``siril`` prefix / ``pixinsight`` substring in
+       ``PROGRAM``/``CREATOR``);
+    2. floating FITS storage (``BITPIX < 0``);
+    3. identity linear scale (``BSCALE == 1.0`` and ``BZERO == 0.0``; absent
+       cards already default to those values by the decoder).
+
+    Any conflicting/missing explicit evidence fails closed (no conversion).
+    PixInsight ``ImageIntegration.outputRangeHigh: 1.0`` is corroborating only
+    and is NOT required. The transform is a float32 multiply (no integer
+    round-trip / clipping / requantization) and is returned as an audit record
+    for provenance, never as a descriptor projection field.
+
+    Returns ``(decoded, record)`` where ``record`` is ``None`` when the master
+    is not producer-qualified normalized_real (no conversion performed).
+    """
+    from dataclasses import replace
+
+    from zecalibrator.core.metadata import (
+        NORMALIZED_REAL_REFERENCE,
+        is_normalized_real_master,
+    )
+
+    producer = is_normalized_real_master(decoded.metadata.original_cards)
+    if producer is None:
+        return decoded, None
+    if not _is_floating_storage(decoded):
+        return decoded, None
+    if float(decoded.bscale) != 1.0 or float(decoded.bzero) != 0.0:
+        return decoded, None
+
+    producer_evidence = _producer_evidence(decoded.metadata.original_cards)
+    data = decoded.data.astype(np.float32) * np.float32(NORMALIZED_REAL_REFERENCE)
+    converted = replace(decoded, data=np.ascontiguousarray(data))
+    record = {
+        "role": role,
+        "storage_domain": "normalized_real",
+        "producer": producer,
+        "producer_evidence": producer_evidence,
+        "from_domain": "normalized_real",
+        "to_domain": "adu_equivalent",
+        "scale": float(NORMALIZED_REAL_REFERENCE),
+        "scale_source": "producer_normalized_real_16bit_reference",
+    }
+    return converted, record
+
+
+def _is_floating_storage(decoded) -> bool:
+    """Return whether the decoded frame was stored as floating FITS (BITPIX<0)."""
+    dt = np.dtype(decoded.stored_dtype)
+    return dt.kind == "f"
+
+
+def _producer_evidence(cards):
+    """Return the actual PROGRAM/CREATOR string that identified the producer."""
+    for keyword in ("PROGRAM", "CREATOR"):
+        for c in cards:
+            if c.keyword.upper() == keyword:
+                return c.value
+    return None
+
 
 def sha256_bytes(data: bytes, *, cancel=None) -> str:
     if cancel is not None:

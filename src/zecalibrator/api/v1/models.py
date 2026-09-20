@@ -358,7 +358,7 @@ _PROVENANCE_TOP_KEYS = frozenset({
     "product_version", "decoder_version", "provenance_schema", "matching_policy",
     "science_contract", "backend", "request", "executed_processing", "scalars",
     "status", "reason_code", "warnings", "flat_saturation_screening",
-    "flat_scalars_origin",
+    "flat_scalars_origin", "master_domain_transforms",
 })
 
 
@@ -398,6 +398,7 @@ class ProvenanceRecord:
     roi_extent_evidence: Optional[RoiExtentEvidence] = None
     flat_saturation_screening: Optional[str] = None
     flat_scalars_origin: Optional[str] = None
+    master_domain_transforms: tuple = ()
 
     def __post_init__(self) -> None:
         if self.schema_version != PROVENANCE_SCHEMA:
@@ -407,6 +408,7 @@ class ProvenanceRecord:
         object.__setattr__(self, "executed_processing", tuple(self.executed_processing))
         object.__setattr__(self, "scalars", MappingProxyType(dict(self.scalars)))
         object.__setattr__(self, "warnings", tuple(self.warnings))
+        object.__setattr__(self, "master_domain_transforms", tuple(self.master_domain_transforms))
         if self.input_scaling is not None:
             object.__setattr__(self, "input_scaling", MappingProxyType(dict(self.input_scaling)))
 
@@ -436,6 +438,7 @@ class ProvenanceRecord:
             "status": self.status,
             "reason_code": self.reason_code,
             "warnings": list(self.warnings),
+            "master_domain_transforms": [dict(t) for t in self.master_domain_transforms],
         }
 
     @classmethod
@@ -471,6 +474,7 @@ class ProvenanceRecord:
             roi_extent_evidence=_roi_evidence_from_dict(d.get("roi_extent_evidence")),
             flat_saturation_screening=d.get("flat_saturation_screening"),
             flat_scalars_origin=d.get("flat_scalars_origin"),
+            master_domain_transforms=tuple(d.get("master_domain_transforms", ())),
             plan=plan,
             policy=policy,
             api_version=d["api_version"],

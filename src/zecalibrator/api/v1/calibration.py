@@ -117,6 +117,7 @@ def _wrap(
         roi_extent_evidence=facts.get("roi_extent_evidence"),
         flat_saturation_screening=flat_notes.get("flat_saturation_screening"),
         flat_scalars_origin=flat_notes.get("flat_scalars_origin"),
+        master_domain_transforms=flat_notes.get("master_domain_transforms", ()),
         plan=plan,
         policy=policy,
         api_version="1.0",
@@ -155,8 +156,13 @@ def _decode_light(source: FrameSource, *, token, obs):
 
     data = _io.read_bytes(source.path, cancel=token)
     whole_fits_sha256 = _io.sha256_bytes(data)
+    # R3D-E F1: a Standard light is supplied as "Image to calibrate" with no
+    # import declaration; build the standard_light_contract so the strict
+    # decoder's raw-domain evidence requirement is satisfied without weakening
+    # its processed-history/units/structural checks.
+    declaration = source.declaration if source.declaration is not None else _io.standard_light_contract()
     decoded = _io.decode_fits_from_bytes(
-        data, source.hdu, source.declaration, cancel=token, progress=None
+        data, source.hdu, declaration, cancel=token, progress=None
     )
     metadata = _io.apply_roi_extent(decoded.metadata, source.roi_extent, decoded.data.shape)
     decoded = replace(decoded, metadata=metadata)
@@ -234,8 +240,10 @@ def _flat_prep_mode(plan: CalibrationPlan) -> str:
         if "bias_flat" in plan.masters:
             return "bias_only_flat"
         raise InvalidRequestError("raw_response flat requires flat_dark or bias_flat dependency")
-    if ff in ("normalized_response", "corrected_unnormalized"):
+    if ff == "normalized_response":
         return "already_normalized"
+    if ff == "corrected_unnormalized":
+        return "normalize_only"
     raise InvalidRequestError(f"unsupported flat_form: {ff!r}")
 
 
@@ -380,6 +388,7 @@ def _load_masters(plan: CalibrationPlan, *, token, obs):
 
     masters: dict = {}
     flat_notes: dict = {}
+    domain_transforms: list = []
     for role, binding in plan.masters.items():
         token.raise_if_cancelled()
         try:
@@ -447,10 +456,18 @@ def _load_masters(plan: CalibrationPlan, *, token, obs):
             if external_mask.shape != decoded.data.shape:
                 raise ValueError(f"binding {role}: mask shape mismatch")
             decoded.mask.__ior__(external_mask)
-            norm = _normalize_corrected_flat(desc, decoded)
-            frame = _new_frame(norm.R, decoded.mask, _flat_metadata_from_descriptor(desc, "dimensionless"))
-            proof = _normalization_proof_from_norm(norm)
-            flat_form = "normalized_response"
+            # R3D-E F2: a producer-proven normalized_real [0,1] flat is lifted
+            # ×65535 at input to the canonical ADU-equivalent domain.
+            decoded, transform = _io.convert_normalized_real_master(decoded, role=desc.master_type)
+            if transform is not None:
+                domain_transforms.append(transform)
+            # R3D-E F3: the additive flat correction has ALREADY occurred. Keep
+            # flat_form="corrected_unnormalized" (no proof) and let the
+            # executor's ``normalize_only`` branch normalize the response
+            # directly — never re-subtract flat_dark/bias_flat here.
+            frame = decoded
+            proof = None
+            flat_form = "corrected_unnormalized"
             flat_notes["flat_saturation_screening"] = "unavailable"
             flat_notes["flat_scalars_origin"] = "executed"
         else:
@@ -465,6 +482,12 @@ def _load_masters(plan: CalibrationPlan, *, token, obs):
             if external_mask.shape != decoded.data.shape:
                 raise ValueError(f"binding {role}: mask shape mismatch")
             decoded.mask.__ior__(external_mask)
+            # R3D-E F2: producer-proven normalized_real [0,1] additive masters
+            # (dark/bias/flat_dark) are lifted ×65535 at input so the dark
+            # reaches the same canonical scale as the light before subtraction.
+            decoded, transform = _io.convert_normalized_real_master(decoded, role=desc.master_type)
+            if transform is not None:
+                domain_transforms.append(transform)
             frame = decoded
             proof = None
             flat_form = desc.flat_form
@@ -480,6 +503,7 @@ def _load_masters(plan: CalibrationPlan, *, token, obs):
             normalization_proof=proof,
             short_flat_profile=desc.short_flat_profile,
         )
+    flat_notes["master_domain_transforms"] = tuple(domain_transforms)
     return masters, flat_notes
 
 

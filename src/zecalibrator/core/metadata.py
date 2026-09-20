@@ -482,6 +482,39 @@ def history_cards(cards) -> tuple[CardRecord, ...]:
     return tuple(c for c in cards if _card_keyword(c) == "HISTORY")
 
 
+# The 16-bit reference used to lift a producer-proven ``normalized_real [0,1]``
+# master into the canonical signed-float32 ADU-equivalent domain (R3D-E F2).
+NORMALIZED_REAL_REFERENCE: float = 65535.0
+
+
+def is_normalized_real_master(cards: tuple[CardRecord, ...]) -> Optional[str]:
+    """Return the recognized producer name when a master's ``PROGRAM``/
+    ``CREATOR`` identifies a producer whose floating storage domain is
+    qualified ``normalized_real [0,1]`` (``"siril"`` or ``"pixinsight"``),
+    else ``None``.
+
+    R3D-E F2 (owner rule): this is **producer detection only** — never HISTORY
+    stacking strings (``normalized input`` / ``unnormalized input`` /
+    ``normalized output`` / ``unnormalized output``), which describe Siril
+    stacking normalization, not pixel storage domain. ``BITPIX < 0`` alone is
+    never sufficient; the caller (``convert_normalized_real_master``) must
+    additionally confirm floating storage + identity linear scale. Pixel
+    statistics are never consulted.
+
+    This is an *audit* classification; it never changes the strict decoder's
+    domain/labeling rules.
+    """
+    program = _first_card_value(cards, "PROGRAM")
+    creator = _first_card_value(cards, "CREATOR")
+    program_s = program.lower() if isinstance(program, str) else ""
+    creator_s = creator.lower() if isinstance(creator, str) else ""
+    if program_s.startswith("siril") or creator_s.startswith("siril"):
+        return "siril"
+    if "pixinsight" in program_s or "pixinsight" in creator_s:
+        return "pixinsight"
+    return None
+
+
 @dataclass(frozen=True)
 class CardRecord:
     """One original header card, in its original position.
@@ -985,6 +1018,7 @@ __all__ = [
     "CardRecord",
     "ConflictDiagnostic",
     "ImportDeclaration",
+    "NORMALIZED_REAL_REFERENCE",
     "NUMERIC_KEYWORDS",
     "SensorMetadata",
     "build_sensor_metadata",
@@ -992,6 +1026,7 @@ __all__ = [
     "detect_producer",
     "extract_acquisition_facts",
     "history_cards",
+    "is_normalized_real_master",
     "resolve_aliases",
     "resolve_aliases_with_provenance",
 ]

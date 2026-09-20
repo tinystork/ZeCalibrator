@@ -199,7 +199,7 @@ def test_flat_default_applied_not_rejected():
     )
     assert res.outcome == OUTCOME_READY
     assert res.route.flat_mode == "apply"
-    assert res.route.flat_prep_mode == "already_normalized"
+    assert res.route.flat_prep_mode == "normalize_only"
     assert "flat" in res.plan.masters
 
 

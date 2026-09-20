@@ -447,16 +447,22 @@ def _units_reason(desc: MasterDescriptor, expected_units: str) -> list[Reason]:
     return []
 
 
-def _acquisition_reasons(light: Acquisition, master: Acquisition, policy: MatchPolicy, *, standard_contract: bool = False) -> list[Reason]:
+def _acquisition_reasons(light: Acquisition, master: Acquisition, policy: MatchPolicy, *, standard_contract: bool = False, prepared_flat: bool = False) -> list[Reason]:
     reasons: list[Reason] = []
-    if standard_contract:
-        # R3D-C: missing gain/offset on a session-supplied master is UNVERIFIED
-        # (non-blocking); a known comparable mismatch stays blocking.
-        reasons += _standard_optional_reasons(light.gain, master.gain, "GAIN_MISMATCH", "acquisition.gain", numeric=True)
-        reasons += _standard_optional_reasons(light.offset, master.offset, "OFFSET_MISMATCH", "acquisition.offset", numeric=True)
-    else:
-        reasons += _numeric_reason(light.gain, master.gain, "GAIN_MISMATCH", "acquisition.gain")  # necessary
-        reasons += _numeric_reason(light.offset, master.offset, "OFFSET_MISMATCH", "acquisition.offset")  # necessary
+    if not prepared_flat:
+        # R3D-E F4: a prepared flat (corrected_unnormalized / normalized_response)
+        # is already the multiplicative response; its original gain/offset are
+        # irrelevant to the light and must not emit GAIN_MISMATCH/OFFSET_MISMATCH
+        # hard reasons. A raw_response flat keeps its additive-dependency
+        # compatibility unchanged (gain/offset still checked).
+        if standard_contract:
+            # R3D-C: missing gain/offset on a session-supplied master is UNVERIFIED
+            # (non-blocking); a known comparable mismatch stays blocking.
+            reasons += _standard_optional_reasons(light.gain, master.gain, "GAIN_MISMATCH", "acquisition.gain", numeric=True)
+            reasons += _standard_optional_reasons(light.offset, master.offset, "OFFSET_MISMATCH", "acquisition.offset", numeric=True)
+        else:
+            reasons += _numeric_reason(light.gain, master.gain, "GAIN_MISMATCH", "acquisition.gain")  # necessary
+            reasons += _numeric_reason(light.offset, master.offset, "OFFSET_MISMATCH", "acquisition.offset")  # necessary
     reasons += _disambiguator_reasons(light.readout_mode, master.readout_mode, "READOUT_MISMATCH", "acquisition.readout_mode")
     reasons += _disambiguator_reasons(light.adc_mode, master.adc_mode, "ADC_MISMATCH", "acquisition.adc_mode")
     return reasons
@@ -594,7 +600,14 @@ def _candidate_compatibility(
     reasons: list[Reason] = []
     reasons += _geometry_reasons(reference.geometry, desc.geometry, standard_contract=standard_contract)
     reasons += _detector_reasons(reference.detector, desc.detector)
-    reasons += _acquisition_reasons(reference.acquisition, desc.acquisition, policy, standard_contract=standard_contract)
+    prepared_flat = (
+        desc.master_type == "flat"
+        and desc.flat_form in ("corrected_unnormalized", "normalized_response")
+    )
+    reasons += _acquisition_reasons(
+        reference.acquisition, desc.acquisition, policy,
+        standard_contract=standard_contract, prepared_flat=prepared_flat,
+    )
 
     if check in (_CHECK_DARK_EXPOSURE, _CHECK_FLATDARK_EXPOSURE):
         reasons += _exposure_reason(reference_exposure, desc.acquisition.exposure_s, policy)

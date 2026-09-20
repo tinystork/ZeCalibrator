@@ -499,6 +499,25 @@ def _prepare_flat(
         flat_valid = np.isfinite(R) & (R > 0) & (R > RESPONSE_FLOOR) & ~finc_invalid
         return R, flat_valid, dict(proof.scalars), None
 
+    if flat_prep_mode == "normalize_only":
+        # R3D-E F3: the additive flat correction has ALREADY occurred (the flat
+        # is the corrected-but-unnormalized multiplicative response). Do NOT call
+        # ``flat_correction`` and do NOT consume ``flat_dark``/``bias_flat``;
+        # normalize the response directly, with no normalization proof required.
+        if flat_m.flat_form != "corrected_unnormalized":
+            raise InvalidRequestError(
+                "flat_prep_mode 'normalize_only' requires flat_form='corrected_unnormalized'"
+            )
+        norm = normalize_flat_response(
+            finc,
+            cfa_phase=cfa_phase,
+            roi_origin=geo.roi_origin or (0, 0),
+            saturation_samples=None,
+            saturation_limit=None,
+            fcorr_invalid=finc_invalid,
+        )
+        return norm.R, norm.valid, dict(norm.scalars), norm
+
     if flat_prep_mode == "flat_dark_incl_bias":
         if flat_m.flat_form not in ("raw_response", None):
             raise InvalidRequestError(
