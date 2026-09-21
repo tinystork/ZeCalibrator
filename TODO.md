@@ -406,6 +406,50 @@ Activation contract/report baseline records the actual post-closure full SHA.
 
 ## DEFERRED
 
+- P8-A4 follow-ups (deferred/informational by owner — no A4 rework): **O1** the
+  `DecodedLight` carrier is built even when a later stage fails (routing
+  `NO_MATCH`), costing exactly the acquisition inspection already paid; **O2**
+  array `facts` (`scaling_applied`/`domain`) and FITS `facts` (`{bscale,bzero}`)
+  keep their pre-A4 shapes (no diagnostic drift); **O3** with the carrier
+  supplied, the calibrate-side decode-failure mapping is unreachable on the batch
+  path by construction (standalone `calibrate_frame` unchanged); **O4** the
+  reprofile re-ranking.
+- P8 GPU-RESIDENT INTEGRATION FEASIBILITY (owner-recorded 2026-09-21 —
+  ARCHAEOLOGY/DESIGN ONLY, no implementation, no CuPy, no public API, no ZSSS or
+  ZeCalibrator change). Question: can ZeCalibrator expose a backend-neutral
+  calibration boundary letting an already-resident NumPy **or** CuPy raw frame
+  stay resident through calibration, with NumPy as the canonical scientific
+  reference? Two related areas:
+  **A — precision/validation cost contract**: for `_float64_reference`,
+  `measure_float32_error`, `_f32_checked`, `_master_mask` and the related
+  defensive copies/conversions, characterise the scientific requirement, the
+  provenance/diagnostic requirement, the mutation-safety requirement, whether it
+  must run per frame, whether it can be proven once or structurally, and whether
+  changing it would weaken an existing contract. **Do not optimise it yet.**
+  **B — ZSSS / GPU-resident boundary**: study the current public/private array
+  path and the actual ZSSS GPU frame representation; design a future public,
+  versioned integration API accepting CPU-resident NumPy and GPU-resident CuPy
+  raw frames with no mandatory CPU<->GPU round trips.
+  Requirements: ZeCalibrator independently installable; no dependency on ZSSS;
+  ZSSS consumes only a documented public contract; CPU/NumPy canonical
+  reference; CuPy optional; no silent CPU fallback when GPU execution is
+  explicitly requested; prepared masters/flat/masks transferable/preparable once
+  and reusable on device; the calibrated result may remain GPU-resident for
+  downstream ZSSS processing; DQ/mask/NaN/scalar/provenance semantics equivalent
+  to CPU; no FITS serialise/re-read boundary; no ZeAlfie dependency;
+  Windows/Linux/macOS CPU behaviour unchanged when CuPy is unavailable.
+  Distinguish explicitly: (1) standalone ZeCalibrator performance, (2) CPU
+  in-memory integration, (3) GPU-resident ZSSS integration — and estimate the
+  transfer/allocation boundaries for each. Return current data-flow diagrams,
+  proposed CPU and GPU-resident flows, the contract/API decisions that would
+  eventually be required, parity gates, dependency/packaging consequences,
+  expected transfer counts, which measured costs could disappear or move on GPU,
+  and whether a GPU backend is architecturally justified.
+  Context (owner): ZeCalibrator standalone almost certainly does not need the GPU;
+  ZeCalibrator as the scientific engine embedded in ZSSS could benefit greatly
+  precisely because the GPU is already there — this distinction avoids
+  complicating the application while preparing a real high-performance backend
+  where it makes sense.
 - P8-A3B follow-ups (deferred/informational by owner — no A3B rework): **O1**
   `_build_prepared_flat` captures only `InvalidRequestError`/`GeometryMismatchError`,
   so a genuinely unexpected exception type would surface at frame-1 context build
