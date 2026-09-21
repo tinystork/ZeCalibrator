@@ -406,6 +406,15 @@ Activation contract/report baseline records the actual post-closure full SHA.
 
 ## DEFERRED
 
+- P8-A2 Stage 1 follow-up (deferred by owner, cosmetic): in
+  `api/v1/calibration.py::_calibrate_frame_impl` the `load_masters` progress
+  event is emitted *before* `_flat_prep_mode(plan)` is evaluated, so a plan with
+  an unsupported flat form emits one extra (harmless) `load_masters` event
+  before the propagating `InvalidRequestError`. Error path only; failure
+  precedence and `executed_processing` are unchanged. Do **not** modify the
+  accepted Stage 1 commit for this; fold into a future UX/cleanup pass (fix is a
+  one-line hoist of the emit after the `_flat_prep_mode` call). Recorded from the
+  Nono review-0 observation O-new-1 of mission `ZC-P8A2-PREPARED-CONTEXT-STAGE1-20260921`.
 - Native packaging G8 (G7 now separately activated; see current mission).
   G3/G4/G5/G6 are ACCEPTED.
 - GUI `Settings > Language` selector — future separate micro-phase only (the
