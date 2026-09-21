@@ -1620,7 +1620,7 @@ class MainWindow(QtWidgets.QMainWindow):
         status = summary.get("status")
         # Truthful counters (F6).
         items = summary.get("items", [])
-        committed = sum(1 for i in items if i["disposition"] == "COMPLETED")
+        committed = sum(1 for i in items if i["disposition"] in ("COMPLETED", "COMPLETED_WITH_WARNINGS"))
         warnings = sum(1 for i in items if i["disposition"] == "COMPLETED_WITH_WARNINGS")
         skipped = sum(1 for i in items if i["disposition"] == "SKIPPED")
         failed = sum(1 for i in items if i["disposition"] == "FAILED")

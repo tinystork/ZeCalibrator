@@ -241,6 +241,65 @@ def test_export_scope_selected_vs_all(qapp, paths, tmp_path):
         _close(w)
 
 
+def test_export_summary_counts_warnings_as_committed(qapp, paths):
+    """R3D-H: a COMPLETED_WITH_WARNINGS item is both committed AND a warning.
+
+    A successfully committed output that carries warnings must never be
+    reported as committed=0 (the pre-R3D-H accounting dropped it from the
+    committed count)."""
+    w = MainWindow(paths)
+    try:
+        summary = {
+            "status": "COMPLETED_WITH_WARNINGS",
+            "total_inputs": 10,
+            "input_displays": [f"light{i}" for i in range(10)],
+            "items": [
+                {"index": i, "disposition": "COMPLETED_WITH_WARNINGS",
+                 "plan_id": f"plan-{i}", "reason_code": None}
+                for i in range(10)
+            ],
+        }
+        w._handle_export_finished(summary)
+        text = w.status_label.text()
+        assert "committed=10" in text
+        assert "warnings=10" in text
+        assert "skipped=0" in text
+        assert "failed=0" in text
+        assert "not-started=0" in text
+    finally:
+        _close(w)
+
+
+def test_export_summary_mixed_dispositions_truthful(qapp, paths):
+    """R3D-H: mixed dispositions count committed=COMPLETED+CWW, warnings=CWW."""
+    w = MainWindow(paths)
+    try:
+        items = [
+            {"index": 0, "disposition": "COMPLETED", "plan_id": "p0", "reason_code": None},
+            {"index": 1, "disposition": "COMPLETED", "plan_id": "p1", "reason_code": None},
+            {"index": 2, "disposition": "COMPLETED_WITH_WARNINGS", "plan_id": "p2", "reason_code": None},
+            {"index": 3, "disposition": "COMPLETED_WITH_WARNINGS", "plan_id": "p3", "reason_code": None},
+            {"index": 4, "disposition": "COMPLETED_WITH_WARNINGS", "plan_id": "p4", "reason_code": None},
+            {"index": 5, "disposition": "FAILED", "plan_id": None, "reason_code": "X"},
+            {"index": 6, "disposition": "SKIPPED", "plan_id": None, "reason_code": None},
+        ]
+        summary = {
+            "status": "COMPLETED_WITH_WARNINGS",
+            "total_inputs": 7,
+            "input_displays": [f"light{i}" for i in range(7)],
+            "items": items,
+        }
+        w._handle_export_finished(summary)
+        text = w.status_label.text()
+        assert "committed=5" in text
+        assert "warnings=3" in text
+        assert "skipped=1" in text
+        assert "failed=1" in text
+        assert "not-started=0" in text
+    finally:
+        _close(w)
+
+
 def test_corrupt_settings_preserved_on_close(qapp, tmp_path):
     """F5: an unsupported-schema settings file is preserved, not overwritten."""
     from zecalibrator.gui.settings import settings_path
