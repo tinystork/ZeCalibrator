@@ -518,6 +518,23 @@ class PreparedFlatOutcome:
 
 
 @dataclass(frozen=True)
+class PreparedMasterForm:
+    """Plan-invariant frozen prepared master form (P8-A1).
+
+    ``frame_f32`` is the master's native contiguous float32 plane and
+    ``mask_u16`` its validated uint16 DQ mask (reserved bits proven zero), both
+    frozen (``writeable=False``) before the form enters the context.
+    ``invariants_proven`` records that float32 storage / overflow impossibility /
+    reserved-bit validity were each established exactly once at preparation.
+    """
+
+    role: str
+    frame_f32: np.ndarray
+    mask_u16: np.ndarray
+    invariants_proven: bool = True
+
+
+@dataclass(frozen=True)
 class PreparedCalibrationContext:
     """Plan-invariant master-side work, prepared once and applied per frame.
 
@@ -533,6 +550,7 @@ class PreparedCalibrationContext:
     flat_notes: Mapping[str, object]
     context_id: str
     prepared_flat: Optional[PreparedFlatOutcome] = None
+    master_forms: Mapping[str, PreparedMasterForm] = MappingProxyType({})
 
 
 class _PreparedContextSlot:
@@ -678,6 +696,44 @@ def _build_prepared_flat(plan, flat_prep_mode, masters):
     )
 
 
+def _build_prepared_master_forms(masters):
+    """Build frozen prepared master forms for the additive master roles once.
+
+    P8-A1: masters are float32 by contract (``DecodedFrame.data`` is a signed
+    native contiguous float32 plane) and their masks are already uint16; this
+    records the per-master invariants exactly once — float32 storage (overflow
+    structurally impossible) and reserved-bit validity (``validate_mask`` passes
+    once) — and freezes both before they enter the context. A non-float32 master
+    is refused here (fail loudly, never silently converted). Only the additive
+    roles ``bias``/``dark`` are consumed per frame by ``calibrate_light``; the
+    flat is handled separately by ``PreparedFlatOutcome`` (A3B).
+    """
+    from zecalibrator.core.dq import validate_mask
+
+    forms: dict = {}
+    for role in ("bias", "dark"):
+        binding = masters.get(role)
+        if binding is None:
+            continue
+        frame = binding.frame
+        # The prepared fast path is only sound because the master is already
+        # float32 (exact round-trip, overflow structurally impossible). Enforce
+        # that invariant instead of silently converting an unexpected dtype.
+        if frame.data.dtype != np.float32:
+            raise ValueError(
+                f"prepared master {role!r} data must already be float32 "
+                f"(DecodedFrame.data contract), got {frame.data.dtype!r}"
+            )
+        frame_f32 = np.asarray(frame.data, dtype=np.float32)
+        mask_u16 = validate_mask(frame.mask)
+        frame_f32.flags.writeable = False
+        mask_u16.flags.writeable = False
+        forms[role] = PreparedMasterForm(
+            role=role, frame_f32=frame_f32, mask_u16=mask_u16, invariants_proven=True,
+        )
+    return MappingProxyType(forms)
+
+
 def _prepare_calibration_context(plan: CalibrationPlan, *, token):
     """Prepare the plan-invariant master-side work exactly once.
 
@@ -708,6 +764,7 @@ def _prepare_calibration_context(plan: CalibrationPlan, *, token):
     bindings = MappingProxyType(
         {role: _freeze_master(master, plan.masters[role]) for role, master in masters.items()}
     )
+    master_forms = _build_prepared_master_forms(masters)
     context = PreparedCalibrationContext(
         plan=plan,
         flat_prep_mode=flat_prep_mode,
@@ -715,6 +772,7 @@ def _prepare_calibration_context(plan: CalibrationPlan, *, token):
         flat_notes=MappingProxyType(dict(flat_notes)),
         context_id=_context_id(plan, flat_prep_mode, bindings),
         prepared_flat=prepared_flat,
+        master_forms=master_forms,
     )
     return context, None
 
@@ -834,6 +892,7 @@ def _execute_prepared(light, context, plan, input_identity, facts, *, token, obs
             progress=None,  # facade owns the monotonic coordinator
             operation_id=OPERATION_ID,
             prepared_flat_outcome=context.prepared_flat,
+            prepared_master_forms=context.master_forms,
         )
     except OperationCancelled:
         return _wrap(

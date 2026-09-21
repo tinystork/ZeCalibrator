@@ -407,6 +407,7 @@ def execute_calibration(
     progress: Optional[ProgressObserver] = None,
     operation_id: str = "zecalibrator-calibration",
     prepared_flat_outcome: object = None,
+    prepared_master_forms: object = None,
 ) -> CalibrationResult:
     """Execute one bounded frame calibration with no partial mutation.
 
@@ -419,6 +420,15 @@ def execute_calibration(
     it instead of re-running ``_prepare_flat`` per frame. It is opaque to this
     module (duck-typed); ``None`` (the default) preserves today's per-frame
     ``_prepare_flat`` path exactly.
+
+    ``prepared_master_forms`` is an additive private seam (P8-A1): when the
+    caller supplies a plan-invariant mapping of role → frozen prepared master
+    form (float32 frame + validated uint16 mask + proven invariants),
+    ``_execute`` reuses those frozen forms instead of re-running the per-frame
+    ``.astype(np.float32)`` copies and per-master reserved-bit validation, and
+    hands ``masters_prevalidated=True`` to ``calibrate_light``. It is opaque to
+    this module (duck-typed); ``None`` (the default) preserves today's per-frame
+    checked path exactly. Per-frame shape checks stay.
     """
     if request.additive_mode not in ("control", "bias_only", "dark_incl_bias", "dark_bias_removed"):
         raise InvalidRequestError(f"unsupported additive_mode: {request.additive_mode!r}")
@@ -437,6 +447,7 @@ def execute_calibration(
         return _execute(
             light, request, masters, flat_prep_mode=flat_prep_mode, token=token, emit=emit,
             prepared_flat_outcome=prepared_flat_outcome,
+            prepared_master_forms=prepared_master_forms,
         )
     except OperationCancelled:
         return _cancelled_result()
@@ -615,7 +626,8 @@ def _prepare_flat(
 
 
 def _execute(
-    light, request, masters, *, flat_prep_mode, token, emit, prepared_flat_outcome=None
+    light, request, masters, *, flat_prep_mode, token, emit, prepared_flat_outcome=None,
+    prepared_master_forms=None,
 ) -> CalibrationResult:
     token.raise_if_cancelled()
     emit("geometry_validation", 0, 3)
@@ -657,16 +669,34 @@ def _execute(
     emit("additive_division", 2, 3)
 
     additive_kwargs: dict = {}
-    if "bias" in bound:
-        additive_kwargs["bias"] = bound["bias"].frame.data.astype(np.float32)
-        additive_kwargs["bias_mask"] = bound["bias"].frame.mask
-    if "dark" in bound:
-        if request.additive_mode == "dark_incl_bias":
-            additive_kwargs["dark_inc"] = bound["dark"].frame.data.astype(np.float32)
-            additive_kwargs["dark_inc_mask"] = bound["dark"].frame.mask
-        elif request.additive_mode == "dark_bias_removed":
-            additive_kwargs["dark_removed"] = bound["dark"].frame.data.astype(np.float32)
-            additive_kwargs["dark_removed_mask"] = bound["dark"].frame.mask
+    masters_prevalidated = prepared_master_forms is not None
+    if masters_prevalidated:
+        # P8-A1: reuse the plan-invariant frozen prepared master forms instead of
+        # the per-frame ``.astype(np.float32)`` copies and per-master mask
+        # validation. Shape checks remain inside ``calibrate_light``.
+        if "bias" in bound:
+            form = prepared_master_forms["bias"]
+            additive_kwargs["bias"] = form.frame_f32
+            additive_kwargs["bias_mask"] = form.mask_u16
+        if "dark" in bound:
+            form = prepared_master_forms["dark"]
+            if request.additive_mode == "dark_incl_bias":
+                additive_kwargs["dark_inc"] = form.frame_f32
+                additive_kwargs["dark_inc_mask"] = form.mask_u16
+            elif request.additive_mode == "dark_bias_removed":
+                additive_kwargs["dark_removed"] = form.frame_f32
+                additive_kwargs["dark_removed_mask"] = form.mask_u16
+    else:
+        if "bias" in bound:
+            additive_kwargs["bias"] = bound["bias"].frame.data.astype(np.float32)
+            additive_kwargs["bias_mask"] = bound["bias"].frame.mask
+        if "dark" in bound:
+            if request.additive_mode == "dark_incl_bias":
+                additive_kwargs["dark_inc"] = bound["dark"].frame.data.astype(np.float32)
+                additive_kwargs["dark_inc_mask"] = bound["dark"].frame.mask
+            elif request.additive_mode == "dark_bias_removed":
+                additive_kwargs["dark_removed"] = bound["dark"].frame.data.astype(np.float32)
+                additive_kwargs["dark_removed_mask"] = bound["dark"].frame.mask
 
     result = calibrate_light(
         light.data.astype(np.float32),
@@ -676,6 +706,7 @@ def _execute(
         flat_response=flat_response,
         flat_valid=flat_valid,
         saturation_limit=_qualified_saturation(light_md),
+        masters_prevalidated=masters_prevalidated,
         **additive_kwargs,
     )
 

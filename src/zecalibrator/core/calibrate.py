@@ -88,6 +88,24 @@ def _master_mask(mask: Optional[np.ndarray], shape: tuple[int, int], name: str) 
     return m
 
 
+def _reuse_prevalidated_mask(
+    mask: Optional[np.ndarray], shape: tuple[int, int], name: str
+) -> np.ndarray:
+    """Reuse a prepared (already validated) uint16 master mask.
+
+    The prepared fast path supplies a frozen uint16 mask whose reserved bits were
+    proven zero exactly once at preparation. Only the per-frame shape check is
+    repeated (it depends on the light); the per-master ``validate_mask`` work is
+    skipped — a proven invariant, never a silent relaxation.
+    """
+    if mask is None:
+        return np.zeros(shape, dtype=np.uint16)
+    m = np.asarray(mask)
+    if m.shape != shape:
+        raise InvalidRequestError(f"{name} mask shape {m.shape} vs {shape}")
+    return m
+
+
 def _require_masters(additive_mode: str, kwargs: dict) -> None:
     required = {
         "control": (),
@@ -146,6 +164,7 @@ def calibrate_light(
     flat_valid: Optional[np.ndarray] = None,
     saturation_limit: Optional[float] = None,
     floor: float = DEFAULT_FLOOR,
+    masters_prevalidated: bool = False,
 ) -> CalibrationResult:
     """Calibrate a decoded light plane and return a structured result.
 
@@ -154,6 +173,20 @@ def calibrate_light(
     ``flat_mode == "apply"``, ``flat_response`` is an already-normalized
     dimensionless response and ``flat_valid`` a boolean validity mask; the
     ``R > floor`` division floor is enforced here too (never clamped).
+
+    ``masters_prevalidated`` is a PRIVATE, opt-in fast path for the prepared
+    batch context. When ``True``, the caller has proven (at preparation, on
+    frozen read-only objects) that the supplied additive master arrays and the
+    prepared flat response are already float32 — so their float32→float64→
+    float32 round-trip is exact and their overflow flags are structurally
+    ``False`` — and that the master masks are already validated uint16 masks
+    with reserved bits zero. The conversion and overflow detection for those
+    plan-invariant objects is therefore skipped, and their overflow
+    contributions are treated as ``False``, only because the caller proved them
+    unreachable (a documented precondition, never a silent relaxation). The
+    light-side conversion/validation, the light mask validation, and every
+    shape check remain per frame. The default ``False`` reproduces the checked
+    path byte-identically for arbitrary/direct callers.
     """
     if flat_mode not in ("none", "apply"):
         raise InvalidRequestError(f"unsupported flat_mode: {flat_mode!r}")
@@ -166,28 +199,43 @@ def calibrate_light(
     in_mask = _master_mask(input_mask, shape, "input")
 
     # Convert masters to float32 (frame arithmetic) with overflow detection.
+    # ``masters_prevalidated`` (private prepared fast path) reuses the caller's
+    # frozen float32 master arrays directly and treats their overflow flags as
+    # ``False`` — the float32→float64→float32 round-trip is exact and overflow
+    # is structurally impossible for float32 storage, so this is a proven
+    # unreachable contribution, never a silent relaxation.
     m_bias = m_bias_of = m_dinc = m_dinc_of = m_drem = m_drem_of = None
     if bias is not None:
-        m_bias, m_bias_of = _f32_checked(bias, "bias")
+        if masters_prevalidated:
+            m_bias, m_bias_of = bias, False
+        else:
+            m_bias, m_bias_of = _f32_checked(bias, "bias")
     if dark_inc is not None:
-        m_dinc, m_dinc_of = _f32_checked(dark_inc, "dark_inc")
+        if masters_prevalidated:
+            m_dinc, m_dinc_of = dark_inc, False
+        else:
+            m_dinc, m_dinc_of = _f32_checked(dark_inc, "dark_inc")
     if dark_removed is not None:
-        m_drem, m_drem_of = _f32_checked(dark_removed, "dark_removed")
+        if masters_prevalidated:
+            m_drem, m_drem_of = dark_removed, False
+        else:
+            m_drem, m_drem_of = _f32_checked(dark_removed, "dark_removed")
 
     A = additive_numerator(
         L, additive_mode, bias=m_bias, dark_inc=m_dinc, dark_removed=m_drem
     )
 
+    mask_fn = _reuse_prevalidated_mask if masters_prevalidated else _master_mask
     additive_invalid = np.zeros(shape, dtype=bool)
     if additive_mode == "bias_only":
-        additive_invalid |= _master_mask(bias_mask, shape, "bias") != 0
+        additive_invalid |= mask_fn(bias_mask, shape, "bias") != 0
         additive_invalid |= m_bias_of
     elif additive_mode == "dark_incl_bias":
-        additive_invalid |= _master_mask(dark_inc_mask, shape, "dark_inc") != 0
+        additive_invalid |= mask_fn(dark_inc_mask, shape, "dark_inc") != 0
         additive_invalid |= m_dinc_of
     elif additive_mode == "dark_bias_removed":
-        additive_invalid |= _master_mask(bias_mask, shape, "bias") != 0
-        additive_invalid |= _master_mask(dark_removed_mask, shape, "dark_removed") != 0
+        additive_invalid |= mask_fn(bias_mask, shape, "bias") != 0
+        additive_invalid |= mask_fn(dark_removed_mask, shape, "dark_removed") != 0
         additive_invalid |= m_bias_of | m_drem_of
 
     flat_invalid = np.zeros(shape, dtype=bool)
@@ -195,9 +243,15 @@ def calibrate_light(
     if flat_mode == "apply":
         if flat_response is None:
             raise InvalidRequestError("flat_mode 'apply' requires flat_response")
-        R, r_overflow = _f32_checked(flat_response, "flat_response")
-        if R.shape != shape:
-            raise InvalidRequestError(f"flat response shape {R.shape} vs {shape}")
+        if masters_prevalidated:
+            R = np.asarray(flat_response)
+            if R.shape != shape:
+                raise InvalidRequestError(f"flat response shape {R.shape} vs {shape}")
+            r_overflow = False
+        else:
+            R, r_overflow = _f32_checked(flat_response, "flat_response")
+            if R.shape != shape:
+                raise InvalidRequestError(f"flat response shape {R.shape} vs {shape}")
         # The frozen R > floor division floor applies to supplied responses too.
         flat_invalid = ~(np.isfinite(R) & (R > np.float32(floor)))
         flat_invalid |= r_overflow
