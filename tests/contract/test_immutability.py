@@ -140,13 +140,13 @@ def test_calibration_result_scalars_immutable(make_frame_fixture):
         result.scalars["mono"] = 1.0
 
 
-def test_unknown_roi_does_not_match_unknown(make_frame_fixture):
+def test_unknown_bayer_roi_origin_unverified_not_fatal(make_frame_fixture):
     make_frame = make_frame_fixture
-    # R3B: roi_origin is CFA-conditional — unknown roi_origin still rejects for a
-    # Bayer sensor (parity phase unknown), but is a disambiguator for mono.
+    # R3D-G: roi_origin is Standard-contract optional for a Bayer sensor —
+    # missing on both sides is UNVERIFIED (the planner already arbitrated it),
+    # no longer a fatal MISSING_REQUIRED_FIELD at execution.
     light = make_frame((2, 2), roi_origin=None, cfa_phase="GRBG")
     dark = make_frame((2, 2), roi_origin=None, cfa_phase="GRBG")
     masters = {"dark": MasterBinding(role="dark", frame=dark, bias_state="included")}
-    with pytest.raises(GeometryMismatchError) as exc:
-        execute_calibration(light, CalibrationRequest(additive_mode="dark_incl_bias"), masters)
-    assert "MISSING_REQUIRED_FIELD" in exc.value.reason_code or "ROI" in exc.value.reason_code
+    r = execute_calibration(light, CalibrationRequest(additive_mode="dark_incl_bias"), masters)
+    assert r.status == "COMPLETED"

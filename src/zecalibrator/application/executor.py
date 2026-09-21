@@ -112,11 +112,11 @@ def _is_finite(v) -> bool:
         return False
 
 
-def _field_reason(light_val, master_val, mismatch_code: str) -> Optional[str]:
+def _field_reason(light_val, master_val, mismatch_code: str, field: str) -> Optional[str]:
     if light_val is None or master_val is None:
         return "MISSING_REQUIRED_FIELD"
     if light_val != master_val:
-        return mismatch_code
+        return f"{mismatch_code}: {field}"
     return None
 
 
@@ -130,7 +130,7 @@ def _unknown_instance_val(v) -> bool:
     return isinstance(v, str) and v.strip() == "unknown"
 
 
-def _disambiguator_field_reason(light_val, master_val, mismatch_code: str, *, unknown=_unknown_val) -> Optional[str]:
+def _disambiguator_field_reason(light_val, master_val, mismatch_code: str, field: str, *, unknown=_unknown_val) -> Optional[str]:
     """Disambiguator-tier reason (R3B mirror of the matcher).
 
     Both-unknown is a non-blocking UNVERIFIED note (returns ``None`` — no
@@ -144,51 +144,59 @@ def _disambiguator_field_reason(light_val, master_val, mismatch_code: str, *, un
     if lu or mu:
         return "MISSING_REQUIRED_FIELD"
     if light_val != master_val:
-        return mismatch_code
+        return f"{mismatch_code}: {field}"
     return None
 
 
-def _conditional_field_reason(light_val, master_val, mismatch_code: str, *, necessary: bool, unknown=_unknown_val) -> Optional[str]:
-    """CFA-conditional tier: necessary for a Bayer sensor, disambiguator otherwise."""
+def _conditional_field_reason(light_val, master_val, mismatch_code: str, field: str, *, necessary: bool, unknown=_unknown_val) -> Optional[str]:
+    """CFA-conditional tier: Standard-optional for a Bayer sensor (R3D-G
+    executor parity), disambiguator otherwise.
+
+    For a Bayer sensor, ``orientation``/``roi_origin`` are no longer fatal when
+    missing (the Standard matcher already arbitrated that unknown as UNVERIFIED);
+    only a known both-sides contradiction stays fatal. For a non-Bayer sensor
+    they remain disambiguators.
+    """
     if necessary:
         if unknown(light_val) or unknown(master_val):
-            return "MISSING_REQUIRED_FIELD"
+            return None
         if light_val != master_val:
-            return mismatch_code
+            return f"{mismatch_code}: {field}"
         return None
-    return _disambiguator_field_reason(light_val, master_val, mismatch_code, unknown=unknown)
+    return _disambiguator_field_reason(light_val, master_val, mismatch_code, field, unknown=unknown)
 
 
 def _tiered_geometry_reasons(lg, mg) -> tuple[str, ...]:
-    """Tiered geometry reasons (R3B): necessary / disambiguator / conditional."""
+    """Tiered geometry reasons: necessary / disambiguator / Standard-optional."""
     reasons: list[str] = []
     if lg.shape != mg.shape:
-        reasons.append("GEOMETRY_MISMATCH")
+        reasons.append("GEOMETRY_MISMATCH: geometry.shape")
 
     # binning — necessary.
     if lg.binning is None or mg.binning is None:
-        reasons.append("MISSING_REQUIRED_FIELD")
+        reasons.append("MISSING_REQUIRED_FIELD: geometry.binning")
     elif lg.binning != mg.binning:
-        reasons.append("BINNING_MISMATCH")
-        reasons.append("GEOMETRY_MISMATCH")
+        reasons.append("BINNING_MISMATCH: geometry.binning")
+        reasons.append("GEOMETRY_MISMATCH: geometry.binning")
 
     # sensor_dimensions — disambiguator.
-    reasons.append(_disambiguator_field_reason(lg.sensor_dimensions, mg.sensor_dimensions, "GEOMETRY_MISMATCH"))
+    reasons.append(_disambiguator_field_reason(lg.sensor_dimensions, mg.sensor_dimensions, "GEOMETRY_MISMATCH", "geometry.sensor_dimensions"))
 
     cfa_applies = is_bayer_phase(lg.cfa_phase) or is_bayer_phase(mg.cfa_phase)
 
-    # orientation — conditional.
-    reasons.append(_conditional_field_reason(lg.orientation, mg.orientation, "GEOMETRY_MISMATCH", necessary=cfa_applies))
+    # orientation — Standard-optional for Bayer (missing no longer fatal),
+    # disambiguator otherwise.
+    reasons.append(_conditional_field_reason(lg.orientation, mg.orientation, "GEOMETRY_MISMATCH", "geometry.orientation", necessary=cfa_applies))
 
-    # roi_origin — conditional (CFA also flips the parity phase on mismatch).
+    # roi_origin — Standard-optional for Bayer (missing no longer fatal; a
+    # known both-sides difference flips the CFA parity phase), disambiguator
+    # otherwise.
     if cfa_applies:
-        if lg.roi_origin is None or mg.roi_origin is None:
-            reasons.append("MISSING_REQUIRED_FIELD")
-        elif lg.roi_origin != mg.roi_origin:
-            reasons.append("ROI_ORIGIN_MISMATCH")
-            reasons.append("CFA_PHASE_MISMATCH")
+        if lg.roi_origin is not None and mg.roi_origin is not None and lg.roi_origin != mg.roi_origin:
+            reasons.append("ROI_ORIGIN_MISMATCH: geometry.roi_origin")
+            reasons.append("CFA_PHASE_MISMATCH: geometry.roi_origin")
     else:
-        reasons.append(_disambiguator_field_reason(lg.roi_origin, mg.roi_origin, "ROI_ORIGIN_MISMATCH"))
+        reasons.append(_disambiguator_field_reason(lg.roi_origin, mg.roi_origin, "ROI_ORIGIN_MISMATCH", "geometry.roi_origin"))
 
     # roi_extent — optional (redundant with shape): checked only when both
     # known. The executor's master metadata never carries roi_extent (the
@@ -197,48 +205,52 @@ def _tiered_geometry_reasons(lg, mg) -> tuple[str, ...]:
     # matcher already accepted).
     if lg.roi_extent is not None and mg.roi_extent is not None:
         if lg.roi_extent != mg.roi_extent:
-            reasons.append("GEOMETRY_MISMATCH")
+            reasons.append("GEOMETRY_MISMATCH: geometry.roi_extent")
 
     # cfa_phase — necessary.
     if lg.cfa_phase is None or mg.cfa_phase is None:
-        reasons.append("MISSING_REQUIRED_FIELD")
+        reasons.append("MISSING_REQUIRED_FIELD: geometry.cfa_phase")
     elif lg.cfa_phase != mg.cfa_phase:
-        reasons.append("CFA_PHASE_MISMATCH")
+        reasons.append("CFA_PHASE_MISMATCH: geometry.cfa_phase")
 
     return _reasons(*reasons)
 
 
-def _numeric_field_reason(light_val, master_val, mismatch_code: str) -> Optional[str]:
+def _numeric_field_reason(light_val, master_val, mismatch_code: str, field: str) -> Optional[str]:
+    """Standard-optional numeric tier (R3D-G): gain/offset missing on either
+    side is UNVERIFIED (no reason); only a known both-sides difference is fatal."""
     if light_val is None or master_val is None:
-        return "MISSING_REQUIRED_FIELD"
+        return None
     if not _is_finite(light_val) or not _is_finite(master_val):
-        return "MISSING_REQUIRED_FIELD"
-    if light_val != master_val:
-        return mismatch_code
+        return None
+    if float(light_val) != float(master_val):
+        return f"{mismatch_code}: {field}"
     return None
 
 
 def _temp_reason(lt: Optional[float], mt: Optional[float]) -> Optional[str]:
+    """Standard-optional temperature tier (R3D-G): missing on either side is
+    UNVERIFIED (no reason); only a known both-sides out-of-tolerance is fatal."""
     if lt is None or mt is None:
-        return "MISSING_REQUIRED_FIELD"
+        return None
     if not _is_finite(lt) or not _is_finite(mt):
-        return "MISSING_REQUIRED_FIELD"
+        return None
     if abs(float(lt) - float(mt)) > TEMP_PARSER_TOLERANCE_C:
-        return "TEMPERATURE_MISMATCH"
+        return "TEMPERATURE_MISMATCH: acquisition.temperature_c"
     return None
 
 
 def _exposure_reason(reference: Optional[float], master: Optional[float]) -> Optional[str]:
     if reference is None or master is None:
-        return "MISSING_REQUIRED_FIELD"
+        return "MISSING_REQUIRED_FIELD: acquisition.exposure_s"
     if not _is_finite(reference) or not _is_finite(master):
-        return "MISSING_REQUIRED_FIELD"
+        return "MISSING_REQUIRED_FIELD: acquisition.exposure_s"
     t1, t2 = float(reference), float(master)
     if t1 < 0 or t2 < 0:
-        return "MISSING_REQUIRED_FIELD"  # negative exposure domain
+        return "MISSING_REQUIRED_FIELD: acquisition.exposure_s"  # negative exposure domain
     tol = max(EXPOSURE_TOLERANCE_ABS, EXPOSURE_TOLERANCE_REL * max(abs(t1), abs(t2)))
     if abs(t1 - t2) > tol:
-        return "EXPOSURE_MISMATCH"
+        return "EXPOSURE_MISMATCH: acquisition.exposure_s"
     return None
 
 
@@ -284,34 +296,47 @@ def _validate_compatibility(
     check_filter: bool = False,
     check_optical: bool = False,
     expected_units: str = "ADU",
+    prepared_flat: bool = False,
 ) -> tuple[str, ...]:
     m = master.frame.metadata
     reasons: list[str] = []
 
     reasons += _tiered_geometry_reasons(light.geometry, m.geometry)
-    reasons.append(_disambiguator_field_reason(light.detector_instance_id, m.detector_instance_id, "DETECTOR_MISMATCH", unknown=_unknown_instance_val))
-    reasons.append(_field_reason(light.detector_model, m.detector_model, "DETECTOR_MISMATCH"))
-    reasons.append(_numeric_field_reason(light.gain, m.gain, "GAIN_MISMATCH"))
-    reasons.append(_numeric_field_reason(light.offset, m.offset, "OFFSET_MISMATCH"))
-    reasons.append(_disambiguator_field_reason(light.readout_mode, m.readout_mode, "READOUT_MISMATCH"))
-    reasons.append(_disambiguator_field_reason(light.adc_mode, m.adc_mode, "ADC_MISMATCH"))
+    reasons.append(_disambiguator_field_reason(light.detector_instance_id, m.detector_instance_id, "DETECTOR_MISMATCH", "detector.detector_instance_id", unknown=_unknown_instance_val))
+    reasons.append(_field_reason(light.detector_model, m.detector_model, "DETECTOR_MISMATCH", "detector.detector_model"))
+
+    # R3D-E F4 / R3D-G: a prepared flat (corrected_unnormalized /
+    # normalized_response) is already the multiplicative response; its original
+    # gain/offset are irrelevant to the light and must not emit
+    # GAIN_MISMATCH/OFFSET_MISMATCH. A raw_response flat (and every other role)
+    # keeps the gain/offset comparison (Standard-optional, both-known-different
+    # stays fatal).
+    if not prepared_flat:
+        reasons.append(_numeric_field_reason(light.gain, m.gain, "GAIN_MISMATCH", "acquisition.gain"))
+        reasons.append(_numeric_field_reason(light.offset, m.offset, "OFFSET_MISMATCH", "acquisition.offset"))
+
+    reasons.append(_disambiguator_field_reason(light.readout_mode, m.readout_mode, "READOUT_MISMATCH", "acquisition.readout_mode"))
+    reasons.append(_disambiguator_field_reason(light.adc_mode, m.adc_mode, "ADC_MISMATCH", "acquisition.adc_mode"))
 
     # Units: the light is always sensor-ADU (validated separately); the master
     # must match the role-specific expectation (ADU for sensor masters,
     # dimensionless for a normalized_response flat).
     if m.units != expected_units:
-        reasons.append("MISSING_REQUIRED_FIELD")
+        reasons.append("MISSING_REQUIRED_FIELD: physical_units")
 
     # Temperature is relation-scoped like exposure (dark/flat_dark only): a bias
     # is temperature-stable and a flat is normalized, so neither requires it.
+    # A prepared flat never passes an exposure_reference, so its temperature is
+    # already skipped; guard it anyway for parity clarity.
     if exposure_reference is not None:
         reasons.append(_exposure_reason(exposure_reference, m.exposure_s))
-        reasons.append(_temp_reason(light.temperature_c, m.temperature_c))
+        if not prepared_flat:
+            reasons.append(_temp_reason(light.temperature_c, m.temperature_c))
 
     if check_filter:
-        reasons.append(_field_reason(light.filter, m.filter, "FILTER_MISMATCH"))
+        reasons.append(_field_reason(light.filter, m.filter, "FILTER_MISMATCH", "optical.filter"))
     if check_optical:
-        reasons.append(_disambiguator_field_reason(light.optical_train_id, m.optical_train_id, "OPTICAL_TRAIN_MISMATCH"))
+        reasons.append(_disambiguator_field_reason(light.optical_train_id, m.optical_train_id, "OPTICAL_TRAIN_MISMATCH", "optical.optical_train_id"))
 
     return _reasons(*reasons)
 
@@ -325,6 +350,7 @@ def _validate_binding(
     check_filter: bool = False,
     check_optical: bool = False,
     expected_units: str = "ADU",
+    prepared_flat: bool = False,
 ) -> None:
     if master.role != expected_role:
         raise GeometryMismatchError(
@@ -337,6 +363,7 @@ def _validate_binding(
         check_filter=check_filter,
         check_optical=check_optical,
         expected_units=expected_units,
+        prepared_flat=prepared_flat,
     )
     if reasons:
         raise GeometryMismatchError(reasons[0], reasons)
@@ -596,7 +623,8 @@ def _execute(light, request, masters, *, flat_prep_mode, token, emit) -> Calibra
         if flat_m is None:
             raise InvalidRequestError("required master role missing: 'flat'")
         expected_units = "dimensionless" if flat_m.flat_form == "normalized_response" else "ADU"
-        _validate_binding(light_md, flat_m, "flat", check_filter=True, check_optical=True, expected_units=expected_units)
+        prepared_flat = flat_m.flat_form in ("corrected_unnormalized", "normalized_response")
+        _validate_binding(light_md, flat_m, "flat", check_filter=True, check_optical=True, expected_units=expected_units, prepared_flat=prepared_flat)
 
         token.raise_if_cancelled()
         emit("flat_preparation", 1, 3)

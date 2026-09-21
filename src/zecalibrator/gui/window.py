@@ -716,6 +716,19 @@ class MainWindow(QtWidgets.QMainWindow):
     def _human_role_list(self, roles) -> str:
         return " · ".join(self._ROLE_HUMAN_CAPITAL.get(r, r) for r in roles)
 
+    def _bound_plan_roles(self) -> list[str]:
+        """The sorted set of master roles actually bound by the resolved plans.
+
+        R3D-G: only the roles the resolved :class:`CalibrationPlan` consumes are
+        shown — never a supplied session master the plan does not use (e.g. a
+        DARKFLAT that is not consumed by a prepared flat).
+        """
+        roles: set[str] = set()
+        for plan in self._plans.values():
+            if plan is not None:
+                roles.update(plan.masters.keys())
+        return sorted(roles)
+
     def _set_standard_human_status(self, state: str, detail: str = "") -> None:
         if state == "ready":
             text = "Ready to calibrate" + (f" — {detail}" if detail else "")
@@ -1575,6 +1588,12 @@ class MainWindow(QtWidgets.QMainWindow):
             # Record the generation for which the Standard auto-route was resolved
             # (used by the one-step export to decide stale-vs-valid).
             self._standard_route_generation = self._generation
+            # R3D-G: after route resolution, the Standard status reflects the
+            # bound plan roles only — never an unused supplied master.
+            if self._standard_route_ready():
+                roles = self._bound_plan_roles()
+                detail = self._human_role_list(roles) if roles else "masters"
+                self._set_standard_human_status("ready", detail)
         status = summary.get("status")
         if status == "FAILED":
             self.status_label.setText(
@@ -1731,9 +1750,11 @@ class MainWindow(QtWidgets.QMainWindow):
                 # Wire the exact managed LibrarySpec so _ensure_library()/export use
                 # it; a ready managed state never coexists with an empty library.
                 self._library_spec = self._managed_spec
-                roles = sorted({role for _sha, role in self._session_selection})
-                detail = self._human_role_list(roles) if roles else "masters"
-                self._set_standard_human_status("ready", detail)
+                # R3D-G: the bound plan roles are only known after route
+                # resolution. Never list the full supplied session-role set here
+                # (it may include a master the resolved plan does not consume,
+                # e.g. an unused DARKFLAT).
+                self._set_standard_human_status("ready")
                 self.status_label.setText("Masters ready.")
         else:
             self._library_spec = None

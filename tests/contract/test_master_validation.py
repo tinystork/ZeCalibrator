@@ -57,14 +57,16 @@ def test_thermal_parser_tolerance_accepted(make_frame_fixture):
     assert r.status == "COMPLETED"
 
 
-def test_nan_temperature_rejected(make_frame_fixture):
+def test_nan_temperature_treated_as_unknown_not_fatal(make_frame_fixture):
+    # R3D-G: a non-finite (NaN) temperature is UNVERIFIED-equivalent — the
+    # Standard planner already arbitrated it; execution no longer turns it into
+    # a fatal MISSING_REQUIRED_FIELD.
     make_frame = make_frame_fixture
     light = make_frame((4, 4), value=100.0, temperature_c=float("nan"))
     dark = make_frame((4, 4), value=10.0, temperature_c=20.0)
     masters = {"dark": MasterBinding(role="dark", frame=dark, bias_state="included")}
-    with pytest.raises(GeometryMismatchError) as exc:
-        execute_calibration(light, CalibrationRequest("dark_incl_bias"), masters)
-    assert "MISSING_REQUIRED_FIELD" in exc.value.reason_code
+    r = execute_calibration(light, CalibrationRequest("dark_incl_bias"), masters)
+    assert r.status == "COMPLETED"
 
 
 def test_bias_does_not_require_temperature(make_frame_fixture):
@@ -159,14 +161,16 @@ def test_dark_is_filter_independent(make_frame_fixture):
     assert r.status == "COMPLETED"
 
 
-def test_unknown_required_fact_does_not_pass(make_frame_fixture):
+def test_unknown_gain_unverified_not_fatal(make_frame_fixture):
+    # R3D-G: missing gain on both sides is UNVERIFIED (the Standard planner
+    # already accepted it); execution no longer rejects it as a fatal
+    # MISSING_REQUIRED_FIELD.
     make_frame = make_frame_fixture
     light = make_frame((4, 4), value=100.0, gain=None)
     dark = make_frame((4, 4), value=10.0, gain=None)
     masters = {"dark": MasterBinding(role="dark", frame=dark, bias_state="included")}
-    with pytest.raises(GeometryMismatchError) as exc:
-        execute_calibration(light, CalibrationRequest("dark_incl_bias"), masters)
-    assert "MISSING_REQUIRED_FIELD" in exc.value.reason_code
+    r = execute_calibration(light, CalibrationRequest("dark_incl_bias"), masters)
+    assert r.status == "COMPLETED"
 
 
 def test_wrong_flatdark_bias_state_rejected(make_frame_fixture):
