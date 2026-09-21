@@ -406,6 +406,40 @@ Activation contract/report baseline records the actual post-closure full SHA.
 
 ## DEFERRED
 
+- P8 post-A4 owner decisions (2026-09-21):
+  **A1 — prepared master defensive work: AUTHORISED (bounded implementation).**
+  Masters and the prepared flat response are float32 by contract and frozen since
+  A2/A3B, so per-frame master-side work is a per-master invariant. Scope: extend the
+  EXISTING `PreparedCalibrationContext` with frozen prepared master forms
+  (float32 frame + validated uint16 mask + proven invariants); `calibrate_light`
+  keeps ALL its existing checks unchanged for arbitrary/direct callers; only the
+  batch path consumes the established invariants. Shape validations stay per frame.
+  Estimated ~24 % of `calibrate_light` (~0.65 s/frame, ~6.5 s per 10-light batch)
+  with no contract change. Gates: equivalence, direct-caller checks intact,
+  reserved-bit/overflow parity, no aliasing, read-only prepared forms, reuse
+  call-count, real byte-identical witness, reprofile, frozen/public surfaces
+  unchanged; owner acceptance before commit/push.
+  **A2 — precision instrumentation: CLOSED with STATUS QUO.** Keep the exhaustive
+  per-plane float64 reference, the measured float32 error envelope and the existing
+  `PrecisionInfo` semantics. Do NOT add a bound, sampling, an opt-out,
+  `precision_measured`, persistence into FITS/CALPROV or a new provenance contract:
+  the object is an in-memory diagnostic, no product requirement for persisting or
+  consuming it has been demonstrated, and no new contract will be created merely to
+  optimise an internal diagnostic. Future science/product decision if a real
+  consumer or persistence requirement appears: decide the scientific statement
+  first, then its measurement/proof mechanism.
+  **ZSSS GPU residency: RETAIN HOST-CENTRIC** (accepted as the ZSSS architectural
+  position; recorded in the ZSSS ledger at
+  `zeseestarstacker/docs/gpu_residency_decision.md` with the three reopen triggers
+  and the mandatory preconditions). No GPU-resident pipeline state for
+  ZeCalibrator; no CuPy backend on an assumption of future ZSSS residency.
+- P8 STOP CONDITION (owner, 2026-09-21): after A1 is accepted and reprofiled, STOP —
+  do NOT automatically start another performance optimisation. At that point report
+  the complete new wall-clock and cost decomposition so the owner can decide whether
+  P8 performance work is finished and the project returns to product functionality /
+  the CPU in-memory integration capability admission. Rationale: ~610–646 s at the
+  start of P8, ~67 s before A1; chasing a further few seconds would turn a successful
+  optimisation campaign into a distraction.
 - P8-A4 follow-ups (deferred/informational by owner — no A4 rework): **O1** the
   `DecodedLight` carrier is built even when a later stage fails (routing
   `NO_MATCH`), costing exactly the acquisition inspection already paid; **O2**
