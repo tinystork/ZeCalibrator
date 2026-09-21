@@ -43,7 +43,8 @@ from zecalibrator.core.metadata import (
 )
 from zecalibrator.core.precision import (
     PrecisionInfo,
-    integer_exceeds_float32_exact_range,
+    exceeds_float32_exact_bound,
+    float32_guard_provable_safe,
     measure_float32_roundoff,
 )
 
@@ -434,23 +435,22 @@ def decode_fits(
 
         physical = bscale * stored_f64 + bzero
 
-        finite = np.isfinite(physical)
-        if finite.any():
-            vals = physical[finite]
-            if np.any(np.abs(vals) > float(np.finfo(np.float32).max)):
-                raise PrecisionRefusalError(
-                    "decoded magnitude exceeds float32 range (extreme scale)"
-                )
-            if np.any(
-                np.fromiter(
-                    (integer_exceeds_float32_exact_range(v) for v in vals),
-                    dtype=bool,
-                    count=int(vals.size),
-                )
-            ):
-                raise PrecisionRefusalError(
-                    "decoded integer ADU exceeds float32-exact bound 2**24"
-                )
+        # Precision guard (C1 magnitude, C2 exact-integer). When the FITS
+        # representation proves every finite physical value stays within both
+        # limits, skip the value scan entirely; otherwise apply the vectorised
+        # checks in the original order (C1 before C2).
+        if not float32_guard_provable_safe(stored.dtype, bscale, bzero):
+            finite = np.isfinite(physical)
+            if finite.any():
+                vals = physical[finite]
+                if np.any(np.abs(vals) > float(np.finfo(np.float32).max)):
+                    raise PrecisionRefusalError(
+                        "decoded magnitude exceeds float32 range (extreme scale)"
+                    )
+                if exceeds_float32_exact_bound(vals):
+                    raise PrecisionRefusalError(
+                        "decoded integer ADU exceeds float32-exact bound 2**24"
+                    )
 
         data32 = np.ascontiguousarray(physical.astype(np.float32))
         mask = np.zeros(stored.shape, dtype=np.uint16)

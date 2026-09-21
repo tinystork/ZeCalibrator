@@ -17,7 +17,8 @@ import numpy as np
 
 from zecalibrator.core.errors import InvalidRequestError, PrecisionRefusalError
 from zecalibrator.core.precision import (
-    integer_exceeds_float32_exact_range,
+    exceeds_float32_exact_bound,
+    float32_guard_provable_safe,
     measure_float32_roundoff,
 )
 
@@ -242,22 +243,17 @@ def validate_array_precision(arr) -> None:
                 "stored 64-bit integer exceeds float64 exact-integer bound 2**53"
             )
 
-    f64 = a.astype(np.float64)
-    finite = np.isfinite(f64)
-    if finite.any():
-        vals = f64[finite]
-        if np.any(np.abs(vals) > float(np.finfo(np.float32).max)):
-            raise PrecisionRefusalError("decoded magnitude exceeds float32 range (extreme scale)")
-        if np.any(
-            np.fromiter(
-                (integer_exceeds_float32_exact_range(v) for v in vals),
-                dtype=bool,
-                count=int(vals.size),
-            )
-        ):
-            raise PrecisionRefusalError(
-                "decoded integer ADU exceeds float32-exact bound 2**24"
-            )
+    if not float32_guard_provable_safe(a.dtype, 1.0, 0.0):
+        f64 = a.astype(np.float64)
+        finite = np.isfinite(f64)
+        if finite.any():
+            vals = f64[finite]
+            if np.any(np.abs(vals) > float(np.finfo(np.float32).max)):
+                raise PrecisionRefusalError("decoded magnitude exceeds float32 range (extreme scale)")
+            if exceeds_float32_exact_bound(vals):
+                raise PrecisionRefusalError(
+                    "decoded integer ADU exceeds float32-exact bound 2**24"
+                )
 
 
 def verify_identity_digest(identity, data, mask) -> str:

@@ -96,6 +96,53 @@ def exceeds_float32_magnitude(value: float) -> bool:
     return abs(v) > FLOAT32_MAX
 
 
+def float32_guard_provable_safe(stored_dtype, bscale: float, bzero: float) -> bool:
+    """True when the storage representation proves that every *finite* decoded
+    value satisfies both precision limits (``|v| <= 2**24``, hence also
+    ``|v| <= float32 max``), so the value-scanning precision guard checks
+    (C1 magnitude / C2 exact-integer) can be skipped.
+
+    This is an acceptance-only (sound) static proof: it returns ``True`` only
+    when safety is proven from the representation alone. It never *refuses* a
+    frame from a representation bound. When ``False``, the caller must fall back
+    to the vectorised value predicate. Byte-order invariant: the bound is
+    computed from ``np.iinfo(dtype).min/.max`` on the (possibly non-native)
+    dtype, never from an itemsize attribute of ``np.iinfo`` (which has none).
+    """
+    dt = np.dtype(stored_dtype)
+    bs = float(bscale)
+    bz = float(bzero)
+    if bs == 0.0:
+        # physical is constant = bzero wherever stored is finite, for any
+        # storage dtype (integer or floating).
+        bound = abs(bz)
+    elif dt.kind in ("i", "u"):
+        info = np.iinfo(dt)
+        maxabs_stored = float(max(abs(int(info.min)), abs(int(info.max))))
+        bound = abs(bs) * maxabs_stored + abs(bz)
+    else:
+        # Floating storage with a nonzero scale has an unbounded value domain:
+        # no representation bound can prove the limit unreachable.
+        return False
+    return bool(np.isfinite(bound)) and bound <= float(FLOAT32_EXACT_INT_BOUND)
+
+
+def exceeds_float32_exact_bound(values) -> bool:
+    """Vectorised twin of :func:`integer_exceeds_float32_exact_range`: ``True``
+    when any finite, integer-valued entry exceeds the float32 exact-integer
+    bound (``2**24``). Non-finite and non-integer-valued entries are ignored,
+    matching the scalar predicate exactly.
+    """
+    vals = np.asarray(values)
+    finite = np.isfinite(vals)
+    if not np.any(finite):
+        return False
+    f = vals[finite]
+    return bool(
+        np.any((f == np.rint(f)) & (np.abs(f) > np.float64(FLOAT32_EXACT_INT_BOUND)))
+    )
+
+
 __all__ = [
     "FLOAT32_EXACT_INT_BOUND",
     "FLOAT32_MAX",
