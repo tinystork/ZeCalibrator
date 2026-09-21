@@ -406,6 +406,38 @@ Activation contract/report baseline records the actual post-closure full SHA.
 
 ## DEFERRED
 
+- P8-A3B follow-ups (deferred/informational by owner — no A3B rework): **O1**
+  `_build_prepared_flat` captures only `InvalidRequestError`/`GeometryMismatchError`,
+  so a genuinely unexpected exception type would surface at frame-1 context build
+  rather than at the per-frame flat stage (today it would also propagate; the
+  timing differs); **O2** the eager build runs before `_freeze_master` (verified
+  harmless: copies + freshly allocated `norm` arrays, no aliasing into a master
+  frame); **O3** the seam's route guard can only mismatch on caller error (the
+  facade always passes `context.flat_prep_mode`); **O4** the reprofile re-ranking.
+- P8-A4 — DECODE ONCE (owner-authorised for DESIGN/ARCHAEOLOGY only, 2026-09-21):
+  remove the redundant per-light FITS read/decode between `inspect_frame` and
+  calibration in the batch path. Target shape: `file -> decode once -> canonical
+  private DecodedFrame -> {inspection/routing, calibration}`. Preserves the
+  public `calibrate_frame` API, standalone behaviour, raw-decoder semantics, light
+  identity/hash/provenance truthfulness, validation/failure/cancellation
+  precedence; no implicit/global/persistent cache; no science/DQ/equation change;
+  no GPU; no parallelism; no public API/capability change. Study whether the
+  existing `ArrayFrameSource`/decoded representation can serve as the internal
+  seam instead of a competing representation. Anticipate (do NOT implement) a
+  future integration boundary where a consumer (e.g. ZSSS) supplies an
+  already-decoded in-memory frame with no FITS re-serialise/re-read cycle.
+- P8-GPU-FEASIBILITY gate (recorded by owner 2026-09-21 — analysis only, NOT
+  authorised for implementation): after A4 + reprofile, decompose the remaining
+  per-frame calibration cost into actual calibration equations vs DQ/mask work vs
+  float32/float64 conversions and copies vs float64 reference computation vs
+  precision/error measurement vs other material array operations. Only then
+  decide between further CPU/vectorised work, redesigning the precision
+  instrumentation without weakening contracts, or an optional CuPy backend.
+  Constraints for any future GPU design: CPU remains the canonical scientific
+  reference; analyse specifically the ZSSS GPU-resident case (frame and prepared
+  masters already in VRAM) to avoid unnecessary VRAM<->RAM round trips; a ~6.5
+  Mpx single-frame transfer/allocation overhead must not be assumed away. Do not
+  put a GPU under work that can still be deleted (hence A4 first).
 - P8-A3 follow-ups (deferred by owner, non-blocking — do NOT rework the accepted
   A3 commit for these): **O1** `core/precision.exceeds_float32_exact_bound`
   re-applies `np.isfinite` to an array both callers already filtered (idempotent;
