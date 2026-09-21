@@ -406,6 +406,31 @@ Activation contract/report baseline records the actual post-closure full SHA.
 
 ## DEFERRED
 
+- P8-A3 follow-ups (deferred by owner, non-blocking — do NOT rework the accepted
+  A3 commit for these): **O1** `core/precision.exceeds_float32_exact_bound`
+  re-applies `np.isfinite` to an array both callers already filtered (idempotent;
+  one redundant pass on the fallback path only); **O2** the
+  `RuntimeWarning: invalid value encountered in multiply` under `BSCALE=0` with
+  non-finite storage is pre-existing (raised in `physical = bscale*stored_f64 +
+  bzero`, upstream of the guard) and unchanged; **O3** characterisation: the C1
+  magnitude check is unreachable from float32 storage (it needs `BITPIX=-64` or a
+  large `BSCALE`), since float32 storage cannot exceed `float32max`.
+- P8 follow-up candidates (recorded after the A3 reprofile, NOT authorised for
+  optimisation yet): duplicate light decode per frame (`inspect_frame` +
+  `calibrate_frame::_decode_light` decode the same bytes — the former "A4");
+  precision roundoff/error measurement (`measure_float32_roundoff` /
+  `measure_float32_error`); repeated per-frame master mask validation
+  (`core/dq.validate_mask` in `calibrate_light`); output/write cost. Measured
+  shares of the 10-light batch after A3: flat normalization 27.6 s (28.8 %),
+  light decode 23.3 s, calibration arithmetic 23.1 s, output write 6.3 s,
+  `validate_plan` 4.8 s, masters 3.6 s (total ~95.8 s wall; host-load dependent).
+  Note: `tottime` under cProfile is NOT reliable wall-clock attribution after the
+  A3 call-count collapse — prefer the instrumented per-stage timings.
+- P8 trajectory note (owner, 2026-09-21): parallelism is **removed from the
+  mandatory roadmap** (kept as a tool only). Sequence: A3 commit -> Stage 2
+  prepared flat response (design gate first) -> reprofile -> A4 -> reprofile ->
+  product decision ("is ZeCalibrator fast enough yet?"). 10 real lights went from
+  ~10 min to ~96 s over A2+A3 on this host.
 - P8-A2 Stage 1 follow-up (deferred by owner, cosmetic): in
   `api/v1/calibration.py::_calibrate_frame_impl` the `load_masters` progress
   event is emitted *before* `_flat_prep_mode(plan)` is evaluated, so a plan with
