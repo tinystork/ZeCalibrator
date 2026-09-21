@@ -57,7 +57,7 @@ def auto_route_batch(
     """
     from zecalibrator import _version
     from zecalibrator.api.v1.batch import _write_output
-    from zecalibrator.api.v1.calibration import calibrate_frame
+    from zecalibrator.api.v1.calibration import _calibrate_frame_impl, _PreparedContextSlot
     from zecalibrator.api.v1.frames import inspect_frame
     from zecalibrator.api.v1.models import (
         BatchItem,
@@ -103,6 +103,7 @@ def auto_route_batch(
     manifest_inputs = []
     manifest_items = []
     cancelled = False
+    context_slot = _PreparedContextSlot()
 
     def _process(idx, frame):
         nonlocal cancelled
@@ -150,7 +151,7 @@ def auto_route_batch(
             )
 
         try:
-            result = calibrate_frame(frame, plan, ExecutionOptions(), cancel=token)
+            result = _calibrate_frame_impl(frame, plan, ExecutionOptions(), token=token, obs=None, slot=context_slot)
         except OperationCancelled:
             raise
         except InvalidRequestError as exc:

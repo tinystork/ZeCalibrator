@@ -14,7 +14,9 @@ supported: the facade pre-normalizes a corrected flat and builds a truthful
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
+from types import MappingProxyType
+from typing import Mapping, Optional
 
 import numpy as np
 
@@ -35,7 +37,7 @@ from zecalibrator.core.errors import (
     PrecisionRefusalError,
 )
 from zecalibrator.core.metadata import ImportDeclaration, SensorMetadata
-from zecalibrator.core.plans import MatchPolicy
+from zecalibrator.core.plans import MasterBinding, MatchPolicy
 from zecalibrator.io.master_source import FilesystemSource
 
 from . import _io
@@ -507,6 +509,379 @@ def _load_masters(plan: CalibrationPlan, *, token, obs):
     return masters, flat_notes
 
 
+# ---------------------------------------------------------------------------
+# Prepared calibration context (private, execution-only)
+# ---------------------------------------------------------------------------
+@dataclass(frozen=True)
+class FrozenMaster:
+    """Immutable decoded master bound to its verified plan identity."""
+
+    role: str
+    frame: "DecodedFrame"
+    bias_state: str
+    flat_form: Optional[str]
+    normalization_proof: Optional[object]
+    short_flat_profile: bool
+    content_sha256: str
+    size_bytes: int
+    hdu: object
+    mask_identity: Optional[str]
+
+
+@dataclass(frozen=True)
+class PreparedCalibrationContext:
+    """Plan-invariant master-side work, prepared once and applied per frame.
+
+    Immutable: ``bindings``/``flat_notes`` are read-only mappings and every
+    bound frame's ``data``/``mask`` arrays are frozen (``writeable=False``). The
+    context never hands out a mutable reference.
+    """
+
+    plan: CalibrationPlan
+    flat_prep_mode: str
+    bindings: Mapping[str, FrozenMaster]
+    flat_notes: Mapping[str, object]
+    context_id: str
+
+
+class _PreparedContextSlot:
+    """Private single-slot holder, keyed by ``plan_id`` (batch-local).
+
+    A successfully prepared context is reused only while its matching plan
+    occupies the slot; a miss (different ``plan_id``, an evicted/replaced
+    context, or no context) re-prepares. No module-level state, no disk, no
+    settings.
+    """
+
+    __slots__ = ("_plan_id", "_context")
+
+    def __init__(self) -> None:
+        self._plan_id: Optional[str] = None
+        self._context: Optional[PreparedCalibrationContext] = None
+
+    def get(self, plan: CalibrationPlan) -> Optional[PreparedCalibrationContext]:
+        context = self._context
+        if context is None or self._plan_id != plan.plan_id:
+            return None
+        if not _context_matches_plan(context, plan):
+            return None
+        return context
+
+    def put(self, plan: CalibrationPlan, context: PreparedCalibrationContext) -> None:
+        self._plan_id = plan.plan_id
+        self._context = context
+
+    def clear(self) -> None:
+        self._plan_id = None
+        self._context = None
+
+    @property
+    def is_empty(self) -> bool:
+        return self._context is None
+
+
+def _freeze_master(master, binding: MasterBinding) -> FrozenMaster:
+    """Freeze a decoded master *after* the load-time mask mutation.
+
+    The load path already performed ``decoded.mask.__ior__(external_mask)``;
+    freezing here (as the final preparation step) makes the bound frame arrays
+    immutable so a reused context can never be mutated in place.
+    """
+    frame = master.frame
+    frame.data.flags.writeable = False
+    frame.mask.flags.writeable = False
+    return FrozenMaster(
+        role=master.role,
+        frame=frame,
+        bias_state=master.bias_state,
+        flat_form=master.flat_form,
+        normalization_proof=master.normalization_proof,
+        short_flat_profile=master.short_flat_profile,
+        content_sha256=binding.content_sha256,
+        size_bytes=binding.size_bytes,
+        hdu=binding.hdu,
+        mask_identity=binding.mask_identity,
+    )
+
+
+def _context_id(plan: CalibrationPlan, flat_prep_mode: str, bindings) -> str:
+    from zecalibrator.core.digests import canonical_json, sha256_hex
+
+    payload = {
+        "plan_id": plan.plan_id,
+        "flat_prep_mode": flat_prep_mode,
+        "bindings": {role: fm.content_sha256 for role, fm in sorted(bindings.items())},
+    }
+    return sha256_hex(canonical_json(payload).encode("utf-8"))
+
+
+def _context_matches_plan(
+    context: PreparedCalibrationContext, plan: CalibrationPlan
+) -> bool:
+    """O(1) binding-identity guard: never silently reuse a mismatched context."""
+    if context.plan.plan_id != plan.plan_id:
+        return False
+    if set(context.bindings) != set(plan.masters):
+        return False
+    for role, fm in context.bindings.items():
+        binding = plan.masters[role]
+        if (
+            fm.content_sha256 != binding.content_sha256
+            or fm.size_bytes != binding.size_bytes
+            or fm.hdu != binding.hdu
+            or fm.mask_identity != binding.mask_identity
+        ):
+            return False
+    return True
+
+
+def _prepare_calibration_context(plan: CalibrationPlan, *, token):
+    """Prepare the plan-invariant master-side work exactly once.
+
+    Returns ``(context, failure)``: ``context`` is a
+    :class:`PreparedCalibrationContext` on success (``None`` on failure) and
+    ``failure`` is the typed exception on failure (``None`` on success). Only
+    success is ever cached; a failure returns ``(None, exc)`` so the caller's
+    miss path re-runs this exact function (today's ``_load_masters`` semantics,
+    including transient-failure retry). ``InvalidRequestError`` from
+    ``_flat_prep_mode`` propagates unchanged, exactly as today.
+    """
+    # Computed outside the master-load try/except so its InvalidRequestError
+    # propagates (matching the pre-refactor call order).
+    flat_prep_mode = _flat_prep_mode(plan)
+    try:
+        masters, flat_notes = _load_masters(plan, token=token, obs=None)
+    except (
+        OperationCancelled,
+        DecodeError,
+        PrecisionRefusalError,
+        SourceError,
+        OSError,
+        ValueError,
+    ) as exc:
+        return None, exc
+
+    bindings = MappingProxyType(
+        {role: _freeze_master(master, plan.masters[role]) for role, master in masters.items()}
+    )
+    context = PreparedCalibrationContext(
+        plan=plan,
+        flat_prep_mode=flat_prep_mode,
+        bindings=bindings,
+        flat_notes=MappingProxyType(dict(flat_notes)),
+        context_id=_context_id(plan, flat_prep_mode, bindings),
+    )
+    return context, None
+
+
+def _prepare_or_reuse(plan: CalibrationPlan, slot, *, token):
+    if slot is not None:
+        context = slot.get(plan)
+        if context is not None:
+            return context, None
+    context, failure = _prepare_calibration_context(plan, token=token)
+    if failure is not None:
+        return None, failure
+    if slot is not None:
+        slot.put(plan, context)
+    return context, None
+
+
+def _to_executor_masters(bindings):
+    from zecalibrator.application.executor import MasterBinding as ExecutorMasterBinding
+
+    return {
+        role: ExecutorMasterBinding(
+            role=fm.role,
+            frame=fm.frame,
+            bias_state=fm.bias_state,
+            flat_form=fm.flat_form,
+            normalization_proof=fm.normalization_proof,
+            short_flat_profile=fm.short_flat_profile,
+        )
+        for role, fm in bindings.items()
+    }
+
+
+def _wrap_prepare_failure(
+    failure, *, plan, policy, request, input_identity, facts
+):
+    executed = ("decode", "validate_plan", "load_masters")
+    if isinstance(failure, OperationCancelled):
+        return _wrap(
+            _engine_cancelled(), plan=plan, policy=policy, request=request,
+            input_identity=input_identity, facts=facts, executed=executed,
+        )
+    if isinstance(failure, (DecodeError, PrecisionRefusalError)):
+        reason = getattr(failure, "reason_code", None) or "DECODE_ERROR"
+        return _wrap(
+            _engine_failed(reason, str(failure)), plan=plan, policy=policy,
+            request=request, input_identity=input_identity, facts=facts,
+            executed=executed,
+        )
+    return _wrap(
+        _engine_failed("MASTER_LOAD_FAILED", str(failure)), plan=plan, policy=policy,
+        request=request, input_identity=input_identity, facts=facts,
+        executed=executed,
+    )
+
+
+def _decode_light_for_plan(source, plan, *, policy, request, token, obs):
+    """Decode the light and match it to the plan.
+
+    Returns ``(failure, light, input_identity, facts)`` where ``failure`` is a
+    wrapped :class:`CalibrationResult` on decode failure (or ``None`` on
+    success); ``light``/``input_identity``/``facts`` are ``None`` on failure.
+    """
+    _io.emit_progress(obs, OPERATION_ID, "decode", 1, 5)
+    try:
+        light, input_identity, facts = _decode_light(source, token=token, obs=obs)
+    except OperationCancelled:
+        return _wrap(
+            _engine_cancelled(), plan=plan, policy=policy, request=request,
+            input_identity=None, facts={}, executed=("decode",),
+        ), None, None, None
+    except DecodeError as exc:
+        return _wrap(
+            _engine_failed(exc.reason_code, str(exc)), plan=plan, policy=policy,
+            request=request, input_identity=None, facts={}, executed=("decode",),
+        ), None, None, None
+    except PrecisionRefusalError as exc:
+        return _wrap(
+            _engine_failed("PRECISION_REFUSAL", str(exc)), plan=plan, policy=policy,
+            request=request, input_identity=None, facts={}, executed=("decode",),
+        ), None, None, None
+    except (SourceError, OSError, ValueError) as exc:
+        return _wrap(
+            _engine_failed("SOURCE_ERROR", str(exc)), plan=plan, policy=policy,
+            request=request, input_identity=None, facts={}, executed=("decode",),
+        ), None, None, None
+
+    _light_matches_plan(light, plan)
+    return None, light, input_identity, facts
+
+
+def _execute_prepared(light, context, plan, input_identity, facts, *, token, obs):
+    request = plan.request
+    policy = _reconstruct_policy(plan)
+    masters = _to_executor_masters(context.bindings)
+
+    try:
+        from zecalibrator.application.executor import (
+            CalibrationRequest as ExecutorRequest,
+            execute_calibration,
+        )
+
+        engine = execute_calibration(
+            light,
+            ExecutorRequest(additive_mode=request.additive_mode, flat_mode=request.flat_mode),
+            masters,
+            flat_prep_mode=context.flat_prep_mode,
+            cancel=token,
+            progress=None,  # facade owns the monotonic coordinator
+            operation_id=OPERATION_ID,
+        )
+    except OperationCancelled:
+        return _wrap(
+            _engine_cancelled(), plan=plan, policy=policy, request=request,
+            input_identity=input_identity, facts=facts,
+            executed=("decode", "validate_plan", "load_masters", "calibrate"),
+        )
+    except GeometryMismatchError as exc:
+        return _wrap(
+            _engine_failed(exc.reason_code, str(exc)), plan=plan, policy=policy,
+            request=request, input_identity=input_identity, facts=facts,
+            executed=("decode", "validate_plan", "load_masters", "calibrate"),
+        )
+
+    token.raise_if_cancelled()
+    result = _wrap(
+        engine,
+        plan=plan,
+        policy=policy,
+        request=request,
+        input_identity=input_identity,
+        facts=facts,
+        executed=("decode", "validate_plan", "load_masters", "calibrate"),
+        flat_notes=dict(context.flat_notes),
+    )
+    _io.emit_progress(obs, OPERATION_ID, "complete", 5, 5)
+    return result
+
+
+def _apply_prepared_context(source, context, options, *, token, progress):
+    """Apply a prepared context to one light source (decode + calibrate + wrap).
+
+    Private seam: ``prepare + apply`` reproduces ``calibrate_frame`` exactly
+    (same science, statuses, reason codes, warnings, scalars, provenance).
+    """
+    obs = _io.normalize_progress(progress, OPERATION_ID)
+    plan = context.plan
+    request = plan.request
+    policy = _reconstruct_policy(plan)
+
+    failure, light, input_identity, facts = _decode_light_for_plan(
+        source, plan, policy=policy, request=request, token=token, obs=obs
+    )
+    if failure is not None:
+        return failure
+    return _execute_prepared(light, context, context.plan, input_identity, facts, token=token, obs=obs)
+
+
+def _calibrate_frame_impl(source, plan, options, *, token, obs, slot):
+    """Single per-frame execution path shared by ``calibrate_frame`` and batch.
+
+    Preserves today's exact order and failure precedence: pre-cancel →
+    verify_plan_id → validate_plan → decode → light_matches_plan → master stage
+    (prepare once / reuse) → execute. ``slot`` is an optional batch-local
+    single-slot holder; ``calibrate_frame`` passes ``None`` (prepare every time).
+    """
+    request = plan.request
+    policy = _reconstruct_policy(plan)
+
+    if token.is_cancelled():
+        return _wrap(
+            _engine_cancelled(), plan=plan, policy=policy, request=request,
+            input_identity=None, facts={}, executed=(),
+        )
+
+    try:
+        plan.verify_plan_id()
+    except ValueError as exc:
+        raise InvalidRequestError(f"plan digest mismatch: {exc}") from exc
+
+    semantic = _semantic_plan_errors(plan)
+    if semantic:
+        return _wrap(
+            _engine_failed("PLAN_INVALID", "; ".join(semantic)),
+            plan=plan, policy=policy, request=request, input_identity=None, facts={},
+            executed=("validate_plan",),
+        )
+    validation = _alib.validate_plan(plan, FilesystemSource())
+    if validation.status == "FAILED":
+        return _wrap(
+            _engine_failed("PLAN_INVALID", "; ".join(validation.reasons)),
+            plan=plan, policy=policy, request=request, input_identity=None, facts={},
+            executed=("validate_plan",),
+        )
+
+    failure, light, input_identity, facts = _decode_light_for_plan(
+        source, plan, policy=policy, request=request, token=token, obs=obs
+    )
+    if failure is not None:
+        return failure
+
+    _io.emit_progress(obs, OPERATION_ID, "load_masters", 3, 5)
+    context, failure = _prepare_or_reuse(plan, slot, token=token)
+    if failure is not None:
+        return _wrap_prepare_failure(
+            failure, plan=plan, policy=policy, request=request,
+            input_identity=input_identity, facts=facts,
+        )
+
+    return _execute_prepared(light, context, plan, input_identity, facts, token=token, obs=obs)
+
+
 def calibrate_frame(
     source: FrameSource,
     plan: CalibrationPlan,
@@ -532,91 +907,7 @@ def calibrate_frame(
 
     token = cancel or CancellationToken()
     obs = _io.normalize_progress(progress, OPERATION_ID)
-    request = plan.request
-    policy = _reconstruct_policy(plan)
-
-    if token.is_cancelled():
-        return _wrap(_engine_cancelled(), plan=plan, policy=policy, request=request, input_identity=None, facts={}, executed=())
-
-    try:
-        plan.verify_plan_id()
-    except ValueError as exc:
-        raise InvalidRequestError(f"plan digest mismatch: {exc}") from exc
-
-    # Validation parity: semantic (role/master_type/hdu) + byte identity.
-    semantic = _semantic_plan_errors(plan)
-    if semantic:
-        return _wrap(
-            _engine_failed("PLAN_INVALID", "; ".join(semantic)),
-            plan=plan, policy=policy, request=request, input_identity=None, facts={}, executed=("validate_plan",),
-        )
-    validation = _alib.validate_plan(plan, FilesystemSource())
-    if validation.status == "FAILED":
-        return _wrap(
-            _engine_failed("PLAN_INVALID", "; ".join(validation.reasons)),
-            plan=plan, policy=policy, request=request, input_identity=None, facts={}, executed=("validate_plan",),
-        )
-
-    _io.emit_progress(obs, OPERATION_ID, "decode", 1, 5)
-
-    try:
-        light, input_identity, facts = _decode_light(source, token=token, obs=obs)
-    except OperationCancelled:
-        return _wrap(_engine_cancelled(), plan=plan, policy=policy, request=request, input_identity=None, facts={}, executed=("decode",))
-    except DecodeError as exc:
-        return _wrap(_engine_failed(exc.reason_code, str(exc)), plan=plan, policy=policy, request=request, input_identity=None, facts={}, executed=("decode",))
-    except PrecisionRefusalError as exc:
-        return _wrap(_engine_failed("PRECISION_REFUSAL", str(exc)), plan=plan, policy=policy, request=request, input_identity=None, facts={}, executed=("decode",))
-    except (SourceError, OSError, ValueError) as exc:
-        return _wrap(_engine_failed("SOURCE_ERROR", str(exc)), plan=plan, policy=policy, request=request, input_identity=None, facts={}, executed=("decode",))
-
-    _light_matches_plan(light, plan)
-    flat_prep_mode = _flat_prep_mode(plan)
-
-    _io.emit_progress(obs, OPERATION_ID, "load_masters", 3, 5)
-    try:
-        masters, flat_notes = _load_masters(plan, token=token, obs=obs)
-    except OperationCancelled:
-        return _wrap(_engine_cancelled(), plan=plan, policy=policy, request=request, input_identity=input_identity, facts=facts, executed=("decode", "validate_plan", "load_masters"))
-    except (DecodeError, PrecisionRefusalError) as exc:
-        reason = getattr(exc, "reason_code", None) or "DECODE_ERROR"
-        return _wrap(_engine_failed(reason, str(exc)), plan=plan, policy=policy, request=request, input_identity=input_identity, facts=facts, executed=("decode", "validate_plan", "load_masters"))
-    except (SourceError, OSError, ValueError) as exc:
-        return _wrap(_engine_failed("MASTER_LOAD_FAILED", str(exc)), plan=plan, policy=policy, request=request, input_identity=input_identity, facts=facts, executed=("decode", "validate_plan", "load_masters"))
-
-    try:
-        from zecalibrator.application.executor import (
-            CalibrationRequest as ExecutorRequest,
-            execute_calibration,
-        )
-
-        engine = execute_calibration(
-            light,
-            ExecutorRequest(additive_mode=request.additive_mode, flat_mode=request.flat_mode),
-            masters,
-            flat_prep_mode=flat_prep_mode,
-            cancel=token,
-            progress=None,  # facade owns the monotonic coordinator
-            operation_id=OPERATION_ID,
-        )
-    except OperationCancelled:
-        return _wrap(_engine_cancelled(), plan=plan, policy=policy, request=request, input_identity=input_identity, facts=facts, executed=("decode", "validate_plan", "load_masters", "calibrate"))
-    except GeometryMismatchError as exc:
-        return _wrap(_engine_failed(exc.reason_code, str(exc)), plan=plan, policy=policy, request=request, input_identity=input_identity, facts=facts, executed=("decode", "validate_plan", "load_masters", "calibrate"))
-
-    token.raise_if_cancelled()
-    result = _wrap(
-        engine,
-        plan=plan,
-        policy=policy,
-        request=request,
-        input_identity=input_identity,
-        facts=facts,
-        executed=("decode", "validate_plan", "load_masters", "calibrate"),
-        flat_notes=flat_notes,
-    )
-    _io.emit_progress(obs, OPERATION_ID, "complete", 5, 5)
-    return result
+    return _calibrate_frame_impl(source, plan, options, token=token, obs=obs, slot=None)
 
 
 __all__ = ["calibrate_frame"]

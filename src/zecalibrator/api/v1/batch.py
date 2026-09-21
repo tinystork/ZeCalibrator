@@ -51,7 +51,7 @@ from zecalibrator.io.output_writer import (
 )
 
 from . import _io
-from .calibration import calibrate_frame
+from .calibration import _calibrate_frame_impl, _PreparedContextSlot
 from .errors import InvalidRequestError, LibraryClosedError
 from .frames import inspect_frame
 from .matching import resolve_calibration
@@ -93,13 +93,17 @@ def _validate_batch_args(frames, request, library, policy, options):
     return options
 
 
-def _process_one(idx, frame, request, library, policy, destination, token, plan_schema_holder=None):
+def _process_one(idx, frame, request, library, policy, destination, token, plan_schema_holder=None, slot=None):
     """Process one frame into a :class:`BatchItem` (raises on cancellation).
 
     ``plan_schema_holder`` is an optional mutable mapping; when a plan is
     resolved, its ``provenance_schema`` (the plan/provenance-projection schema,
     ``plan.versions.provenance_schema``) is recorded so the batch manifest can
     mirror it (single source of truth = the plan's ``VersionSet``).
+
+    ``slot`` is the batch-local single-slot prepared-context holder threaded
+    through from ``_batch_generator`` (see ``_PreparedContextSlot``); ``None``
+    disables reuse.
     """
     try:
         inspection_result = inspect_frame(frame, cancel=token)
@@ -174,7 +178,7 @@ def _process_one(idx, frame, request, library, policy, destination, token, plan_
         plan_schema_holder["provenance_schema"] = plan.versions.provenance_schema
 
     try:
-        result = calibrate_frame(frame, plan, ExecutionOptions(), cancel=token)
+        result = _calibrate_frame_impl(frame, plan, ExecutionOptions(), token=token, obs=None, slot=slot)
     except OperationCancelled:
         raise
     except InvalidRequestError as exc:
@@ -271,6 +275,7 @@ def _batch_generator(frames, request, library, policy, options, token, obs):
     manifest_inputs = []
     manifest_items = []
     plan_schema_holder = {}
+    context_slot = _PreparedContextSlot()
     cancelled = False
 
     emit_batch_progress(obs, "batch_start", 0, total)
@@ -280,7 +285,7 @@ def _batch_generator(frames, request, library, policy, options, token, obs):
             frame_id = frame_display_id(frame)
             emit_batch_progress(obs, "frame_start", idx, total, frame_id=frame_id)
 
-            item = _process_one(idx, frame, request, library, policy, destination, token, plan_schema_holder)
+            item = _process_one(idx, frame, request, library, policy, destination, token, plan_schema_holder, slot=context_slot)
 
             manifest_inputs.append({"index": idx, "identity": _identity_to_dict(item.input_identity)})
             manifest_items.append(item.to_dict())
