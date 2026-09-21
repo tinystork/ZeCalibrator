@@ -16,21 +16,76 @@ from . import _io
 from .errors import DecodeError, InvalidRequestError, PrecisionRefusalError, SourceError
 from .models import (
     ArrayFrameSource,
-    ArrayInputIdentity,
     FitsFrameSource,
-    FitsInputIdentity,
     FrameInspection,
     FrameSource,
     InspectResult,
-    InputIdentity,
 )
 
 OPERATION_ID = "zecalibrator-inspect"
 
 
-def _domain_finding(metadata) -> str:
-    value = getattr(metadata, "raw_domain_declaration", None)
-    return value if value in ("raw", "processed", "unknown") else "unsupported"
+def _decode_and_inspect(source, *, declaration=None, token, obs):
+    """Decode once and return ``(InspectResult, carrier)`` (private P8-A4 seam).
+
+    Identical to :func:`inspect_frame` in behaviour and reason codes, but also
+    returns the private :class:`~zecalibrator.api.v1._io.DecodedLight` carrier so
+    the batch/auto-route path can hand the SAME decoded snapshot and identity to
+    calibration. ``carrier`` is ``None`` whenever the result is not ``COMPLETED``.
+    """
+    if not isinstance(source, (FitsFrameSource, ArrayFrameSource)):
+        raise InvalidRequestError("source must be a FitsFrameSource or ArrayFrameSource")
+
+    if token.is_cancelled():
+        return InspectResult(operation_status="CANCELLED", reason_code="CANCELLED"), None
+
+    if isinstance(source, ArrayFrameSource):
+        try:
+            carrier = _io._decode_light_once(source, token=token)
+        except OperationCancelled:
+            return InspectResult(operation_status="CANCELLED", reason_code="CANCELLED"), None
+        except PrecisionRefusalError as exc:
+            return InspectResult(operation_status="FAILED", reason_code="PRECISION_REFUSAL", details=str(exc)), None
+        except (ValueError, InvalidRequestError) as exc:
+            return InspectResult(operation_status="FAILED", reason_code="INVALID_SOURCE", details=str(exc)), None
+
+        inspection = FrameInspection(
+            metadata=source.metadata,
+            identity=carrier.identity,
+            domain_finding=carrier.domain_finding,
+            hdu=None,
+            shape=tuple(carrier.frame.data.shape),
+            warnings=carrier.warnings,
+            roi_extent_evidence=None,
+        )
+        _io.emit_progress(obs, OPERATION_ID, "complete", 1, 1)
+        return InspectResult(operation_status="COMPLETED", inspection=inspection), carrier
+
+    # FitsFrameSource
+    try:
+        carrier = _io._decode_light_once(
+            source, token=token, declaration=declaration, progress=obs
+        )
+    except OperationCancelled:
+        return InspectResult(operation_status="CANCELLED", reason_code="CANCELLED"), None
+    except DecodeError as exc:
+        return InspectResult(operation_status="FAILED", reason_code=exc.reason_code, details=str(exc)), None
+    except PrecisionRefusalError as exc:
+        return InspectResult(operation_status="FAILED", reason_code="PRECISION_REFUSAL", details=str(exc)), None
+    except (OSError, SourceError, ValueError) as exc:
+        return InspectResult(operation_status="FAILED", reason_code="SOURCE_ERROR", details=str(exc)), None
+
+    inspection = FrameInspection(
+        metadata=carrier.frame.metadata,
+        identity=carrier.identity,
+        domain_finding=carrier.domain_finding,
+        hdu=carrier.frame.hdu,
+        shape=tuple(carrier.frame.data.shape),
+        warnings=carrier.warnings,
+        roi_extent_evidence=carrier.roi_extent_evidence,
+    )
+    _io.emit_progress(obs, OPERATION_ID, "complete", 1, 1)
+    return InspectResult(operation_status="COMPLETED", inspection=inspection), carrier
 
 
 def inspect_frame(
@@ -53,85 +108,8 @@ def inspect_frame(
 
     token = cancel or CancellationToken()
     obs = _io.normalize_progress(progress, OPERATION_ID)
-
-    if token.is_cancelled():
-        return InspectResult(operation_status="CANCELLED", reason_code="CANCELLED")
-
-    if isinstance(source, ArrayFrameSource):
-        try:
-            decoded = _io.array_source_to_decoded(source, cancel=token)
-            actual_digest = _io.verify_identity_digest(
-                source.identity, decoded.data, decoded.mask
-            )
-        except OperationCancelled:
-            return InspectResult(operation_status="CANCELLED", reason_code="CANCELLED")
-        except PrecisionRefusalError as exc:
-            return InspectResult(operation_status="FAILED", reason_code="PRECISION_REFUSAL", details=str(exc))
-        except (ValueError, InvalidRequestError) as exc:
-            return InspectResult(operation_status="FAILED", reason_code="INVALID_SOURCE", details=str(exc))
-
-        resolved_identity: InputIdentity = ArrayInputIdentity(
-            caller_logical_id=source.identity.caller_logical_id,
-            decoded_digest=actual_digest,
-        )
-        inspection = FrameInspection(
-            metadata=source.metadata,
-            identity=resolved_identity,
-            domain_finding=_domain_finding(source.metadata),
-            hdu=None,
-            shape=tuple(decoded.data.shape),
-            warnings=tuple(source.metadata.warnings),
-            roi_extent_evidence=None,
-        )
-        _io.emit_progress(obs, OPERATION_ID, "complete", 1, 1)
-        return InspectResult(operation_status="COMPLETED", inspection=inspection)
-
-    # FitsFrameSource
-    effective_declaration = declaration if declaration is not None else source.declaration
-    if effective_declaration is None:
-        # R3D-E F1: a Standard light supplied as "Image to calibrate" carries no
-        # import declaration; build the standard_light_contract so the strict
-        # decoder's raw-domain evidence requirement is satisfied without
-        # weakening its processed-history/units/structural checks.
-        effective_declaration = _io.standard_light_contract()
-    try:
-        data = _io.read_bytes(source.path, cancel=token)
-        whole_fits_sha256 = _io.sha256_bytes(data)
-        decoded = _io.decode_fits_from_bytes(
-            data, source.hdu, effective_declaration, cancel=token, progress=obs
-        )
-        metadata = _io.apply_roi_extent(decoded.metadata, source.roi_extent, decoded.data.shape)
-    except OperationCancelled:
-        return InspectResult(operation_status="CANCELLED", reason_code="CANCELLED")
-    except DecodeError as exc:
-        return InspectResult(operation_status="FAILED", reason_code=exc.reason_code, details=str(exc))
-    except PrecisionRefusalError as exc:
-        return InspectResult(operation_status="FAILED", reason_code="PRECISION_REFUSAL", details=str(exc))
-    except (OSError, SourceError, ValueError) as exc:
-        return InspectResult(operation_status="FAILED", reason_code="SOURCE_ERROR", details=str(exc))
-
-    decoded_digest = _io.verify_identity_digest(
-        FitsInputIdentity(path=str(source.path), hdu=decoded.hdu, decoded_digest=""),
-        decoded.data,
-        decoded.mask,
-    )
-    identity: InputIdentity = FitsInputIdentity(
-        path=str(source.path),
-        hdu=decoded.hdu,
-        whole_fits_sha256=whole_fits_sha256,
-        decoded_digest=decoded_digest,
-    )
-    inspection = FrameInspection(
-        metadata=metadata,
-        identity=identity,
-        domain_finding=_domain_finding(metadata),
-        hdu=decoded.hdu,
-        shape=tuple(decoded.data.shape),
-        warnings=tuple(metadata.warnings),
-        roi_extent_evidence=source.roi_extent,
-    )
-    _io.emit_progress(obs, OPERATION_ID, "complete", 1, 1)
-    return InspectResult(operation_status="COMPLETED", inspection=inspection)
+    result, _carrier = _decode_and_inspect(source, declaration=declaration, token=token, obs=obs)
+    return result
 
 
 __all__ = ["inspect_frame"]

@@ -12,6 +12,9 @@ import hashlib
 import io
 import os
 import tempfile
+from dataclasses import dataclass, replace
+from types import MappingProxyType
+from typing import Mapping
 
 import numpy as np
 
@@ -418,4 +421,117 @@ def array_source_to_decoded(source, *, cancel=None):
         blank=None,
         hdu=None,
         precision=measure_float32_roundoff(f64),
+    )
+
+
+@dataclass(frozen=True)
+class DecodedLight:
+    """Private single-acquisition carrier for a decoded light (P8-A4).
+
+    P8-A4 defines the scientific snapshot of a frame as the byte content acquired
+    by its single acquisition. Inspection, routing and calibration consume that
+    same decoded snapshot and identity. A concurrent/transient mutation AFTER that
+    acquisition is outside A4's frame snapshot.
+
+    ``frame`` is the canonical :class:`zecalibrator.io.raw_decoder.DecodedFrame`;
+    ``identity`` is a ``FitsInputIdentity`` (FITS source) or ``ArrayInputIdentity``
+    (array source); ``facts`` is the read-only calibration input-evidence mapping
+    (``input_dtype``/``input_units``/``input_scaling``/``roi_extent_evidence``);
+    ``domain_finding``/``warnings``/``roi_extent_evidence`` carry the inspection
+    fields. This is a private seam: no public symbol, no ``__all__`` entry.
+    """
+
+    frame: "DecodedFrame"
+    identity: object  # FitsInputIdentity | ArrayInputIdentity
+    facts: Mapping
+    domain_finding: str
+    warnings: tuple
+    roi_extent_evidence: object
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "facts", MappingProxyType(dict(self.facts)))
+        object.__setattr__(self, "warnings", tuple(self.warnings))
+
+
+def _domain_finding(metadata) -> str:
+    """Classify the raw-domain declaration for an inspection (private)."""
+    value = getattr(metadata, "raw_domain_declaration", None)
+    return value if value in ("raw", "processed", "unknown") else "unsupported"
+
+
+def _decode_light_once(source, *, token, declaration=None, progress=None):
+    """Acquire and decode a light EXACTLY ONCE (P8-A4 single-acquisition snapshot).
+
+    Returns a :class:`DecodedLight` on success or raises the same typed failure
+    each consumer maps through its own today-mapping (``OperationCancelled``,
+    ``DecodeError``, ``PrecisionRefusalError``, ``SourceError``/``OSError``/
+    ``ValueError``).
+
+    FITS source: read bytes once, hash those exact bytes, decode from those bytes,
+    apply the ROI extent, compute the decoded digest — the canonical single
+    acquisition. Array source: ``array_source_to_decoded`` + digest (no file I/O).
+
+    Mandatory formulation: P8-A4 defines the scientific snapshot of a frame as the
+    byte content acquired by its single acquisition. Inspection, routing and
+    calibration consume that same decoded snapshot and identity. A
+    concurrent/transient mutation AFTER that acquisition is outside A4's frame
+    snapshot.
+    """
+    from zecalibrator.application.library import ArrayInputIdentity, FitsInputIdentity
+    from zecalibrator.api.v1.models import ArrayFrameSource
+
+    if isinstance(source, ArrayFrameSource):
+        decoded = array_source_to_decoded(source, cancel=token)
+        actual_digest = verify_identity_digest(source.identity, decoded.data, decoded.mask)
+        identity = ArrayInputIdentity(
+            caller_logical_id=source.identity.caller_logical_id,
+            decoded_digest=actual_digest,
+        )
+        facts = {
+            "input_dtype": str(np.asarray(source.data).dtype),
+            "input_units": source.metadata.units,
+            "input_scaling": {"scaling_applied": True, "domain": source.domain},
+            "roi_extent_evidence": None,
+        }
+        return DecodedLight(
+            frame=decoded,
+            identity=identity,
+            facts=facts,
+            domain_finding=_domain_finding(source.metadata),
+            warnings=tuple(source.metadata.warnings),
+            roi_extent_evidence=None,
+        )
+
+    # FitsFrameSource
+    data = read_bytes(source.path, cancel=token)
+    whole_fits_sha256 = sha256_bytes(data)
+    decl = declaration if declaration is not None else source.declaration
+    if decl is None:
+        decl = standard_light_contract()
+    decoded = decode_fits_from_bytes(
+        data, source.hdu, decl, cancel=token, progress=progress
+    )
+    metadata = apply_roi_extent(decoded.metadata, source.roi_extent, decoded.data.shape)
+    decoded = replace(decoded, metadata=metadata)
+    from zecalibrator.core.digests import science_digest
+
+    identity = FitsInputIdentity(
+        path=str(source.path),
+        hdu=decoded.hdu,
+        whole_fits_sha256=whole_fits_sha256,
+        decoded_digest=science_digest(decoded.data, decoded.mask),
+    )
+    facts = {
+        "input_dtype": decoded.stored_dtype,
+        "input_units": decoded.metadata.units,
+        "input_scaling": {"bscale": decoded.bscale, "bzero": decoded.bzero},
+        "roi_extent_evidence": source.roi_extent,
+    }
+    return DecodedLight(
+        frame=decoded,
+        identity=identity,
+        facts=facts,
+        domain_finding=_domain_finding(metadata),
+        warnings=tuple(metadata.warnings),
+        roi_extent_evidence=source.roi_extent,
     )

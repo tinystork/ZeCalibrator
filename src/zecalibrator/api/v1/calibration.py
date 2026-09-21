@@ -14,7 +14,7 @@ supported: the facade pre-normalizes a corrected flat and builds a truthful
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Mapping, Optional
 
@@ -44,13 +44,11 @@ from . import _io
 from .errors import SourceError
 from .models import (
     ArrayFrameSource,
-    ArrayInputIdentity,
     CalibrationPlan,
     CalibrationRequest,
     CalibrationResult,
     ExecutionOptions,
     FitsFrameSource,
-    FitsInputIdentity,
     FrameSource,
     MasterDescriptor,
     ProvenanceRecord,
@@ -140,49 +138,13 @@ def _wrap(
 
 
 def _decode_light(source: FrameSource, *, token, obs):
-    """Decode the light; returns ``(DecodedFrame, identity, facts)``."""
-    if isinstance(source, ArrayFrameSource):
-        decoded = _io.array_source_to_decoded(source, cancel=token)
-        actual_digest = _io.verify_identity_digest(source.identity, decoded.data, decoded.mask)
-        identity = ArrayInputIdentity(
-            caller_logical_id=source.identity.caller_logical_id,
-            decoded_digest=actual_digest,
-        )
-        facts = {
-            "input_dtype": str(np.asarray(source.data).dtype),
-            "input_units": source.metadata.units,
-            "input_scaling": {"scaling_applied": True, "domain": source.domain},
-            "roi_extent_evidence": None,
-        }
-        return decoded, identity, facts
+    """Decode the light; returns ``(DecodedFrame, identity, facts)``.
 
-    data = _io.read_bytes(source.path, cancel=token)
-    whole_fits_sha256 = _io.sha256_bytes(data)
-    # R3D-E F1: a Standard light is supplied as "Image to calibrate" with no
-    # import declaration; build the standard_light_contract so the strict
-    # decoder's raw-domain evidence requirement is satisfied without weakening
-    # its processed-history/units/structural checks.
-    declaration = source.declaration if source.declaration is not None else _io.standard_light_contract()
-    decoded = _io.decode_fits_from_bytes(
-        data, source.hdu, declaration, cancel=token, progress=None
-    )
-    metadata = _io.apply_roi_extent(decoded.metadata, source.roi_extent, decoded.data.shape)
-    decoded = replace(decoded, metadata=metadata)
-    from zecalibrator.core.digests import science_digest
-
-    identity = FitsInputIdentity(
-        path=str(source.path),
-        hdu=decoded.hdu,
-        whole_fits_sha256=whole_fits_sha256,
-        decoded_digest=science_digest(decoded.data, decoded.mask),
-    )
-    facts = {
-        "input_dtype": decoded.stored_dtype,
-        "input_units": decoded.metadata.units,
-        "input_scaling": {"bscale": decoded.bscale, "bzero": decoded.bzero},
-        "roi_extent_evidence": source.roi_extent,
-    }
-    return decoded, identity, facts
+    A single acquisition via the private P8-A4 carrier (``obs`` is retained for
+    signature compatibility; progress reporting is owned by the caller).
+    """
+    carrier = _io._decode_light_once(source, token=token)
+    return carrier.frame, carrier.identity, dict(carrier.facts)
 
 
 def _light_matches_plan(light, plan: CalibrationPlan) -> None:
@@ -809,36 +771,44 @@ def _wrap_prepare_failure(
     )
 
 
-def _decode_light_for_plan(source, plan, *, policy, request, token, obs):
-    """Decode the light and match it to the plan.
+def _decode_light_for_plan(source, plan, *, policy, request, token, obs, decoded_light=None):
+    """Decode the light (or reuse a P8-A4 carrier) and match it to the plan.
 
     Returns ``(failure, light, input_identity, facts)`` where ``failure`` is a
     wrapped :class:`CalibrationResult` on decode failure (or ``None`` on
     success); ``light``/``input_identity``/``facts`` are ``None`` on failure.
+    ``decoded_light`` (private) carries the single acquisition already performed
+    by the batch/auto-route inspection stage; when absent the light is decoded
+    once here (standalone ``calibrate_frame`` behaviour, unchanged).
     """
     _io.emit_progress(obs, OPERATION_ID, "decode", 1, 5)
-    try:
-        light, input_identity, facts = _decode_light(source, token=token, obs=obs)
-    except OperationCancelled:
-        return _wrap(
-            _engine_cancelled(), plan=plan, policy=policy, request=request,
-            input_identity=None, facts={}, executed=("decode",),
-        ), None, None, None
-    except DecodeError as exc:
-        return _wrap(
-            _engine_failed(exc.reason_code, str(exc)), plan=plan, policy=policy,
-            request=request, input_identity=None, facts={}, executed=("decode",),
-        ), None, None, None
-    except PrecisionRefusalError as exc:
-        return _wrap(
-            _engine_failed("PRECISION_REFUSAL", str(exc)), plan=plan, policy=policy,
-            request=request, input_identity=None, facts={}, executed=("decode",),
-        ), None, None, None
-    except (SourceError, OSError, ValueError) as exc:
-        return _wrap(
-            _engine_failed("SOURCE_ERROR", str(exc)), plan=plan, policy=policy,
-            request=request, input_identity=None, facts={}, executed=("decode",),
-        ), None, None, None
+    if decoded_light is not None:
+        light = decoded_light.frame
+        input_identity = decoded_light.identity
+        facts = dict(decoded_light.facts)
+    else:
+        try:
+            light, input_identity, facts = _decode_light(source, token=token, obs=obs)
+        except OperationCancelled:
+            return _wrap(
+                _engine_cancelled(), plan=plan, policy=policy, request=request,
+                input_identity=None, facts={}, executed=("decode",),
+            ), None, None, None
+        except DecodeError as exc:
+            return _wrap(
+                _engine_failed(exc.reason_code, str(exc)), plan=plan, policy=policy,
+                request=request, input_identity=None, facts={}, executed=("decode",),
+            ), None, None, None
+        except PrecisionRefusalError as exc:
+            return _wrap(
+                _engine_failed("PRECISION_REFUSAL", str(exc)), plan=plan, policy=policy,
+                request=request, input_identity=None, facts={}, executed=("decode",),
+            ), None, None, None
+        except (SourceError, OSError, ValueError) as exc:
+            return _wrap(
+                _engine_failed("SOURCE_ERROR", str(exc)), plan=plan, policy=policy,
+                request=request, input_identity=None, facts={}, executed=("decode",),
+            ), None, None, None
 
     _light_matches_plan(light, plan)
     return None, light, input_identity, facts
@@ -912,13 +882,16 @@ def _apply_prepared_context(source, context, options, *, token, progress):
     return _execute_prepared(light, context, context.plan, input_identity, facts, token=token, obs=obs)
 
 
-def _calibrate_frame_impl(source, plan, options, *, token, obs, slot):
+def _calibrate_frame_impl(source, plan, options, *, token, obs, slot, decoded_light=None):
     """Single per-frame execution path shared by ``calibrate_frame`` and batch.
 
     Preserves today's exact order and failure precedence: pre-cancel →
     verify_plan_id → validate_plan → decode → light_matches_plan → master stage
     (prepare once / reuse) → execute. ``slot`` is an optional batch-local
     single-slot holder; ``calibrate_frame`` passes ``None`` (prepare every time).
+    ``decoded_light`` (private) is the P8-A4 single-acquisition carrier from the
+    batch/auto-route inspection stage; when ``None`` this path decodes once
+    itself (standalone behaviour, unchanged).
     """
     request = plan.request
     policy = _reconstruct_policy(plan)
@@ -950,7 +923,8 @@ def _calibrate_frame_impl(source, plan, options, *, token, obs, slot):
         )
 
     failure, light, input_identity, facts = _decode_light_for_plan(
-        source, plan, policy=policy, request=request, token=token, obs=obs
+        source, plan, policy=policy, request=request, token=token, obs=obs,
+        decoded_light=decoded_light,
     )
     if failure is not None:
         return failure

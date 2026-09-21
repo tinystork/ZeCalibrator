@@ -53,7 +53,7 @@ from zecalibrator.io.output_writer import (
 from . import _io
 from .calibration import _calibrate_frame_impl, _PreparedContextSlot
 from .errors import InvalidRequestError, LibraryClosedError
-from .frames import inspect_frame
+from .frames import _decode_and_inspect
 from .matching import resolve_calibration
 from .models import (
     ArrayFrameSource,
@@ -106,7 +106,7 @@ def _process_one(idx, frame, request, library, policy, destination, token, plan_
     disables reuse.
     """
     try:
-        inspection_result = inspect_frame(frame, cancel=token)
+        inspection_result, decoded_light = _decode_and_inspect(frame, token=token, obs=None)
     except OperationCancelled:
         raise
     except InvalidRequestError as exc:
@@ -178,7 +178,7 @@ def _process_one(idx, frame, request, library, policy, destination, token, plan_
         plan_schema_holder["provenance_schema"] = plan.versions.provenance_schema
 
     try:
-        result = _calibrate_frame_impl(frame, plan, ExecutionOptions(), token=token, obs=None, slot=slot)
+        result = _calibrate_frame_impl(frame, plan, ExecutionOptions(), token=token, obs=None, slot=slot, decoded_light=decoded_light)
     except OperationCancelled:
         raise
     except InvalidRequestError as exc:
