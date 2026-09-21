@@ -406,12 +406,19 @@ def execute_calibration(
     cancel: Optional[CancellationToken] = None,
     progress: Optional[ProgressObserver] = None,
     operation_id: str = "zecalibrator-calibration",
+    prepared_flat_outcome: object = None,
 ) -> CalibrationResult:
     """Execute one bounded frame calibration with no partial mutation.
 
     Saturation evidence comes from each frame's own qualified metadata, never a
     redundant call override. Returns ``CalibrationResult(status=CANCELLED)`` on
     cooperative cancellation.
+
+    ``prepared_flat_outcome`` is an additive private seam (P8-A3B): when the
+    caller supplies a plan-invariant prepared-flat outcome, ``_execute`` consumes
+    it instead of re-running ``_prepare_flat`` per frame. It is opaque to this
+    module (duck-typed); ``None`` (the default) preserves today's per-frame
+    ``_prepare_flat`` path exactly.
     """
     if request.additive_mode not in ("control", "bias_only", "dark_incl_bias", "dark_bias_removed"):
         raise InvalidRequestError(f"unsupported additive_mode: {request.additive_mode!r}")
@@ -429,6 +436,7 @@ def execute_calibration(
     try:
         return _execute(
             light, request, masters, flat_prep_mode=flat_prep_mode, token=token, emit=emit,
+            prepared_flat_outcome=prepared_flat_outcome,
         )
     except OperationCancelled:
         return _cancelled_result()
@@ -606,7 +614,9 @@ def _prepare_flat(
     return norm.R, norm.valid, dict(norm.scalars), norm
 
 
-def _execute(light, request, masters, *, flat_prep_mode, token, emit) -> CalibrationResult:
+def _execute(
+    light, request, masters, *, flat_prep_mode, token, emit, prepared_flat_outcome=None
+) -> CalibrationResult:
     token.raise_if_cancelled()
     emit("geometry_validation", 0, 3)
 
@@ -628,7 +638,18 @@ def _execute(light, request, masters, *, flat_prep_mode, token, emit) -> Calibra
 
         token.raise_if_cancelled()
         emit("flat_preparation", 1, 3)
-        flat_response, flat_valid, scalars, norm = _prepare_flat(flat_m, masters, flat_prep_mode)
+        # P8-A3B: consume the plan-invariant prepared-flat outcome when it
+        # matches this route; otherwise fall back to today's per-frame
+        # ``_prepare_flat``. A prepared *failure* is re-emitted as a fresh
+        # exception instance (never the cached instance/traceback) at this exact
+        # point, preserving today's precedence and per-frame FAILED mapping.
+        pf = prepared_flat_outcome
+        if pf is None or pf.flat_prep_mode != flat_prep_mode:
+            flat_response, flat_valid, scalars, norm = _prepare_flat(flat_m, masters, flat_prep_mode)
+        elif not pf.ok:
+            raise pf.failure_type(*pf.failure_args)
+        else:
+            flat_response, flat_valid, scalars, norm = pf.flat_response, pf.flat_valid, pf.scalars, pf.norm
         if norm is not None and not norm.usable:
             return _flat_unusable_result(norm, light_md.saturation_evidence)
 

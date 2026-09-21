@@ -529,12 +529,40 @@ class FrozenMaster:
 
 
 @dataclass(frozen=True)
+class PreparedFlatOutcome:
+    """Plan-invariant prepared-flat result captured once per plan (P8-A3B).
+
+    Carries either the frozen ``_prepare_flat`` return tuple (``ok=True``) or the
+    immutable failure description (``ok=False``). The response/validity arrays are
+    frozen read-only and ``scalars`` is a read-only mapping *before* the outcome
+    enters the context. A captured failure stores only the exception **type** and
+    **args** — never an exception instance, traceback, context or cause; the
+    executor reconstructs a fresh instance per frame at the same execution point.
+    """
+
+    flat_prep_mode: str
+    ok: bool
+    flat_response: Optional[np.ndarray]
+    flat_valid: Optional[np.ndarray]
+    scalars: Mapping[str, Optional[float]]
+    norm: Optional[object]
+    failure_type: Optional[type]
+    failure_args: Optional[tuple]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "scalars", MappingProxyType(dict(self.scalars)))
+        if self.failure_args is not None:
+            object.__setattr__(self, "failure_args", tuple(self.failure_args))
+
+
+@dataclass(frozen=True)
 class PreparedCalibrationContext:
     """Plan-invariant master-side work, prepared once and applied per frame.
 
     Immutable: ``bindings``/``flat_notes`` are read-only mappings and every
     bound frame's ``data``/``mask`` arrays are frozen (``writeable=False``). The
-    context never hands out a mutable reference.
+    context never hands out a mutable reference. ``prepared_flat`` carries the
+    light-independent flat response (or its deterministic failure) once per plan.
     """
 
     plan: CalibrationPlan
@@ -542,6 +570,7 @@ class PreparedCalibrationContext:
     bindings: Mapping[str, FrozenMaster]
     flat_notes: Mapping[str, object]
     context_id: str
+    prepared_flat: Optional[PreparedFlatOutcome] = None
 
 
 class _PreparedContextSlot:
@@ -635,6 +664,58 @@ def _context_matches_plan(
     return True
 
 
+def _build_prepared_flat(plan, flat_prep_mode, masters):
+    """Eagerly prepare the light-independent flat response once per plan.
+
+    Only for ``flat_mode == "apply"`` with a ``flat`` master; otherwise returns
+    ``None`` (the executor's per-frame ``_prepare_flat`` path applies). A
+    deterministic preparation failure is captured as the outcome rather than
+    allowed to escape at context-build time: ``InvalidRequestError`` and
+    ``GeometryMismatchError`` are the only types ``_prepare_flat`` can raise, and
+    both are re-emitted per frame at the identical execution point by the
+    executor seam (preserving today's precedence and per-frame FAILED mapping).
+    """
+    if plan.request.flat_mode != "apply" or "flat" not in masters:
+        return None
+    from zecalibrator.application.executor import _prepare_flat
+
+    flat_m = masters["flat"]
+    try:
+        flat_response, flat_valid, scalars, norm = _prepare_flat(flat_m, masters, flat_prep_mode)
+    except (InvalidRequestError, GeometryMismatchError) as exc:
+        # Store only immutable failure facts. ``GeometryMismatchError``
+        # reconstructs from (reason_code, fields) — NOT from ``exc.args`` (which
+        # is the flattened message) — while ``InvalidRequestError`` reconstructs
+        # from ``exc.args`` (its message). Both reconstruct byte-identically via
+        # ``raise failure_type(*failure_args)`` at the executor seam.
+        if isinstance(exc, GeometryMismatchError):
+            failure_args = (exc.reason_code, exc.fields)
+        else:
+            failure_args = exc.args
+        return PreparedFlatOutcome(
+            flat_prep_mode=flat_prep_mode,
+            ok=False,
+            flat_response=None,
+            flat_valid=None,
+            scalars=MappingProxyType({}),
+            norm=None,
+            failure_type=type(exc),
+            failure_args=failure_args,
+        )
+    flat_response.flags.writeable = False
+    flat_valid.flags.writeable = False
+    return PreparedFlatOutcome(
+        flat_prep_mode=flat_prep_mode,
+        ok=True,
+        flat_response=flat_response,
+        flat_valid=flat_valid,
+        scalars=MappingProxyType(dict(scalars)),
+        norm=norm,
+        failure_type=None,
+        failure_args=None,
+    )
+
+
 def _prepare_calibration_context(plan: CalibrationPlan, *, token):
     """Prepare the plan-invariant master-side work exactly once.
 
@@ -661,6 +742,7 @@ def _prepare_calibration_context(plan: CalibrationPlan, *, token):
     ) as exc:
         return None, exc
 
+    prepared_flat = _build_prepared_flat(plan, flat_prep_mode, masters)
     bindings = MappingProxyType(
         {role: _freeze_master(master, plan.masters[role]) for role, master in masters.items()}
     )
@@ -670,6 +752,7 @@ def _prepare_calibration_context(plan: CalibrationPlan, *, token):
         bindings=bindings,
         flat_notes=MappingProxyType(dict(flat_notes)),
         context_id=_context_id(plan, flat_prep_mode, bindings),
+        prepared_flat=prepared_flat,
     )
     return context, None
 
@@ -780,6 +863,7 @@ def _execute_prepared(light, context, plan, input_identity, facts, *, token, obs
             cancel=token,
             progress=None,  # facade owns the monotonic coordinator
             operation_id=OPERATION_ID,
+            prepared_flat_outcome=context.prepared_flat,
         )
     except OperationCancelled:
         return _wrap(
