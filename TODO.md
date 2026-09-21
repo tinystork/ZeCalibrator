@@ -406,6 +406,47 @@ Activation contract/report baseline records the actual post-closure full SHA.
 
 ## DEFERRED
 
+- **P8 PERFORMANCE = CLOSED (owner decision, 2026-09-21).** Do not pursue further
+  timing improvements. Specifically do NOT reopen: A2 precision instrumentation;
+  light-side defensive checks; V2 identity validation; output I/O; GPU/CuPy;
+  parallelism — unless a future *measured product requirement* independently
+  justifies it.
+  **Committed state:** A1 + S1 in `74c72e88aa9709e111094628b1d30d84d370ed6d`
+  (feature branch pushed; `origin/beta` untouched; no beta promotion, no tag).
+  A1 = prevalidated prepared master forms; S1 = the float32 precondition the fast
+  path depends on is now enforced fail-loudly in `_build_prepared_master_forms`
+  (never a silent conversion).
+  **Final wall-clock (real 10-light dataset, this host, load-dependent):**
+  ~610–646 s at the start of P8 → **52 s** after A2 (prepared masters) + A3
+  (decoder guard prove-or-vectorise) + A3B (prepared flat) + A4 (decode once) +
+  A1 (prevalidated master forms).
+  **Final profile (10 lights, ~52 s):** acquisition/decode 15.9 s · calibration
+  16.8 s (majority = the precision instrumentation deliberately KEPT) · V2
+  identity revalidation 4.2 s · output writing 4.5 s · one-time preparation
+  (masters + flat + forms) ~10.3 s · decoder guard on the 2 master planes ~1.2 s.
+  **Why we stop:** the remaining time is *consciously chosen* work — real per-frame
+  science, instrumentation we decided to keep, safety revalidation (V2) and I/O —
+  not architectural waste. There is no remaining structural redundancy; chasing
+  further seconds would start trading simplicity for timing.
+  **Also recorded:** P8-A1 owner decisions (A2 CLOSED/status quo; ZSSS residency
+  RETAIN HOST-CENTRIC) and the P8 STOP CONDITION are in the entries below.
+- **CPU in-memory integration — VERDICT A: EXISTING PUBLIC CONTRACT SUFFICIENT**
+  (archaeology only, no implementation). An in-memory NumPy consumer can already
+  calibrate already-decoded raw frames with no FITS serialisation via the public
+  surface: `ArrayFrameSource` (+ public `SensorMetadata`/`ArrayInputIdentity`) →
+  `inspect_frame` → `resolve_calibration` → `calibrate_frame` / `calibrate_batch`
+  (the latter already prepares masters/flat once per call). This path is exercised
+  by the *public* contract tests (`tests/api/test_api_v1_contract.py`,
+  `test_batch_contract.py`), so it is public by construction.
+  Deliverable = documentation only. Recorded candidates, necessity NOT proven:
+  **G1** the Standard zero-question auto-route is private (`api/v1/_auto_route.py`)
+  so a consumer must pass explicit modes (still safe: incompatible combinations
+  are refused, never downgraded); **G2** `SensorMetadata` construction ergonomics
+  (public but verbose; no public "describe my in-memory frame" helper);
+  **G3** an explicit in-memory capability identifier (would advertise something
+  already true). Do not expose `DecodedLight`/`PreparedCalibrationContext` merely
+  because they exist, and do not create prepare/apply public APIs without a proven
+  requirement. Report: `.a2a-reports/ZC-P8-CPU-INMEMORY-MINIMUM-CONTRACT-20260921.junior.r0.md`.
 - P8 post-A4 owner decisions (2026-09-21):
   **A1 — prepared master defensive work: AUTHORISED (bounded implementation).**
   Masters and the prepared flat response are float32 by contract and frozen since
