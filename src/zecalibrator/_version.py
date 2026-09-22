@@ -7,4 +7,4 @@ science-contract, provenance-schema, library-schema and matching-policy
 versions. Do not derive the API version from this value.
 """
 
-__version__ = "0.0.1"
+__version__ = "0.0.2"

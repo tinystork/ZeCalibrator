@@ -13,13 +13,13 @@ import pytest
 def test_package_version():
     import zecalibrator
 
-    assert zecalibrator.__version__ == "0.0.1"
+    assert zecalibrator.__version__ == "0.0.2"
 
 
 def test_version_literal_single_source():
     import zecalibrator._version as v
 
-    assert v.__version__ == "0.0.1"
+    assert v.__version__ == "0.0.2"
     assert isinstance(v.__version__, str)
 
 
@@ -42,7 +42,7 @@ def test_installed_package_metadata_matches_version_literal():
         installed = metadata.version("ZeCalibrator")
     except metadata.PackageNotFoundError:  # pragma: no cover - depends on the env
         pytest.skip("ZeCalibrator distribution metadata is not installed")
-    assert installed == zecalibrator.__version__ == "0.0.1"
+    assert installed == zecalibrator.__version__ == "0.0.2"
 
 
 def test_clean_import_has_no_optional_heavy_dependencies():
@@ -53,7 +53,7 @@ def test_clean_import_has_no_optional_heavy_dependencies():
         import zecalibrator.api.v1
         import zecalibrator.storage
         import zecalibrator._resources
-        assert zecalibrator.__version__ == "0.0.1"
+        assert zecalibrator.__version__ == "0.0.2"
         # Cold import of the package + lazy API facade must not pull heavy or
         # optional modules (NumPy/Astropy are loaded lazily on model use).
         for mod in ("PySide6", "QtWidgets", "QtCore", "QtGui", "zealfie", "seestar", "cupy", "numpy", "astropy"):
