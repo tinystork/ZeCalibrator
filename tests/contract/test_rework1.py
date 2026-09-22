@@ -133,20 +133,26 @@ def test_custom_flat_threshold_refused():
 
 # --- M3: manual selection filters + recounts ---------------------------------
 def test_empty_manual_changes_nothing():
+    # G2B: empty manual selection leaves the ranking unchanged — two compatible
+    # dark peers are ranked (candidate_id tie-break) instead of AMBIGUOUS.
     lt = light()
     two = pool(dark=[candidate("d1", descriptor("dark", "included", content_sha256="a" * 64)), candidate("d2", descriptor("dark", "included", content_sha256="c" * 64))])
     r = match_calibration(lt, request(), two, policy(), manual_selection={})
-    assert r.outcome == "AMBIGUOUS"
-    assert len(r.coherent_sets) == 2
+    assert r.outcome == "MATCHED"
+    assert r.plan.masters["dark"].descriptor_id == two["dark"][0].descriptor.descriptor_id
+    assert [rec.candidate_id for rec in r.ranked_out] == ["d2"]
 
 
 def test_partial_manual_leaves_residual_ambiguity():
+    # G2B: manual selection for one role no longer resurrects ambiguity for a
+    # peer-ranked role — the two removed darks are ranked to one winner.
     lt = light()
     bias = candidate("b", descriptor("bias", "not_applicable", exposure_s=0.001))
     removed = [candidate("r1", descriptor("dark", "removed")), candidate("r2", descriptor("dark", "removed", content_sha256="3" * 64))]
     r = match_calibration(lt, request("dark_bias_removed"), pool(dark=removed, bias=[bias]), policy(), manual_selection={"bias": "b"})
-    assert r.outcome == "AMBIGUOUS"
-    assert len(r.coherent_sets) == 2
+    assert r.outcome == "MATCHED"
+    assert r.plan.masters["bias"].descriptor_id == bias.descriptor.descriptor_id
+    assert {rec.candidate_id for rec in r.ranked_out} == {"r2"}
 
 
 def test_manual_incompatible_choice_refuses():
@@ -325,7 +331,10 @@ def test_coherent_sets_are_frozen():
     d1 = candidate("d1", descriptor("dark", "included", content_sha256="a" * 64))
     d2 = candidate("d2", descriptor("dark", "included", content_sha256="c" * 64))
     r = match_calibration(lt, request(), pool(dark=[d1, d2]), policy())
-    assert r.outcome == "AMBIGUOUS"
+    # G2B: same-role peers are ranked instead of AMBIGUOUS; the single coherent
+    # set is still frozen.
+    assert r.outcome == "MATCHED"
+    assert len(r.coherent_sets) == 1
     with pytest.raises((TypeError, AttributeError)):
         r.coherent_sets[0].clear()
 
@@ -370,13 +379,14 @@ def test_decision_envelope_json_roundtrip():
     d2 = candidate("d2", descriptor("dark", "included", content_sha256="c" * 64))
     snap = LibrarySnapshot(revision="r1", schema_version=LIBRARY_INDEX_SCHEMA, candidates={"dark": (d1, d2)})
     env = resolve_calibration(lt, request(), snap, policy())
-    assert env.outcome == "AMBIGUOUS"
+    # G2B: same-role peers are ranked (candidate_id tie-break) instead of AMBIGUOUS.
+    assert env.outcome == "MATCHED"
     raw = json.dumps(dict(env.to_dict()), ensure_ascii=False, allow_nan=False)
     restored = DecisionEnvelope.from_dict(json.loads(raw))
-    assert restored.outcome == "AMBIGUOUS"
+    assert restored.outcome == "MATCHED"
     assert restored.request.additive_mode == "dark_incl_bias"
     assert restored.policy.version == "zecalibrator.match.v1"
-    assert len(restored.coherent_sets) == 2
+    assert len(restored.coherent_sets) == 1
     for s in restored.coherent_sets:
         for c in s.values():
             assert c.descriptor_snapshot.descriptor.descriptor_id

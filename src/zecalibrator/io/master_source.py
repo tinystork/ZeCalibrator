@@ -167,6 +167,53 @@ def enumerate_fits_files(root: str, *, follow_symlinks: bool = False) -> Tuple[l
     return files, diagnostics
 
 
+def _card_keyword(card) -> Optional[str]:
+    if isinstance(card, (tuple, list)) and len(card) == 2:
+        return card[0]
+    if isinstance(card, Mapping):
+        return card.get("keyword")
+    return getattr(card, "keyword", None)
+
+
+def _card_value(card):
+    if isinstance(card, (tuple, list)) and len(card) == 2:
+        return card[1]
+    if isinstance(card, Mapping):
+        return card.get("value")
+    return getattr(card, "value", None)
+
+
+_HIERARCH_PREFIX = "HIERARCH "
+
+
+def read_date_obs(cards) -> Optional[str]:
+    """Read the ``DATE-OBS`` raw value from an ordered card list (else ``None``).
+
+    HIERARCH-insensitive keyword match; returns the single unambiguous raw
+    value (all present values must agree), or ``None`` when absent/disagreeing.
+    Parsing is intentionally NOT done here — callers reuse
+    :func:`zecalibrator.core.selection.parse_date_obs` (the one tolerant parser).
+    """
+    values: list = []
+    for c in cards:
+        kw = _card_keyword(c)
+        if kw is None:
+            continue
+        kws = str(kw)
+        if kws.startswith(_HIERARCH_PREFIX):
+            kws = kws[len(_HIERARCH_PREFIX):]
+        if kws.strip().upper() != "DATE-OBS":
+            continue
+        val = _card_value(c)
+        if val is not None:
+            values.append(val)
+    distinct = []
+    for v in values:
+        if v not in distinct:
+            distinct.append(v)
+    return distinct[0] if len(distinct) == 1 else None
+
+
 __all__ = [
     "FilesystemSource",
     "ImageIdentity",
@@ -174,4 +221,5 @@ __all__ = [
     "ScanDiagnostic",
     "SourceError",
     "enumerate_fits_files",
+    "read_date_obs",
 ]

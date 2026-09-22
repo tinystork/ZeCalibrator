@@ -38,6 +38,7 @@ _CREATE_STATEMENTS = (
     "CREATE TABLE IF NOT EXISTS entries ("
     "revision TEXT NOT NULL, role TEXT NOT NULL, candidate_id TEXT NOT NULL, "
     "snapshot_json TEXT NOT NULL, locators_json TEXT NOT NULL, mask_locator_json TEXT, "
+    "acquired_at TEXT, "
     "PRIMARY KEY (revision, role, candidate_id))",
 )
 
@@ -176,8 +177,8 @@ class LibraryIndex:
                         locators = [{"path": l.path, "hdu": l.hdu} for l in c.locators]
                         mask_loc = {"path": c.mask_locator.path} if c.mask_locator is not None else None
                         conn.execute(
-                            "INSERT INTO entries(revision, role, candidate_id, snapshot_json, locators_json, mask_locator_json) "
-                            "VALUES (?, ?, ?, ?, ?, ?)",
+                            "INSERT INTO entries(revision, role, candidate_id, snapshot_json, locators_json, mask_locator_json, acquired_at) "
+                            "VALUES (?, ?, ?, ?, ?, ?, ?)",
                             (
                                 revision,
                                 role,
@@ -185,6 +186,7 @@ class LibraryIndex:
                                 _json_dumps(dict(c.descriptor_snapshot.to_dict())),
                                 _json_dumps(locators),
                                 _json_dumps(mask_loc) if mask_loc is not None else None,
+                                getattr(c, "acquired_at", None),
                             ),
                         )
                 conn.execute("COMMIT")
@@ -213,15 +215,28 @@ class LibraryIndex:
         rev = revision if revision is not None else self._latest_revision(conn)
         if rev is None:
             return LibrarySnapshot(revision="", schema_version=LIBRARY_INDEX_SCHEMA, candidates={})
-        rows = conn.execute(
-            "SELECT role, candidate_id, snapshot_json, locators_json, mask_locator_json "
-            "FROM entries WHERE revision = ? ORDER BY role, candidate_id",
-            (rev,),
-        ).fetchall()
+        # ``acquired_at`` is additive: a revision written before this column
+        # existed still loads with ``acquired_at=None``.
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(entries)").fetchall()}
+        has_acquired = "acquired_at" in cols
+        if has_acquired:
+            rows = conn.execute(
+                "SELECT role, candidate_id, snapshot_json, locators_json, mask_locator_json, acquired_at "
+                "FROM entries WHERE revision = ? ORDER BY role, candidate_id",
+                (rev,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT role, candidate_id, snapshot_json, locators_json, mask_locator_json "
+                "FROM entries WHERE revision = ? ORDER BY role, candidate_id",
+                (rev,),
+            ).fetchall()
         if not rows and revision is not None:
             raise LibraryIndexError(f"requested revision not found: {revision}")
         by_role: dict[str, list[Candidate]] = {}
-        for role, candidate_id, snap_json, loc_json, mask_json in rows:
+        for row in rows:
+            role, candidate_id, snap_json, loc_json, mask_json = row[:5]
+            acquired_at = row[5] if has_acquired else None
             snapshot = DescriptorSnapshot.from_dict(_json_loads(snap_json))
             locators = tuple(FitsFileLocator(path=l["path"], hdu=l["hdu"]) for l in _json_loads(loc_json))
             mask_loc = None
@@ -235,6 +250,7 @@ class LibraryIndex:
                     descriptor_snapshot=snapshot,
                     locators=locators,
                     mask_locator=mask_loc,
+                    acquired_at=acquired_at,
                 )
             )
         candidates = {role: tuple(cs) for role, cs in by_role.items()}

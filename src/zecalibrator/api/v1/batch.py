@@ -599,6 +599,9 @@ def _build_candidate(path, spec, source, mask_path):
         mask_loc = None
         mask_identity = None
     shape = _fits_shape(source, path, spec.hdu)
+    # G2B: FITS header DATE-OBS wins when present/parseable, else the spec value,
+    # else None.
+    acquired_at = _resolve_acquired_at(source, path, spec)
     desc = _descriptor_from_spec(
         spec, shape=shape, content_sha256=ident.content_sha256,
         size_bytes=ident.size_bytes, mask_identity=mask_identity,
@@ -609,7 +612,26 @@ def _build_candidate(path, spec, source, mask_path):
         descriptor_snapshot=DescriptorSnapshot(desc),
         locators=(loc,),
         mask_locator=mask_loc,
+        acquired_at=acquired_at,
     )
+
+
+def _resolve_acquired_at(source, path, spec) -> Optional[str]:
+    """Resolve a master's ``acquired_at``: FITS header DATE-OBS wins when
+    present/parseable, else the spec value, else None."""
+    from zecalibrator.core.selection import parse_date_obs
+    from zecalibrator.io.master_source import read_date_obs
+
+    try:
+        cards = source.read_header(path, hdu=spec.hdu)
+    except Exception:  # noqa: BLE001 - header read is best-effort for ranking
+        cards = ()
+    header_date = read_date_obs(cards)
+    if header_date is not None and parse_date_obs(header_date) is not None:
+        return header_date
+    if spec.acquired_at:
+        return spec.acquired_at
+    return None
 
 
 def index_library(

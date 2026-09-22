@@ -842,6 +842,7 @@ class MasterImportSpec:
     validity_evidence: Optional[ValidityEvidence] = None
     processing_provenance: Optional[ProcessingProvenance] = None
     dq_state: str = "source_mask"
+    acquired_at: Optional[str] = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.path, str) or not self.path.strip():
@@ -854,6 +855,8 @@ class MasterImportSpec:
             raise InvalidRequestError("MasterImportSpec.hdu must be int or str")
         if isinstance(self.hdu, int) and self.hdu < 0:
             raise InvalidRequestError("MasterImportSpec.hdu must be a non-negative int or str")
+        if self.acquired_at is not None and (not isinstance(self.acquired_at, str) or not self.acquired_at.strip()):
+            raise InvalidRequestError("MasterImportSpec.acquired_at must be a non-empty string or None")
         if self.dq_state not in DQ_STATES:
             raise InvalidRequestError(f"MasterImportSpec.dq_state invalid: {self.dq_state!r}")
         if self.dq_state == "no_source_dq":
@@ -987,10 +990,13 @@ class ManagedMasterRecord:
     mask_path: Optional[str] = None
     last_seen_path: Optional[str] = None
     schema_version: str = MANAGED_LEDGER_SCHEMA
+    acquired_at: Optional[str] = None
 
     def __post_init__(self) -> None:
         if self.role not in ("bias", "dark", "flat", "flat_dark"):
             raise InvalidRequestError(f"ManagedMasterRecord.role invalid: {self.role!r}")
+        if self.acquired_at is not None and (not isinstance(self.acquired_at, str) or not self.acquired_at.strip()):
+            raise InvalidRequestError("ManagedMasterRecord.acquired_at must be a non-empty string or None")
         if not _is_hex64(self.content_sha256):
             raise InvalidRequestError(
                 "ManagedMasterRecord.content_sha256 must be a 64-char lowercase hex string"
@@ -1049,6 +1055,7 @@ class ManagedMasterRecord:
             "dq_state": self.dq_state,
             "mask_path": self.mask_path,
             "last_seen_path": self.last_seen_path,
+            "acquired_at": self.acquired_at,
         }
 
     @classmethod
@@ -1070,6 +1077,7 @@ class ManagedMasterRecord:
             mask_path=d.get("mask_path"),
             last_seen_path=d.get("last_seen_path"),
             schema_version=d.get("schema_version", MANAGED_LEDGER_SCHEMA),
+            acquired_at=d.get("acquired_at"),
         )
 
 

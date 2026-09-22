@@ -255,6 +255,10 @@ class MasterBinding:
     Construction validates that the descriptor snapshot is exactly coherent with
     the recorded identity fields (``descriptor_id``/``content_sha256``/
     ``size_bytes``/``hdu``/``mask_identity``); a mismatched snapshot raises.
+
+    ``acquired_at`` is a retrieval-facing DATE-OBS string (ranking evidence only);
+    it is deliberately NOT part of ``identity_dict`` and therefore never enters
+    the plan digest.
     """
 
     descriptor_id: str
@@ -265,6 +269,7 @@ class MasterBinding:
     mask_identity: Optional[str]
     locators: tuple[FitsFileLocator, ...] = ()
     mask_locator: Optional[MaskPayloadLocator] = None
+    acquired_at: Optional[str] = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "locators", tuple(self.locators))
@@ -306,6 +311,7 @@ class MasterBinding:
             "mask_identity": self.mask_identity,
             "locators": [l.to_dict() for l in self.locators],
             "mask_locator": self.mask_locator.to_dict() if self.mask_locator is not None else None,
+            "acquired_at": self.acquired_at,
         }
     @classmethod
     def from_dict(cls, d: Mapping[str, object]) -> "MasterBinding":
@@ -318,6 +324,79 @@ class MasterBinding:
             mask_identity=d["mask_identity"],
             locators=tuple(FitsFileLocator(path=l["path"], hdu=l["hdu"]) for l in d.get("locators", ())),
             mask_locator=MaskPayloadLocator(path=d["mask_locator"]["path"]) if d.get("mask_locator") else None,
+            acquired_at=d.get("acquired_at"),
+        )
+
+
+@dataclass(frozen=True)
+class SkippedRole:
+    """A role that had a compatible candidate but was not applied."""
+
+    role: str
+    reason_code: str
+    detail: str = ""
+
+    def to_dict(self) -> Mapping[str, object]:
+        return {"role": self.role, "reason_code": self.reason_code, "detail": self.detail}
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, object]) -> "SkippedRole":
+        return cls(role=d["role"], reason_code=d["reason_code"], detail=d.get("detail", ""))
+
+
+@dataclass(frozen=True)
+class CalibrationComposition:
+    """Honest, availability-relative record of what a plan actually applied.
+
+    Level semantics (availability-relative):
+
+    * ``NONE``    = no master at all is bound in the plan;
+    * ``PARTIAL`` = at least one master bound, and at least one role that HAD a
+      compatible candidate after ranking was not applied (or a scientifically
+      dependent role could not be satisfied);
+    * ``COMPLETE`` = at least one master bound and every role that had a
+      compatible candidate was applied.
+
+    Roles with no compatible candidate are recorded in ``no_candidate_roles``;
+    roles that had a candidate but were skipped are recorded in
+    ``skipped_roles`` with their reason codes. Nothing is silently hidden.
+    """
+
+    applied_roles: tuple[str, ...]
+    skipped_roles: tuple[SkippedRole, ...]
+    level: str  # NONE | PARTIAL | COMPLETE
+    additive_state: str  # none | bias_only | dark_incl_bias | dark_bias_removed
+    flat_applied: bool
+    no_candidate_roles: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if self.level not in ("NONE", "PARTIAL", "COMPLETE"):
+            raise ValueError(f"CalibrationComposition.level invalid: {self.level!r}")
+        if self.additive_state not in ("none", "bias_only", "dark_incl_bias", "dark_bias_removed"):
+            raise ValueError(f"CalibrationComposition.additive_state invalid: {self.additive_state!r}")
+        object.__setattr__(self, "applied_roles", tuple(self.applied_roles))
+        object.__setattr__(self, "skipped_roles", tuple(self.skipped_roles))
+        object.__setattr__(self, "no_candidate_roles", tuple(self.no_candidate_roles))
+
+    def to_dict(self) -> Mapping[str, object]:
+        return {
+            "applied_roles": list(self.applied_roles),
+            "skipped_roles": [s.to_dict() for s in self.skipped_roles],
+            "level": self.level,
+            "additive_state": self.additive_state,
+            "flat_applied": self.flat_applied,
+            "no_candidate_roles": list(self.no_candidate_roles),
+        }
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, object]) -> "CalibrationComposition":
+        return cls(
+            applied_roles=tuple(d.get("applied_roles", ())),
+            skipped_roles=tuple(SkippedRole.from_dict(s) for s in d.get("skipped_roles", ())),
+            level=d["level"],
+            additive_state=d.get("additive_state", "none"),
+            flat_applied=bool(d.get("flat_applied", False)),
+            no_candidate_roles=tuple(d.get("no_candidate_roles", ())),
         )
 
 
@@ -325,7 +404,13 @@ class MasterBinding:
 class CalibrationPlan:
     """Executable-intent plan binding validated light constraints, exact master
     identities and actual policy parameters. ``plan_id`` is derived and excludes
-    retrieval locators and execution fields."""
+    retrieval locators and execution fields.
+
+    ``selection`` / ``selection_policy_version`` / ``composition`` are NON-DIGEST
+    audit blocks: they are carried by ``to_dict``/``from_dict`` but never enter
+    ``plan_digest_dict`` (so two plans identical except for the selection block
+    share the same ``plan_id``).
+    """
 
     plan_id: str
     request: CalibrationRequest
@@ -333,9 +418,13 @@ class CalibrationPlan:
     masters: Mapping[str, MasterBinding]
     policy_parameters: PolicyParameters
     versions: VersionSet
+    selection: tuple = ()
+    selection_policy_version: str = ""
+    composition: Optional["CalibrationComposition"] = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "masters", MappingProxyType(dict(self.masters)))
+        object.__setattr__(self, "selection", tuple(self.selection))
 
     @classmethod
     def build(
@@ -345,6 +434,9 @@ class CalibrationPlan:
         masters: Mapping[str, MasterBinding],
         policy_parameters: PolicyParameters,
         versions: VersionSet,
+        selection: tuple = (),
+        selection_policy_version: str = "",
+        composition: Optional["CalibrationComposition"] = None,
     ) -> "CalibrationPlan":
         plan = cls(
             plan_id="",
@@ -353,6 +445,9 @@ class CalibrationPlan:
             masters=masters,
             policy_parameters=policy_parameters,
             versions=versions,
+            selection=tuple(selection),
+            selection_policy_version=selection_policy_version,
+            composition=composition,
         )
         object.__setattr__(plan, "plan_id", plan.recompute_plan_id())
         return plan
@@ -383,6 +478,9 @@ class CalibrationPlan:
             "masters": {role: dict(b.to_dict()) for role, b in self.masters.items()},
             "policy_parameters": dict(self.policy_parameters.to_dict()),
             "versions": dict(self.versions.to_dict()),
+            "selection": [s.to_dict() for s in self.selection],
+            "selection_policy_version": self.selection_policy_version,
+            "composition": dict(self.composition.to_dict()) if self.composition is not None else None,
         }
     @classmethod
     def from_dict(cls, d: Mapping[str, object]) -> "CalibrationPlan":
@@ -397,10 +495,19 @@ class CalibrationPlan:
             masters=masters,
             policy_parameters=cls._policy_from_dict(d["policy_parameters"]),
             versions=VersionSet(**d["versions"]),
+            selection=tuple(cls._selection_from_dict(s) for s in d.get("selection", ())),
+            selection_policy_version=d.get("selection_policy_version", ""),
+            composition=CalibrationComposition.from_dict(d["composition"]) if d.get("composition") is not None else None,
         )
         if d.get("plan_id") is not None and d["plan_id"] != plan.plan_id:
             raise ValueError(f"plan digest mismatch: recorded {d['plan_id']!r}, recomputed {plan.plan_id!r}")
         return plan
+
+    @staticmethod
+    def _selection_from_dict(d: Mapping[str, object]):
+        from zecalibrator.core.selection import MasterSelectionRecord
+
+        return MasterSelectionRecord.from_dict(d)
 
     @staticmethod
     def _light_from_dict(d: Mapping[str, object]) -> LightConstraints:
@@ -468,6 +575,9 @@ class Candidate:
 
     Construction validates that the descriptor snapshot is exactly coherent with
     the descriptor identity (never a mismatched pair).
+
+    ``acquired_at`` is a retrieval-facing DATE-OBS string (ranking evidence only);
+    it is not part of the descriptor identity and never enters any digest.
     """
 
     candidate_id: str
@@ -475,11 +585,14 @@ class Candidate:
     descriptor_snapshot: DescriptorSnapshot
     locators: tuple[FitsFileLocator, ...] = ()
     mask_locator: Optional[MaskPayloadLocator] = None
+    acquired_at: Optional[str] = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.candidate_id, str) or not self.candidate_id:
             raise ValueError("Candidate.candidate_id must be a non-empty string")
         object.__setattr__(self, "locators", tuple(self.locators))
+        if self.acquired_at is not None and not isinstance(self.acquired_at, str):
+            raise ValueError("Candidate.acquired_at must be a string or None")
         snap = self.descriptor_snapshot.descriptor
         if snap.descriptor_id != self.descriptor.descriptor_id:
             raise ValueError("Candidate descriptor_snapshot descriptor_id does not match descriptor")
@@ -504,6 +617,7 @@ class Candidate:
 
 __all__ = [
     "ADDITIVE_MODES",
+    "CalibrationComposition",
     "CalibrationPlan",
     "CalibrationRequest",
     "Candidate",
@@ -522,6 +636,7 @@ __all__ = [
     "PolicyError",
     "PolicyParameters",
     "SCIENCE_CONTRACT_VERSION",
+    "SkippedRole",
     "Tolerance",
     "VersionSet",
     "default_match_policy",

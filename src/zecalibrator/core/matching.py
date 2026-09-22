@@ -40,13 +40,20 @@ from zecalibrator.core.descriptors import (
 )
 from zecalibrator.core.geometry import Geometry, is_bayer_phase
 from zecalibrator.core.plans import (
+    CalibrationComposition,
     CalibrationPlan,
     CalibrationRequest,
     Candidate,
     MasterBinding,
     MatchPolicy,
     PolicyParameters,
+    SkippedRole,
     VersionSet,
+)
+from zecalibrator.core.selection import (
+    SELECTION_POLICY_VERSION,
+    STATUS_AMBIGUOUS_TIE,
+    select_role_candidates,
 )
 
 OUTCOME_MATCHED = "MATCHED"
@@ -140,6 +147,10 @@ class MatchResult:
     coherent_sets: tuple[Mapping[str, Candidate], ...] = ()
     structural_reasons: tuple[Reason, ...] = ()
     unverified: tuple[Reason, ...] = ()
+    selection: tuple = ()
+    ranked_out: tuple = ()
+    composition: Optional["CalibrationComposition"] = None
+    selection_policy_version: str = ""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "rejected_candidates", tuple(self.rejected_candidates))
@@ -147,6 +158,8 @@ class MatchResult:
         object.__setattr__(self, "coherent_sets", tuple(MappingProxyType(dict(s)) for s in self.coherent_sets))
         object.__setattr__(self, "structural_reasons", tuple(self.structural_reasons))
         object.__setattr__(self, "unverified", tuple(self.unverified))
+        object.__setattr__(self, "selection", tuple(self.selection))
+        object.__setattr__(self, "ranked_out", tuple(self.ranked_out))
 
 
 # ---------------------------------------------------------------------------
@@ -652,6 +665,7 @@ def _collapse_duplicates(candidates: Sequence[Candidate]) -> list[Candidate]:
                 descriptor_snapshot=merged.descriptor_snapshot,
                 locators=locs,
                 mask_locator=merged.mask_locator or c.mask_locator,
+                acquired_at=merged.acquired_at,
             )
         else:
             by_key[key] = c
@@ -667,6 +681,13 @@ def _role_of(desc: MasterDescriptor) -> str:
     return desc.master_type
 
 
+def _find_candidate(cands: Sequence[Candidate], candidate_id: str) -> Optional[Candidate]:
+    for c in cands:
+        if c.candidate_id == candidate_id:
+            return c
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Flat dependency options
 # ---------------------------------------------------------------------------
@@ -675,108 +696,133 @@ def _flat_dependency_options(
     flat_candidate: Candidate,
     candidates: Mapping[str, Sequence[Candidate]],
     policy: MatchPolicy,
+    *,
+    light=None,
+    manual_selection: Optional[Mapping[str, str]] = None,
 ):
-    """Return ``(options, manifest_records, structural, audit_records, unverified)``.
+    """Return ``(options, manifest_records, structural, audit_records, unverified,
+    selection_records, ranked_out_records, dep_no_candidate, dep_tie)``.
 
-    ``options`` are complete dependency bindings; ``manifest_records`` are
-    applicable-but-incompatible dependency rejections (exposure/bias-range);
-    ``structural`` is ``FLAT_ADDITIVE_DEPENDENCY_MISSING`` when the flat's
-    additive dependency is entirely absent; ``audit_records`` are wrong-role
-    candidates in the dependency pools (audit only, not manifest);
-    ``unverified`` are non-blocking UNVERIFIED notes from accepted dependency
-    candidates (R3B).
+    ``options`` are complete dependency bindings, each built from the ranked
+    winner of its dependency role (flat_dark is ranked by the additive rule, never
+    the light's civil day); ``manifest_records`` are applicable-but-incompatible
+    dependency rejections (exposure/bias-range); ``structural`` is
+    ``FLAT_ADDITIVE_DEPENDENCY_MISSING`` when the flat's additive dependency is
+    entirely absent; ``audit_records`` are wrong-role candidates in the dependency
+    pools (audit only, not manifest); ``unverified`` are non-blocking UNVERIFIED
+    notes from accepted dependency candidates (R3B). ``selection_records`` /
+    ``ranked_out_records`` carry the ranking audit; ``dep_no_candidate`` lists
+    dependency roles with no compatible candidate; ``dep_tie`` is True when a
+    dependency role reported AMBIGUOUS_TIE.
     """
+    manual = dict(manual_selection or {})
     ff = flat.flat_form
     if ff in ("normalized_response", "corrected_unnormalized"):
-        return [{}], [], [], [], []
+        return [{}], [], [], [], [], (), (), (), False
 
-    if ff == "raw_response":
-        options = []
-        manifest_records: list[RejectionRecord] = []
-        structural: list[Reason] = []
-        audit_records: list[RejectionRecord] = []
-        unverified: list[Reason] = []
+    if ff != "raw_response":
+        return [], [], [Reason("UNDOCUMENTED_PROCESSING", "flat_form", role="flat")], [], [], (), (), (), False
 
-        all_fd = list(candidates.get("flat_dark", ()))
-        all_bias = list(candidates.get("bias", ()))
-        fd_pool = [c for c in all_fd if _role_of(c.descriptor) == "flat_dark"]
-        bias_pool = [c for c in all_bias if _role_of(c.descriptor) == "bias"]
-        for c in all_fd:
-            if _role_of(c.descriptor) != "flat_dark":
-                audit_records.append(RejectionRecord(c.candidate_id, "flat_dark", (Reason("ROLE_UNAVAILABLE", "master_type", role="flat_dark", expected="flat_dark", observed=c.descriptor.master_type),), c.descriptor_snapshot))
-            elif c.descriptor.bias_state not in ("included", "removed"):
-                audit_records.append(RejectionRecord(c.candidate_id, "flat_dark", (Reason("ROLE_UNAVAILABLE", "bias_state", role="flat_dark", parent="flat", expected="included|removed", observed=c.descriptor.bias_state),), c.descriptor_snapshot))
-        for c in all_bias:
-            if _role_of(c.descriptor) != "bias":
-                audit_records.append(RejectionRecord(c.candidate_id, "bias", (Reason("ROLE_UNAVAILABLE", "master_type", role="bias", expected="bias", observed=c.descriptor.master_type),), c.descriptor_snapshot))
+    options = []
+    manifest_records: list[RejectionRecord] = []
+    structural: list[Reason] = []
+    audit_records: list[RejectionRecord] = []
+    unverified: list[Reason] = []
+    selection_records: list = []
+    ranked_out_records: list = []
+    dep_no_candidate: list[str] = []
 
-        flat_bias_range = flat.bias_exposure_max_s
-        flat_short = flat.short_flat_profile
+    all_fd = list(candidates.get("flat_dark", ()))
+    all_bias = list(candidates.get("bias", ()))
+    fd_pool = [c for c in all_fd if _role_of(c.descriptor) == "flat_dark"]
+    bias_pool = [c for c in all_bias if _role_of(c.descriptor) == "bias"]
+    for c in all_fd:
+        if _role_of(c.descriptor) != "flat_dark":
+            audit_records.append(RejectionRecord(c.candidate_id, "flat_dark", (Reason("ROLE_UNAVAILABLE", "master_type", role="flat_dark", expected="flat_dark", observed=c.descriptor.master_type),), c.descriptor_snapshot))
+        elif c.descriptor.bias_state not in ("included", "removed"):
+            audit_records.append(RejectionRecord(c.candidate_id, "flat_dark", (Reason("ROLE_UNAVAILABLE", "bias_state", role="flat_dark", parent="flat", expected="included|removed", observed=c.descriptor.bias_state),), c.descriptor_snapshot))
+    for c in all_bias:
+        if _role_of(c.descriptor) != "bias":
+            audit_records.append(RejectionRecord(c.candidate_id, "bias", (Reason("ROLE_UNAVAILABLE", "master_type", role="bias", expected="bias", observed=c.descriptor.master_type),), c.descriptor_snapshot))
 
-        # Route 1: flat_dark_incl_bias.
-        for fd in _sorted_candidates(fd_pool):
-            if fd.descriptor.bias_state != "included":
-                continue
-            reasons = _candidate_compatibility(
-                flat, fd.descriptor, policy=policy,
-                check=_CHECK_FLATDARK_EXPOSURE, reference_exposure=flat.acquisition.exposure_s, reference_bias_range=None,
-                check_filter=False, check_optical=False, expected_units="ADU", flat_extra=False,
-            )
-            blocking, unv = _split_reasons(reasons)
-            if blocking:
-                manifest_records.append(RejectionRecord(fd.candidate_id, "flat_dark", tuple(blocking), fd.descriptor_snapshot))
-            else:
-                options.append({"flat_dark": fd})
-                unverified.extend(unv)
+    flat_bias_range = flat.bias_exposure_max_s
+    flat_short = flat.short_flat_profile
 
-        # Route 2: flat_dark_bias_removed.
-        for fd in _sorted_candidates(fd_pool):
-            if fd.descriptor.bias_state != "removed":
-                continue
-            fd_reasons = _candidate_compatibility(
-                flat, fd.descriptor, policy=policy,
-                check=_CHECK_FLATDARK_EXPOSURE, reference_exposure=flat.acquisition.exposure_s, reference_bias_range=None,
-                check_filter=False, check_optical=False, expected_units="ADU", flat_extra=False,
-            )
-            fd_blocking, fd_unv = _split_reasons(fd_reasons)
-            if fd_blocking:
-                manifest_records.append(RejectionRecord(fd.candidate_id, "flat_dark", tuple(fd_blocking), fd.descriptor_snapshot))
-                continue
-            for bf in _sorted_candidates(bias_pool):
-                bf_reasons = _candidate_compatibility(
-                    flat, bf.descriptor, policy=policy,
-                    check=_CHECK_FLATBIAS_RANGE, reference_exposure=None, reference_bias_range=flat_bias_range,
-                    check_filter=False, check_optical=False, expected_units="ADU", flat_extra=False,
-                )
-                bf_blocking, bf_unv = _split_reasons(bf_reasons)
-                if bf_blocking:
-                    manifest_records.append(RejectionRecord(bf.candidate_id, "bias_flat", tuple(bf_blocking), bf.descriptor_snapshot))
-                else:
-                    options.append({"flat_dark": fd, "bias_flat": bf})
-                    unverified.extend(fd_unv)
-                    unverified.extend(bf_unv)
+    fd_incl_compat: list[Candidate] = []
+    fd_removed_compat: list[Candidate] = []
+    bias_flat_compat: list[Candidate] = []
 
-        # Route 3: bias_only_flat.
-        if flat_short:
-            for bf in _sorted_candidates(bias_pool):
-                bf_reasons = _candidate_compatibility(
-                    flat, bf.descriptor, policy=policy,
-                    check=_CHECK_FLATBIAS_RANGE, reference_exposure=None, reference_bias_range=flat_bias_range,
-                    check_filter=False, check_optical=False, expected_units="ADU", flat_extra=False,
-                )
-                bf_blocking, bf_unv = _split_reasons(bf_reasons)
-                if bf_blocking:
-                    manifest_records.append(RejectionRecord(bf.candidate_id, "bias_flat", tuple(bf_blocking), bf.descriptor_snapshot))
-                else:
-                    options.append({"bias_flat": bf})
-                    unverified.extend(bf_unv)
+    for fd in _sorted_candidates(_collapse_duplicates(fd_pool)):
+        reasons = _candidate_compatibility(
+            flat, fd.descriptor, policy=policy,
+            check=_CHECK_FLATDARK_EXPOSURE, reference_exposure=flat.acquisition.exposure_s, reference_bias_range=None,
+            check_filter=False, check_optical=False, expected_units="ADU", flat_extra=False,
+        )
+        blocking, unv = _split_reasons(reasons)
+        if blocking:
+            manifest_records.append(RejectionRecord(fd.candidate_id, "flat_dark", tuple(blocking), fd.descriptor_snapshot))
+            continue
+        unverified.extend(unv)
+        if fd.descriptor.bias_state == "included":
+            fd_incl_compat.append(fd)
+        elif fd.descriptor.bias_state == "removed":
+            fd_removed_compat.append(fd)
 
-        routable_fd = [c for c in fd_pool if c.descriptor.bias_state in ("included", "removed")]
-        if not options and len(routable_fd) == 0:
-            structural.append(Reason("FLAT_ADDITIVE_DEPENDENCY_MISSING", "flat_dark", role="flat", parent="flat"))
+    for bf in _sorted_candidates(_collapse_duplicates(bias_pool)):
+        reasons = _candidate_compatibility(
+            flat, bf.descriptor, policy=policy,
+            check=_CHECK_FLATBIAS_RANGE, reference_exposure=None, reference_bias_range=flat_bias_range,
+            check_filter=False, check_optical=False, expected_units="ADU", flat_extra=False,
+        )
+        blocking, unv = _split_reasons(reasons)
+        if blocking:
+            manifest_records.append(RejectionRecord(bf.candidate_id, "bias_flat", tuple(blocking), bf.descriptor_snapshot))
+            continue
+        unverified.extend(unv)
+        bias_flat_compat.append(bf)
 
-        return options, manifest_records, structural, audit_records, unverified
-    return [], [], [Reason("UNDOCUMENTED_PROCESSING", "flat_form", role="flat")], [], []
+    fd_incl_sel = select_role_candidates("flat_dark", light, fd_incl_compat, manual_choice=manual.get("flat_dark"))
+    fd_removed_sel = select_role_candidates("flat_dark", light, fd_removed_compat, manual_choice=manual.get("flat_dark"))
+    bias_flat_sel = select_role_candidates("bias_flat", light, bias_flat_compat, manual_choice=manual.get("bias_flat"))
+
+    dep_tie = (
+        fd_incl_sel.status == STATUS_AMBIGUOUS_TIE
+        or fd_removed_sel.status == STATUS_AMBIGUOUS_TIE
+        or bias_flat_sel.status == STATUS_AMBIGUOUS_TIE
+    )
+
+    for sel in (fd_incl_sel, fd_removed_sel, bias_flat_sel):
+        if sel.winner is not None:
+            selection_records.append(sel.winner)
+        ranked_out_records.extend(sel.ranked_out)
+
+    fd_incl_cand = _find_candidate(fd_incl_compat, fd_incl_sel.winner.chosen_candidate_id) if fd_incl_sel.winner is not None else None
+    fd_removed_cand = _find_candidate(fd_removed_compat, fd_removed_sel.winner.chosen_candidate_id) if fd_removed_sel.winner is not None else None
+    bias_cand = _find_candidate(bias_flat_compat, bias_flat_sel.winner.chosen_candidate_id) if bias_flat_sel.winner is not None else None
+
+    # Route 1: flat_dark_incl_bias.
+    if fd_incl_cand is not None:
+        options.append({"flat_dark": fd_incl_cand})
+    # Route 2: flat_dark_bias_removed.
+    if fd_removed_cand is not None and bias_cand is not None:
+        options.append({"flat_dark": fd_removed_cand, "bias_flat": bias_cand})
+    # Route 3: bias_only_flat.
+    if flat_short and bias_cand is not None:
+        options.append({"bias_flat": bias_cand})
+
+    if not fd_incl_compat and not fd_removed_compat:
+        dep_no_candidate.append("flat_dark")
+    if (flat_short or fd_removed_compat) and not bias_flat_compat:
+        dep_no_candidate.append("bias_flat")
+
+    routable_fd = [c for c in fd_pool if c.descriptor.bias_state in ("included", "removed")]
+    if not options and len(routable_fd) == 0:
+        structural.append(Reason("FLAT_ADDITIVE_DEPENDENCY_MISSING", "flat_dark", role="flat", parent="flat"))
+
+    return (
+        options, manifest_records, structural, audit_records, unverified,
+        tuple(selection_records), tuple(ranked_out_records), tuple(dep_no_candidate), dep_tie,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -791,6 +837,7 @@ def match_calibration(
     manual_selection: Optional[Mapping[str, str]] = None,
     standard_contract: bool = False,
 ) -> MatchResult:
+    manual = dict(manual_selection or {})
     roles = request.required_roles
 
     rejected: list[RejectionRecord] = []
@@ -802,6 +849,7 @@ def match_calibration(
     light_bias_range = light.acquisition.bias_exposure_max_s
     light_exposure = light.acquisition.exposure_s
 
+    # -- additive compatibility (unchanged) ---------------------------------
     for role in roles:
         if role == "flat":
             continue
@@ -852,7 +900,8 @@ def match_calibration(
                 unverified.extend(unv)
         per_role_compatible[role] = compatible
 
-    flat_options: list[tuple[Candidate, dict[str, Candidate]]] = []
+    # -- flat compatibility (unchanged) -------------------------------------
+    compatible_flats: list[Candidate] = []
     if request.flat_mode == "apply":
         all_flat = list(candidates.get("flat", ()))
         applicable_flat = []
@@ -877,65 +926,123 @@ def match_calibration(
                 rejected.append(RejectionRecord(c.candidate_id, "flat", tuple(blocking), c.descriptor_snapshot))
                 continue
             unverified.extend(unv)
-            opts, recs, struct, audit, dep_unv = _flat_dependency_options(c.descriptor, c, candidates, policy)
+            compatible_flats.append(c)
+
+    unverified = _dedup_unverified(unverified)
+
+    # -- ranking -------------------------------------------------------------
+    selection_records: list = []
+    ranked_out_records: list = []
+    compatible_ids_by_role: dict[str, set] = {}
+    additive_role_order = [r for r in roles if r != "flat"]
+
+    role_tie = False
+    additive_winners: dict[str, Candidate] = {}
+    for role in additive_role_order:
+        compat = per_role_compatible[role]
+        compatible_ids_by_role[role] = {c.candidate_id for c in compat}
+        sel = select_role_candidates(role, light, compat, manual_choice=manual.get(role))
+        if sel.status == STATUS_AMBIGUOUS_TIE:
+            role_tie = True
+            continue
+        if sel.winner is not None:
+            additive_winners[role] = _find_candidate(compat, sel.winner.chosen_candidate_id)
+            selection_records.append(sel.winner)
+            ranked_out_records.extend(sel.ranked_out)
+
+    # -- flat ranking --------------------------------------------------------
+    flat_winner_cand: Optional[Candidate] = None
+    flat_route_options: list[dict[str, Candidate]] = []
+    flat_dep_no_candidate: tuple[str, ...] = ()
+    flat_dep_missing = False
+    mixed_flat_form = False
+
+    if request.flat_mode == "apply":
+        compatible_ids_by_role["flat"] = {c.candidate_id for c in compatible_flats}
+        by_form: dict[str, list[Candidate]] = {}
+        for f in compatible_flats:
+            by_form.setdefault(f.descriptor.flat_form, []).append(f)
+        form_winners: list[tuple[str, Candidate]] = []
+        for form in sorted(by_form.keys()):
+            fl = by_form[form]
+            sel = select_role_candidates("flat", light, fl, manual_choice=manual.get("flat"))
+            if sel.status == STATUS_AMBIGUOUS_TIE:
+                role_tie = True
+                continue
+            if sel.winner is not None:
+                form_winners.append((form, _find_candidate(fl, sel.winner.chosen_candidate_id)))
+                selection_records.append(sel.winner)
+                ranked_out_records.extend(sel.ranked_out)
+        if len(form_winners) > 1:
+            mixed_flat_form = True
+        elif form_winners:
+            flat_winner_cand = form_winners[0][1]
+
+        if flat_winner_cand is not None:
+            opts, recs, struct, audit, dep_unv, dep_sel, dep_ranked, dep_no_cand, dep_tie = _flat_dependency_options(
+                flat_winner_cand.descriptor, flat_winner_cand, candidates, policy,
+                light=light, manual_selection=manual,
+            )
             rejected.extend(audit)
             rejected.extend(recs)
             manifest_rejected.extend(recs)
             structural.extend(struct)
             unverified.extend(dep_unv)
-            for deps in opts:
-                flat_options.append((c, deps))
+            selection_records.extend(dep_sel)
+            ranked_out_records.extend(dep_ranked)
+            flat_dep_no_candidate = dep_no_cand
+            if dep_tie:
+                role_tie = True
+            flat_route_options = [dict(o) for o in opts]
+            if not flat_route_options and opts is not None:
+                flat_dep_missing = True
+        else:
+            # flat_mode apply but no compatible flat: no route (flat is in
+            # no_candidate via composition).
+            flat_route_options = []
 
-    unverified = _dedup_unverified(unverified)
-
-    additive_role_order = [r for r in roles if r != "flat"]
-    role_lists = [per_role_compatible[r] for r in additive_role_order]
+    # -- assemble chosen routes ---------------------------------------------
+    routes: list[dict[str, Candidate]] = []
     if request.flat_mode == "apply":
-        role_lists.append(flat_options)
+        if flat_winner_cand is not None:
+            for deps in flat_route_options:
+                chosen: dict[str, Candidate] = dict(additive_winners)
+                chosen["flat"] = flat_winner_cand
+                chosen.update(deps)
+                routes.append(chosen)
+    else:
+        routes.append(dict(additive_winners))
 
-    sets: list[dict[str, Candidate]] = []
-    for combo in _cartesian(role_lists):
-        chosen: dict[str, Candidate] = {}
-        for r, item in zip(additive_role_order, combo[:len(additive_role_order)]):
-            chosen[r] = item
-        if request.flat_mode == "apply":
-            flat_c, deps = combo[len(additive_role_order)]
-            chosen["flat"] = flat_c
-            for dep_role, dep_c in deps.items():
-                chosen[dep_role] = dep_c
-        sets.append(chosen)
-
-    unique_sets: list[dict[str, Candidate]] = []
-    seen_sets: set[tuple] = set()
-    for s in sets:
-        key = tuple(sorted((role, c.identity_key) for role, c in s.items()))
-        if key not in seen_sets:
-            seen_sets.add(key)
-            unique_sets.append(s)
-
-    if manual_selection is not None:
-        unique_sets = _filter_by_manual(manual_selection, unique_sets)
-        if not unique_sets and manual_selection:
-            known_ids = {c.candidate_id for role_cands in candidates.values() for c in role_cands}
-            rejected_ids = {rec.candidate_id for rec in manifest_rejected}
+    # -- manual refusal (mirrors the pre-G2B filtering semantics) ------------
+    manual_refusal = False
+    if manual:
+        known_ids = {c.candidate_id for role_cands in candidates.values() for c in role_cands}
+        rejected_ids = {rec.candidate_id for rec in manifest_rejected}
+        unsatisfied = any(
+            cid not in known_ids or cid not in compatible_ids_by_role.get(role, ())
+            for role, cid in manual.items()
+        )
+        if unsatisfied:
+            manual_refusal = True
             explained = False
-            for role, cid in manual_selection.items():
+            for role, cid in manual.items():
                 if cid not in known_ids:
                     structural.append(Reason("ROLE_UNAVAILABLE", "manual_selection", role=role, expected=cid, observed=None))
                     explained = True
                     break
             if not explained:
-                # Known id that did not resolve to a coherent set. If it was a
-                # rejected candidate, the compatibility reason is already present;
-                # otherwise (wrong role / role-not-required) emit a deterministic
-                # manual-selection refusal reason.
-                if not any(cid in rejected_ids for cid in manual_selection.values()):
-                    for role, cid in sorted(manual_selection.items()):
+                if not any(cid in rejected_ids for cid in manual.values()):
+                    for role, cid in sorted(manual.items()):
                         structural.append(Reason("MANUAL_SELECTION_NO_MATCH", "manual_selection", role=role, expected=cid, observed=None))
 
-    if not unique_sets:
+    unverified = _dedup_unverified(unverified)
+
+    def _no_match():
         reason_codes = _dedup([r.code for r in structural] + [code for rec in manifest_rejected for code in rec.reason_codes])
         reasons = tuple(r for rec in rejected for r in rec.reasons) + tuple(structural)
+        composition = _compute_composition(
+            request, None, compatible_ids_by_role, flat_dep_no_candidate, flat_dep_missing,
+        )
         return MatchResult(
             outcome=OUTCOME_NO_MATCH,
             rejected_candidates=tuple(rejected),
@@ -943,19 +1050,47 @@ def match_calibration(
             reasons=reasons,
             structural_reasons=tuple(structural),
             unverified=tuple(unverified),
+            selection=tuple(selection_records),
+            ranked_out=tuple(ranked_out_records),
+            composition=composition,
+            selection_policy_version=SELECTION_POLICY_VERSION,
         )
 
-    if len(unique_sets) > 1:
+    def _ambiguous():
+        coherent = tuple(routes)
         return MatchResult(
             outcome=OUTCOME_AMBIGUOUS,
             rejected_candidates=tuple(rejected),
             reason_codes=(),
-            coherent_sets=tuple(unique_sets),
+            coherent_sets=coherent,
             unverified=tuple(unverified),
+            selection=tuple(selection_records),
+            ranked_out=tuple(ranked_out_records),
+            composition=None,
+            selection_policy_version=SELECTION_POLICY_VERSION,
         )
 
-    chosen = unique_sets[0]
-    plan = _build_plan(light, request, chosen, policy)
+    if manual_refusal:
+        return _no_match()
+    if role_tie or mixed_flat_form:
+        return _ambiguous()
+    if any(r not in additive_winners for r in additive_role_order):
+        return _no_match()
+    if not routes:
+        return _no_match()
+    if len(routes) > 1:
+        return _ambiguous()
+
+    chosen = routes[0]
+    composition = _compute_composition(
+        request, chosen, compatible_ids_by_role, flat_dep_no_candidate, flat_dep_missing,
+    )
+    plan = _build_plan(
+        light, request, chosen, policy,
+        selection=tuple(selection_records),
+        selection_policy_version=SELECTION_POLICY_VERSION,
+        composition=composition,
+    )
     return MatchResult(
         outcome=OUTCOME_MATCHED,
         plan=plan,
@@ -963,28 +1098,70 @@ def match_calibration(
         reason_codes=(),
         coherent_sets=(chosen,),
         unverified=tuple(unverified),
+        selection=tuple(selection_records),
+        ranked_out=tuple(ranked_out_records),
+        composition=composition,
+        selection_policy_version=SELECTION_POLICY_VERSION,
     )
 
 
-def _cartesian(lists):
-    if not lists:
-        return [()]
-    result = [()]
-    for lst in lists:
-        result = [prefix + (item,) for prefix in result for item in lst]
-    return result
+def _additive_state(applied: tuple[str, ...]) -> str:
+    if "dark" in applied:
+        return "dark_bias_removed" if "bias" in applied else "dark_incl_bias"
+    if "bias" in applied:
+        return "bias_only"
+    return "none"
 
 
-def _filter_by_manual(manual_selection, sets) -> list[dict[str, Candidate]]:
-    sel = dict(manual_selection)
-    result = []
-    for s in sets:
-        if all(role in s and s[role].candidate_id == cid for role, cid in sel.items()):
-            result.append(s)
-    return result
+def _compute_composition(
+    request: CalibrationRequest,
+    chosen: Optional[Mapping[str, Candidate]],
+    compatible_ids_by_role: Mapping[str, set],
+    flat_dep_no_candidate: tuple[str, ...],
+    flat_dep_missing: bool,
+) -> CalibrationComposition:
+    applied = tuple(sorted(chosen.keys())) if chosen is not None else ()
+    required = list(request.required_roles)
+    no_candidate: list[str] = []
+    skipped: list[SkippedRole] = []
+    for role in required:
+        compat_ids = compatible_ids_by_role.get(role, set())
+        if not compat_ids:
+            no_candidate.append(role)
+        elif chosen is None or role not in chosen:
+            reason = "FLAT_ADDITIVE_DEPENDENCY_MISSING" if (role == "flat" and flat_dep_missing) else "NOT_APPLIED"
+            skipped.append(SkippedRole(role, reason, ""))
+    for dr in flat_dep_no_candidate:
+        if dr not in no_candidate:
+            no_candidate.append(dr)
+
+    if not applied:
+        level = "NONE"
+    elif skipped or no_candidate:
+        level = "PARTIAL"
+    else:
+        level = "COMPLETE"
+
+    return CalibrationComposition(
+        applied_roles=applied,
+        skipped_roles=tuple(skipped),
+        level=level,
+        additive_state=_additive_state(applied),
+        flat_applied="flat" in applied,
+        no_candidate_roles=tuple(sorted(set(no_candidate))),
+    )
 
 
-def _build_plan(light, request, chosen: Mapping[str, Candidate], policy: MatchPolicy) -> CalibrationPlan:
+def _build_plan(
+    light,
+    request,
+    chosen: Mapping[str, Candidate],
+    policy: MatchPolicy,
+    *,
+    selection: tuple = (),
+    selection_policy_version: str = "",
+    composition: Optional[CalibrationComposition] = None,
+) -> CalibrationPlan:
     bindings: dict[str, MasterBinding] = {}
     for role, c in sorted(chosen.items()):
         bindings[role] = MasterBinding(
@@ -996,6 +1173,7 @@ def _build_plan(light, request, chosen: Mapping[str, Candidate], policy: MatchPo
             mask_identity=c.descriptor.mask_identity,
             locators=c.locators,
             mask_locator=c.mask_locator,
+            acquired_at=c.acquired_at,
         )
     return CalibrationPlan.build(
         request=request,
@@ -1007,6 +1185,9 @@ def _build_plan(light, request, chosen: Mapping[str, Candidate], policy: MatchPo
             flat_quality_policy=policy.flat_quality_policy,
         ),
         versions=VersionSet(matching_policy=policy.version),
+        selection=tuple(selection),
+        selection_policy_version=selection_policy_version,
+        composition=composition,
     )
 
 

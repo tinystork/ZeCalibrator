@@ -258,8 +258,10 @@ def test_flat_optical_train_mismatch_blocks():
     assert "OPTICAL_TRAIN_MISMATCH" in r.reason_codes
 
 
-# --- Disambiguator cannot distinguish -> still AMBIGUOUS via coherent sets ---
+# --- Disambiguator cannot distinguish -> still deterministic via ranking -------
 def test_unknown_disambiguator_still_ambiguous_when_indistinguishable():
+    # G2B: same-role peers are ranked (candidate_id tie-break when both dates are
+    # unknown) instead of AMBIGUOUS; the losing peer is recorded in ranked_out.
     lt = light(detector=detector(instance="unknown"))
     d1 = descriptor(
         "dark", "included", detector_obj=detector(instance="unknown"),
@@ -272,8 +274,9 @@ def test_unknown_disambiguator_still_ambiguous_when_indistinguishable():
     r = match_calibration(
         lt, request(), pool(dark=[candidate("d1", d1), candidate("d2", d2)]), policy()
     )
-    assert r.outcome == OUTCOME_AMBIGUOUS
-    assert len(r.coherent_sets) == 2
+    assert r.outcome == OUTCOME_MATCHED
+    assert r.plan.masters["dark"].descriptor_id == d1.descriptor_id
+    assert [rec.candidate_id for rec in r.ranked_out] == ["d2"]
     assert "UNVERIFIED" in _unverified_codes(r)
 
 

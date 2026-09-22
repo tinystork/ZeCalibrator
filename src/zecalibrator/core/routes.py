@@ -74,6 +74,7 @@ from zecalibrator.core.matching import (
     _split_reasons,
 )
 from zecalibrator.core.plans import Candidate, MatchPolicy
+from zecalibrator.core.selection import select_role_candidates
 
 OUTCOME_READY = "READY"
 OUTCOME_NEEDS_ATTENTION = "NEEDS_ATTENTION"
@@ -145,6 +146,25 @@ def _dedup_reasons(reasons) -> list[Reason]:
             seen.add(key)
             out.append(r)
     return out
+
+
+def _find_candidate(cands, candidate_id: str) -> Optional[Candidate]:
+    for c in cands:
+        if c.candidate_id == candidate_id:
+            return c
+    return None
+
+
+def _rank_one(role: str, light: LightConstraints, cands) -> Optional[Candidate]:
+    """Return the single ranking winner for ``role`` (or ``None``).
+
+    Reuses :func:`zecalibrator.core.selection.select_role_candidates` (the one
+    ranking implementation) — never a second ranking.
+    """
+    sel = select_role_candidates(role, light, cands)
+    if sel.winner is None:
+        return None
+    return _find_candidate(cands, sel.winner.chosen_candidate_id)
 
 
 def _compatible_candidates(
@@ -305,7 +325,10 @@ def enumerate_routes(
         if not compatible_biases:
             additive_options.append(("control", True, {}))
         else:
-            for b in compatible_biases:
+            # G2B: same-role bias peers are ranked (most-recent-first) instead of
+            # each producing a separate route.
+            b = _rank_one("bias", light, compatible_biases)
+            if b is not None:
                 additive_options.append(("bias_only", True, {"bias": b}))
     else:
         included = [d for d in compatible_darks if d.descriptor.bias_state == "included"]
@@ -317,20 +340,25 @@ def enumerate_routes(
             additive_options = []
         elif included and removed:
             additive_ambiguous = True
-            for d in included:
-                additive_options.append(("dark_incl_bias", False, {"dark": d}))
+            # G2B: rank each bias-state group to a single winner; the
+            # included-vs-removed SCIENTIFIC route ambiguity is unchanged.
+            d_incl = _rank_one("dark", light, included)
+            if d_incl is not None:
+                additive_options.append(("dark_incl_bias", False, {"dark": d_incl}))
             if compatible_biases:
-                for d in removed:
-                    for b in compatible_biases:
-                        additive_options.append(("dark_bias_removed", False, {"dark": d, "bias": b}))
+                d_rem = _rank_one("dark", light, removed)
+                b = _rank_one("bias", light, compatible_biases)
+                if d_rem is not None and b is not None:
+                    additive_options.append(("dark_bias_removed", False, {"dark": d_rem, "bias": b}))
             else:
                 reasons.append(
                     Reason(BIAS_REQUIRED, role="bias", parent="dark",
                            expected="compatible bias", observed=None)
                 )
         elif included:
-            for d in included:
-                additive_options.append(("dark_incl_bias", False, {"dark": d}))
+            d_incl = _rank_one("dark", light, included)
+            if d_incl is not None:
+                additive_options.append(("dark_incl_bias", False, {"dark": d_incl}))
         else:  # removed only
             if not compatible_biases:
                 reasons.append(
@@ -339,9 +367,10 @@ def enumerate_routes(
                 )
                 additive_options = []
             else:
-                for d in removed:
-                    for b in compatible_biases:
-                        additive_options.append(("dark_bias_removed", False, {"dark": d, "bias": b}))
+                d_rem = _rank_one("dark", light, removed)
+                b = _rank_one("bias", light, compatible_biases)
+                if d_rem is not None and b is not None:
+                    additive_options.append(("dark_bias_removed", False, {"dark": d_rem, "bias": b}))
 
     # ---------------------------------------------------------------------- flat
     compatible_flats = []
@@ -387,8 +416,16 @@ def enumerate_routes(
         flat_forms = {f.descriptor.flat_form for f in compatible_flats}
         if len(flat_forms) > 1:
             flat_ambiguous = True
+        # G2B: rank same-form flats to a single winner (same-civil-day rule);
+        # mixed flat_form remains a SCIENTIFIC route ambiguity (unchanged).
+        by_form: dict[str, list] = {}
         for f in compatible_flats:
-            ff = f.descriptor.flat_form
+            by_form.setdefault(f.descriptor.flat_form, []).append(f)
+        for form in sorted(by_form.keys()):
+            f = _rank_one("flat", light, by_form[form])
+            if f is None:
+                continue
+            ff = form
             if ff == "normalized_response":
                 flat_options.append(("apply", "already_normalized", {"flat": f}))
             elif ff == "corrected_unnormalized":

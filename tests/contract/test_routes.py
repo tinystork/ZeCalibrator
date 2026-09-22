@@ -252,12 +252,15 @@ def test_multiple_complete_routes_ambiguous():
     lt = light()
     d1 = descriptor("dark", "included", exposure_s=10.0, content_sha256="a" * 64, mask_identity="b" * 64)
     d2 = descriptor("dark", "included", exposure_s=10.0, content_sha256="c" * 64, mask_identity="d" * 64)
+    # G2B: same-role peers are ranked (candidate_id tie-break) instead of
+    # producing multiple complete routes.
     res = resolve_route(
         lt, snapshot(dark=[candidate("d1", d1), candidate("d2", d2)]), policy()
     )
-    assert res.outcome == OUTCOME_AMBIGUOUS
-    assert len(res.routes) == 2
-    assert res.plan is None
+    assert res.outcome == OUTCOME_READY
+    assert len(res.routes) == 1
+    assert res.plan is not None
+    assert res.route.masters["dark"].descriptor.descriptor_id == d1.descriptor_id
 
 
 def test_single_complete_route_ready_matched():

@@ -182,7 +182,7 @@ def descriptor(
     )
 
 
-def candidate(candidate_id, desc, locator_path=None, mask_path=None):
+def candidate(candidate_id, desc, locator_path=None, mask_path=None, acquired_at=None):
     from zecalibrator.core.plans import FitsFileLocator, MaskPayloadLocator
 
     locators = (FitsFileLocator(path=locator_path, hdu=desc.hdu),) if locator_path else ()
@@ -193,6 +193,7 @@ def candidate(candidate_id, desc, locator_path=None, mask_path=None):
         descriptor_snapshot=DescriptorSnapshot(desc),
         locators=locators,
         mask_locator=mask_loc,
+        acquired_at=acquired_at,
     )
 
 
@@ -208,7 +209,7 @@ def policy():
     return default_match_policy()
 
 
-def make_binding(desc, *, locator_path="/d.fits", mask_path="/d.mask"):
+def make_binding(desc, *, locator_path="/d.fits", mask_path="/d.mask", acquired_at=None):
     from zecalibrator.core.plans import FitsFileLocator, MaskPayloadLocator, MasterBinding
 
     return MasterBinding(
@@ -220,4 +221,5 @@ def make_binding(desc, *, locator_path="/d.fits", mask_path="/d.mask"):
         mask_identity=desc.mask_identity,
         locators=(FitsFileLocator(path=locator_path, hdu=desc.hdu),),
         mask_locator=MaskPayloadLocator(path=mask_path),
+        acquired_at=acquired_at,
     )

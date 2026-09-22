@@ -416,8 +416,9 @@ def test_resolve_ambiguous_has_no_plan():
     result = resolve_calibration(
         _inspection(), CalibrationRequest("dark_incl_bias"), library, default_match_policy()
     )
-    assert result.outcome == "AMBIGUOUS"
-    assert result.plan is None
+    # G2B: same-role peers are ranked (candidate_id tie-break) instead of AMBIGUOUS.
+    assert result.outcome == "MATCHED"
+    assert result.plan is not None
 
 
 def test_resolve_closed_handle_raises_public_error():

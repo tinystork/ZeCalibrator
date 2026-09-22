@@ -105,6 +105,7 @@ def _record_to_dict(record: ManagedMasterRecord) -> dict:
         "dq_state": record.dq_state,
         "mask_path": record.mask_path,
         "last_seen_path": record.last_seen_path,
+        "acquired_at": record.acquired_at,
     }
 
 
@@ -229,6 +230,7 @@ def build_master_import_spec(record: ManagedMasterRecord) -> MasterImportSpec:
         bias_state=record.bias_state,
         flat_form=record.flat_form,
         dq_state=record.dq_state,
+        acquired_at=record.acquired_at,
     )
 
 
@@ -244,6 +246,7 @@ def managed_fingerprint(records: Iterable[ManagedMasterRecord]) -> str:
             "size_bytes": r.size_bytes,
             "dq_state": r.dq_state,
             "mask_path": r.mask_path,
+            "acquired_at": r.acquired_at,
             "declaration": _declaration_to_dict(r.declaration),
             "evidence": {fld: fact.to_dict() for fld, fact in sorted(r.evidence.items())},
             "schema_version": r.schema_version,

@@ -61,6 +61,8 @@ def test_zero_match():
 
 
 def test_multiple_distinct_matches_ambiguous():
+    # G2B: same-role peers are ranked (most-recent-first, then candidate_id) instead
+    # of AMBIGUOUS; the losing peer is recorded in ranked_out.
     lt = light()
     d1 = descriptor("dark", "included", exposure_s=10.0, content_sha256="a" * 64, mask_identity="b" * 64)
     d2 = descriptor("dark", "included", exposure_s=10.0, content_sha256="c" * 64, mask_identity="d" * 64)
@@ -69,14 +71,14 @@ def test_multiple_distinct_matches_ambiguous():
         pool(dark=[candidate("d1", d1), candidate("d2", d2)]),
         policy(),
     )
-    assert r.outcome == OUTCOME_AMBIGUOUS
-    assert r.plan is None
-    assert len(r.coherent_sets) == 2
+    assert r.outcome == OUTCOME_MATCHED
+    assert r.plan is not None
+    assert r.plan.masters["dark"].descriptor_id == d1.descriptor_id  # d1 < d2
+    assert [rec.candidate_id for rec in r.ranked_out] == ["d2"]
 
 
 def test_complete_set_not_per_role_cardinality():
-    # Two dark candidates + two compatible flat_dark candidates must not produce a
-    # "per-role count" result; the number of complete *sets* governs the outcome.
+    # G2B: two compatible darks are ranked to one winner (not a per-role count).
     lt = light()
     d1 = descriptor("dark", "included", exposure_s=10.0, content_sha256="a" * 64, mask_identity="b" * 64)
     d2 = descriptor("dark", "included", exposure_s=10.0, content_sha256="c" * 64, mask_identity="d" * 64)
@@ -85,8 +87,9 @@ def test_complete_set_not_per_role_cardinality():
         pool(dark=[candidate("d1", d1), candidate("d2", d2)]),
         policy(),
     )
-    assert r.outcome == OUTCOME_AMBIGUOUS
-    assert len(r.coherent_sets) == 2
+    assert r.outcome == OUTCOME_MATCHED
+    assert r.plan.masters["dark"].descriptor_id == d1.descriptor_id
+    assert [rec.candidate_id for rec in r.ranked_out] == ["d2"]
 
 
 # --- unknown semantics ------------------------------------------------------
@@ -453,8 +456,12 @@ def test_duplicate_identical_collapse_keeps_locations():
 
 
 def test_same_metadata_different_content_not_duplicate():
+    # G2B: different content = two distinct candidates (ranked, not collapsed);
+    # the losing peer is recorded in ranked_out.
     lt = light()
     d1 = descriptor("dark", "included", content_sha256="a" * 64, mask_identity="b" * 64)
     d2 = descriptor("dark", "included", content_sha256="c" * 64, mask_identity="d" * 64)
     r = match_calibration(lt, request(), pool(dark=[candidate("d1", d1), candidate("d2", d2)]), policy())
-    assert r.outcome == OUTCOME_AMBIGUOUS
+    assert r.outcome == OUTCOME_MATCHED
+    assert r.plan.masters["dark"].descriptor_id == d1.descriptor_id
+    assert [rec.candidate_id for rec in r.ranked_out] == ["d2"]

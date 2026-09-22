@@ -304,6 +304,16 @@ _R3B_CASE_OVERRIDES = {
     "unknown_not_equal_unknown": {"expected_outcome": "MATCHED", "reason_codes": []},
 }
 
+# G2B (master selection): two distinct-but-compatible same-role peers now resolve
+# deterministically via ranking (candidate_id tie-break) instead of AMBIGUOUS.
+# The frozen cases.json declaration ``duplicate_different_hashes_ambiguous``
+# predates G2B; override its expectation here (documented) without editing the
+# owner-frozen declaration — the same way ``unknown_not_equal_unknown`` is
+# documented above.
+_G2B_CASE_OVERRIDES = {
+    "duplicate_different_hashes_ambiguous": {"expected_outcome": "MATCHED", "reason_codes": []},
+}
+
 
 @pytest.mark.parametrize(
     "case",
@@ -311,7 +321,7 @@ _R3B_CASE_OVERRIDES = {
     ids=[c["id"] for c in _CASES],
 )
 def test_declarative_matching_case(case):
-    expected = _R3B_CASE_OVERRIDES.get(case["id"], case)
+    expected = _G2B_CASE_OVERRIDES.get(case["id"], _R3B_CASE_OVERRIDES.get(case["id"], case))
     light, masters = _apply_case(_load_cases(), case)
     request = CalibrationRequest(
         additive_mode=case["request"]["additive_mode"],

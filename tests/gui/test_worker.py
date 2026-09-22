@@ -139,9 +139,9 @@ def test_preflight_ambiguous(controller, tmp_path):
     res = run_operation(controller, _preflight_snapshot(fixture), v1.CancellationToken())
     assert not res.timed_out
     light_summary = res.preflight[0][1]
-    assert light_summary["outcome"] == "AMBIGUOUS"
-    assert len(light_summary["coherent_sets"]) == 2
-    assert light_summary["plan_id"] is None
+    # G2B: same-role peers are ranked (candidate_id tie-break) instead of AMBIGUOUS.
+    assert light_summary["outcome"] == "MATCHED"
+    assert light_summary["plan_id"] is not None
 
 
 def test_preflight_rejection_reasons_structured(controller, tmp_path):

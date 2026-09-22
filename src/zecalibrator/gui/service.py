@@ -534,7 +534,28 @@ def scan_master_header(path: str, selected_role: Optional[str] = None) -> Mappin
         "status": "COMPLETED",
         "candidates": {f: fact.to_dict() for f, fact in candidates.items()},
         "conflicts": {f: [x.to_dict() for x in facts] for f, facts in conflicts.items()},
+        # G2B additive ranking evidence (NOT an ImportDeclaration field; never
+        # enters evidence_for_fields / USER_ONLY_FIELDS / build_declaration).
+        "ranking": {"acquired_at": _scan_date_obs(card_pairs), "source": "fits_header"},
     }
+
+
+def _scan_date_obs(card_pairs):
+    """Return the DATE-OBS raw string for a master header scan (else None).
+
+    HIERARCH-insensitive, single unambiguous value (same semantics as the
+    source-boundary DATE-OBS reader).
+    """
+    values = []
+    for kw, val in _iter_keyword_values(card_pairs):
+        if kw == "DATE-OBS":
+            if val is not None:
+                values.append(val)
+    distinct = []
+    for v in values:
+        if v not in distinct:
+            distinct.append(v)
+    return distinct[0] if len(distinct) == 1 else None
 
 
 def evidence_for_fields(candidates: Mapping, confirmed_fields: Mapping[str, bool]) -> Mapping[str, "v1.EvidenceFact"]:
