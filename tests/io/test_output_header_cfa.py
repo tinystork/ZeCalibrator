@@ -140,6 +140,15 @@ def test_cfa_roundtrip_bayer_preserved(tmp_path):
         )
 
 
+@pytest.mark.parametrize("phase", ["GRBG", "RGGB", "BGGR", "GBRG"])
+def test_all_bayer_phases_emitted_verbatim(phase):
+    # A narrowing of _BAYER_PHASES (or a swapped phase mapping) must fail here:
+    # every explicit Bayer phase is emitted verbatim as BAYERPAT.
+    lc = _constraints(geometry=_geometry(cfa_phase=phase))
+    fields = _fields(lc)
+    assert fields["BAYERPAT"] == phase
+
+
 def test_mono_input_no_bayer_invented(tmp_path):
     lc = _constraints(geometry=_geometry(cfa_phase="mono"))
     fields = _fields(lc)
