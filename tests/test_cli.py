@@ -17,7 +17,7 @@ def run_cli(*args: str) -> subprocess.CompletedProcess:
 def test_version():
     proc = run_cli("--version")
     assert proc.returncode == 0
-    assert "zecalibrator 0.1.0" in proc.stdout
+    assert "zecalibrator 0.0.1" in proc.stdout
 
 
 def test_help():

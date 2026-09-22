@@ -46,7 +46,7 @@ unsupported/unadvertised until a future gate.
 | distribution | `ZeCalibrator` | |
 | product_id / package | `zecalibrator` | |
 | public module | `zecalibrator.api.v1` | |
-| product version target | `0.1.0` | |
+| product version target | `0.0.1` | |
 | public API version target | `1.0` | independent of product version |
 | consumer compatibility range | `>=1,<2` + capabilities | |
 | provenance schema | `zecalibrator.provenance.v2` | |
@@ -951,7 +951,7 @@ Created (all under the product root, none in the parent workspace):
   (setuptools, `src` layout, `requires-python >=3.13,<3.14`, `license =
   "GPL-3.0-or-later"`), `.gitignore`, `.gitattributes`.
 - `src/zecalibrator/` package: `__init__.py` (version only), `_version.py`
-  (literal `0.1.0`), `__main__.py` (CLI only), `cli.py` (`--help`/`--version`
+  (literal `0.0.1`), `__main__.py` (CLI only), `cli.py` (`--help`/`--version`
   only), `storage.py` (platformdirs adapter, `appname="ZeCalibrator"`,
   `appauthor="ZeSoftware"`, `version=None`, `roaming=False`, no import-time
   directory creation), `_resources.py` (importlib.resources), `api/v1/`
