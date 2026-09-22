@@ -228,6 +228,86 @@ def test_scan_folder_inputs_rejects_non_directory(tmp_path):
         service.scan_folder_inputs(str(f))
 
 
+def test_scan_folder_inputs_default_is_top_level_only(tmp_path):
+    """B1 — default (non-recursive) scan sees top-level files only."""
+    (tmp_path / "a.fit").write_bytes(b"")
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    (nested / "b.fit").write_bytes(b"")
+    paths, unsupported = service.scan_folder_inputs(str(tmp_path))
+    assert paths == [str(tmp_path / "a.fit")]
+    assert unsupported == 0
+
+
+def test_scan_folder_inputs_explicit_non_recursive_matches_default(tmp_path):
+    """B2 — explicit ``recursive=False`` is identical to the default call."""
+    (tmp_path / "a.fit").write_bytes(b"")
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    (nested / "b.fit").write_bytes(b"")
+    default = service.scan_folder_inputs(str(tmp_path))
+    explicit = service.scan_folder_inputs(str(tmp_path), recursive=False)
+    assert explicit == default
+
+
+def test_scan_folder_inputs_recursive_deterministic_and_deduped(tmp_path):
+    """B3 — recursive scan discovers supported FITS at every depth in a
+    deterministic order, with no duplicate paths (call twice, same result)."""
+    (tmp_path / "a.fit").write_bytes(b"")
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    (nested / "b.fit").write_bytes(b"")
+    deeper = nested / "deeper"
+    deeper.mkdir()
+    (deeper / "c.FITS").write_bytes(b"")
+
+    first = service.scan_folder_inputs(str(tmp_path), recursive=True)
+    second = service.scan_folder_inputs(str(tmp_path), recursive=True)
+    assert first == second
+    assert first == (
+        [str(tmp_path / "a.fit"), str(nested / "b.fit"), str(deeper / "c.FITS")],
+        0,
+    )
+
+
+def test_scan_folder_inputs_recursive_extension_filter_identical(tmp_path):
+    """B5 — extension filter is identical under recursion: non-FITS nested
+    files count as unsupported and never enter the input paths."""
+    (tmp_path / "a.fit").write_bytes(b"")
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    (nested / "b.fit").write_bytes(b"")
+    (nested / "notes.txt").write_text("x")
+    (nested / "image.jpg").write_bytes(b"")
+    (nested / "c.fts").write_bytes(b"")
+
+    paths, unsupported = service.scan_folder_inputs(str(tmp_path), recursive=True)
+    assert paths == [
+        str(tmp_path / "a.fit"),
+        str(nested / "b.fit"),
+        str(nested / "c.fts"),
+    ]
+    assert unsupported == 2  # notes.txt + image.jpg (directories not counted)
+
+
+def test_scan_folder_inputs_recursive_does_not_follow_dir_symlink(tmp_path):
+    """B6 — a directory symlink pointing back to an ancestor must not cause
+    infinite recursion and must not be followed (os.walk followlinks=False).
+    Skipped gracefully when the platform forbids symlink creation."""
+    (tmp_path / "a.fit").write_bytes(b"")
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    (nested / "b.fit").write_bytes(b"")
+    try:
+        (nested / "loop").symlink_to(tmp_path, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("directory symlink creation not permitted on this platform")
+
+    paths, unsupported = service.scan_folder_inputs(str(tmp_path), recursive=True)
+    assert paths == [str(tmp_path / "a.fit"), str(nested / "b.fit")]
+    assert unsupported == 0
+
+
 # ---------------------------------------------------------------------------
 # Static boundary: no private module imports under gui/
 # ---------------------------------------------------------------------------

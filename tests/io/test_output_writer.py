@@ -183,3 +183,116 @@ def test_build_calprov_record_carries_output_identity_not_whole_hash():
     assert record["output"]["logical_id"] == "lid"
     assert record["output"]["science_digest"] == "d" * 64
     assert "whole_file_sha256" not in record["output"]
+
+
+# ---------------------------------------------------------------------------
+# Windows ERROR_INVALID_FUNCTION (winerror==1 -> errno.EINVAL) publication
+# ---------------------------------------------------------------------------
+def test_windows_link_einval_falls_back_to_exclusive_copy(tmp_path, monkeypatch):
+    """A1 — the real Windows witness: ``os.link`` raising ``OSError(EINVAL)``
+    with ``winerror == 1`` ("Fonction incorrecte", filesystem without hard-link
+    support) must use the exclusive-copy fallback, never fail the frame.
+
+    Asserts *observable* publication behaviour (fallback invoked, final file
+    present with the exact science payload, temp gone), not a private constant.
+    """
+    import errno
+
+    import zecalibrator.io.output_writer as ow
+
+    data = np.full(SHAPE, 42.0, dtype=np.float32)
+    mask = np.zeros(SHAPE, dtype=np.uint16)
+
+    def fake_link(path, link, **kwargs):
+        exc = OSError(errno.EINVAL, "Fonction incorrecte")
+        exc.winerror = 1
+        raise exc
+
+    monkeypatch.setattr(ow.os, "link", fake_link)
+    fallback_calls = []
+    real_copy = ow._copy_exclusive
+    monkeypatch.setattr(
+        ow, "_copy_exclusive",
+        lambda tmp, final: fallback_calls.append((tmp, final)) or real_copy(tmp, final),
+    )
+
+    out = write_standalone_output(
+        data, mask, _provenance(),
+        input_identity=INPUT_IDENTITY, plan_id=PLAN_ID,
+        destination=str(tmp_path), status="COMPLETED",
+    )
+
+    assert fallback_calls, "exclusive-copy fallback was not used for winerror==1"
+    assert out.committed is True
+    assert os.path.exists(out.path)
+    with fits.open(out.path, memmap=False) as hdul:
+        written = np.ascontiguousarray(hdul[0].data, dtype=np.float32)
+        assert np.array_equal(written, data, equal_nan=True)
+    assert _tmp_files(str(tmp_path)) == []
+
+
+def test_publication_succeeds_when_hard_link_available(tmp_path):
+    """A2 — normal publication (os.link available) still succeeds; final file
+    is correct and the temp is gone."""
+    out = _write(tmp_path)
+    assert out.committed is True
+    assert os.path.exists(out.path)
+    with fits.open(out.path, memmap=False) as hdul:
+        names = [h.name for h in hdul]
+        assert names == ["PRIMARY", DQ_EXTNAME, CALPROV_EXTNAME]
+    assert _tmp_files(str(tmp_path)) == []
+
+
+def test_publish_no_clobber_never_overwrites_existing(tmp_path):
+    """A3 — a pre-existing destination is never overwritten (no-clobber)."""
+    src = tmp_path / "src.tmp"
+    src.write_bytes(b"NEW")
+    dst = tmp_path / "final.fits"
+    dst.write_bytes(b"OLD")
+    with pytest.raises(NoClobberViolation):
+        publish_no_clobber(str(src), str(dst))
+    assert dst.read_bytes() == b"OLD"
+    assert not src.exists()
+
+
+def test_publication_real_error_not_silently_fallback(tmp_path, monkeypatch):
+    """A4 — a genuine non-classified link error (ENOSPC) must still raise and
+    must NOT silently take the exclusive-copy fallback."""
+    import errno
+
+    import zecalibrator.io.output_writer as ow
+
+    def fake_link(path, link, **kwargs):
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(ow.os, "link", fake_link)
+    fallback_calls = []
+    real_copy = ow._copy_exclusive
+    monkeypatch.setattr(
+        ow, "_copy_exclusive",
+        lambda tmp, final: fallback_calls.append(1) or real_copy(tmp, final),
+    )
+
+    src = tmp_path / "src.tmp"
+    src.write_bytes(b"PAYLOAD")
+    dst = tmp_path / "final.fits"
+    with pytest.raises(OSError):
+        publish_no_clobber(str(src), str(dst))
+    assert fallback_calls == []  # no silent fallback
+    assert not os.path.exists(str(dst))
+    assert not src.exists()  # task-owned temp still cleaned
+
+
+def test_no_orphaned_temp_or_fd_on_validation_failure(tmp_path, monkeypatch):
+    """A5 — no orphaned ``.tmp`` and no leaked descriptor on failure."""
+    import zecalibrator.io.output_writer as ow
+    from zecalibrator.io.output_writer import OutputValidationError
+
+    def boom(*args, **kwargs):
+        raise OutputValidationError("synthetic validation failure")
+
+    monkeypatch.setattr(ow, "_validate_output", boom)
+    with pytest.raises(OutputValidationError):
+        _write(tmp_path)
+    assert _tmp_files(str(tmp_path)) == []
+    assert _open_deleted_tmp_fds() == []

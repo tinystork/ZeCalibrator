@@ -171,6 +171,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.additive_combo, self.flat_combo,
             self.add_masters_folder_btn, self.add_masters_file_btn,
             self.remove_masters_btn, self.clear_masters_btn,
+            self.include_subfolders_check,
             self.scan_masters_btn, self.confirm_masters_btn, self.build_managed_btn,
             self.output_browse_btn,
         ]
@@ -218,6 +219,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self.remove_masters_btn, self.clear_masters_btn,
         ):
             masters_add_row.addWidget(b)
+        self.include_subfolders_check = QtWidgets.QCheckBox("Include subfolders")
+        self.include_subfolders_check.setChecked(False)
+        masters_add_row.addWidget(self.include_subfolders_check)
         masters_add_row.addStretch(1)
         masters_layout.addLayout(masters_add_row)
         self.managed_status_label = QtWidgets.QLabel("Add calibration masters to begin.")
@@ -995,7 +999,9 @@ class MainWindow(QtWidgets.QMainWindow):
         if not folder:
             return
         try:
-            paths, unsupported = service.scan_folder_inputs(folder)
+            paths, unsupported = service.scan_folder_inputs(
+                folder, recursive=self.include_subfolders_check.isChecked()
+            )
         except ValueError as exc:
             QtWidgets.QMessageBox.warning(self, "Invalid folder", str(exc))
             return

@@ -99,22 +99,43 @@ def dedup_input_paths(paths, existing_paths=()) -> list:
     return result
 
 
-def scan_folder_inputs(folder: str) -> Tuple[list, int]:
-    """Scan ``folder`` top-level only and return ``(input_paths, unsupported)``.
+def scan_folder_inputs(folder: str, *, recursive: bool = False) -> Tuple[list, int]:
+    """Scan ``folder`` for supported input FITS files and return ``(input_paths, unsupported)``.
 
-    - **Top-level only**: subdirectories are never recursed into, and are not
-      counted as unsupported (they are not files).
-    - ``input_paths`` are the top-level files whose suffix matches the shared
-      supported input extension set (case-insensitive), returned in sorted
-      order for determinism.
-    - ``unsupported`` counts top-level *files* whose suffix does not match the
-      supported set (a genuine candidate FITS is never silently dropped).
+    - ``input_paths`` are the files whose suffix matches the shared supported
+      input extension set (case-insensitive), in deterministic sorted order.
+    - ``unsupported`` counts *files* whose suffix does not match the supported
+      set (a genuine candidate FITS is never silently dropped); directories are
+      never counted as unsupported.
+
+    ``recursive=False`` (default) scans the top level only: subdirectories are
+    never recursed into, and are not counted as unsupported (they are not files).
+
+    ``recursive=True`` discovers the same admissible extensions at every depth.
+    Traversal uses ``os.walk(root, followlinks=False)`` with ``dirnames`` sorted
+    in place and ``filenames`` iterated in sorted order:
+
+    * Only real directories are recursed into; directory symlinks/junctions are
+      NOT followed (``followlinks=False`` semantics), which also makes the walk
+      loop-safe even for a symlink pointing back to an ancestor.
+    * Ordering is deterministic: depth-first, directories lexicographically by
+      name, files lexicographically by name within each directory.
+    * No duplicate paths (each real path is yielded exactly once by ``os.walk``).
     """
     folder_path = Path(folder)
     if not folder_path.is_dir():
         raise ValueError(f"not a directory: {folder!r}")
     inputs: list = []
     unsupported = 0
+    if recursive:
+        for root, dirnames, filenames in os.walk(folder_path, followlinks=False):
+            dirnames.sort()
+            for name in sorted(filenames):
+                if is_supported_input_file(name):
+                    inputs.append(str(Path(root) / name))
+                else:
+                    unsupported += 1
+        return inputs, unsupported
     for entry in sorted(folder_path.iterdir()):
         if entry.is_file():
             if is_supported_input_file(entry.name):

@@ -57,6 +57,20 @@ _LINK_UNAVAILABLE = (
 )
 
 
+def _link_error_is_unavailable(exc: OSError) -> bool:
+    """True when ``exc`` means hard links are not viable no-clobber publication.
+
+    Windows: a filesystem that does not implement hard links raises
+    ``ERROR_INVALID_FUNCTION`` (winerror 1) on ``os.link``. CPython maps that to
+    ``errno.EINVAL``, which is NOT a reliable "link unavailable" signal on POSIX,
+    so the Windows code is matched explicitly by ``winerror`` and the POSIX errno
+    table is left untouched.
+    """
+    if getattr(exc, "winerror", None) == 1:
+        return True
+    return exc.errno in _LINK_UNAVAILABLE
+
+
 class NoClobberViolation(Exception):
     """The destination output already exists; no-clobber publication refused."""
 
@@ -239,7 +253,7 @@ def publish_no_clobber(tmp_path: str, final_path: str) -> None:
         except FileExistsError as exc:
             raise NoClobberViolation(f"output already exists: {final_path}") from exc
         except OSError as exc:
-            if exc.errno in _LINK_UNAVAILABLE:
+            if _link_error_is_unavailable(exc):
                 _copy_exclusive(tmp_path, final_path)
             else:
                 raise

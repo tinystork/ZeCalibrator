@@ -371,6 +371,44 @@ def test_standard_add_folder_auto_flow_to_route_resolution(qapp, paths, tmp_path
         _shutdown(w)
 
 
+def test_masters_folder_subfolders_checkbox_wiring(qapp, paths, tmp_path, monkeypatch):
+    """B4 — the "Include subfolders" checkbox is unchecked by default, carries
+    the exact label, and drives ``scan_folder_inputs(recursive=...)`` for the
+    masters folder action only (OFF -> False, ON -> True)."""
+    from zecalibrator.gui import service as svc
+
+    w = MainWindow(paths)
+    assert wait_idle(w)
+    try:
+        assert w.include_subfolders_check is not None
+        assert w.include_subfolders_check.text() == "Include subfolders"
+        assert w.include_subfolders_check.isChecked() is False
+
+        folder = tmp_path / "masters"
+        folder.mkdir()
+
+        recursive_calls = []
+        real_scan = svc.scan_folder_inputs
+
+        def fake_scan(f, *, recursive=False):
+            recursive_calls.append(recursive)
+            return ([], 0)
+
+        monkeypatch.setattr(svc, "scan_folder_inputs", fake_scan)
+        QtWidgets.QFileDialog.getExistingDirectory = staticmethod(lambda *a, **k: str(folder))
+
+        # Default (unchecked) -> non-recursive.
+        w._on_add_masters_folder()
+        assert recursive_calls == [False]
+
+        # Checked -> recursive.
+        w.include_subfolders_check.setChecked(True)
+        w._on_add_masters_folder()
+        assert recursive_calls == [False, True]
+    finally:
+        _shutdown(w)
+
+
 # ---------------------------------------------------------------------------
 # 7. No Standard buttons for the removed technical steps.
 # ---------------------------------------------------------------------------
