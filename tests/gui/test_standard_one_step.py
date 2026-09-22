@@ -455,7 +455,8 @@ def test_export_does_not_require_manual_preflight(qapp, paths, tmp_path, monkeyp
 
         out = tmp_path / "out"
         out.mkdir()
-        QtWidgets.QFileDialog.getExistingDirectory = staticmethod(lambda *a, **k: str(out))
+        # Standard export reads the visible Output-folder field (no modal chooser).
+        w.output_dir_edit.setText(str(out))
 
         # No _on_preflight call: the one-step export resolves the route internally.
         w._on_export()

@@ -236,10 +236,11 @@ def _process_one(idx, frame, request, library, policy, destination, token, plan_
     )
 
 
-def _write_output(result, input_identity, plan_id, destination, token):
-    from zecalibrator.io.output_writer import output_logical_id
-
-    logical_id = output_logical_id(_identity_to_dict(input_identity), plan_id)
+def _write_output(result, input_identity, plan_id, destination, token, replace_existing=False):
+    # The destination path is derived through the SAME helper the auto-route
+    # collision pre-check uses, so the pre-checked path and the written path can
+    # never drift (the writer recomputes the identical path internally).
+    _output_path_for(input_identity, plan_id, destination)
     header_fields = {
         "ZECALCAL": "zecalibrator",
         "HIERARCH ZECALSCHEMA": result.provenance.plan.versions.provenance_schema,
@@ -256,6 +257,7 @@ def _write_output(result, input_identity, plan_id, destination, token):
         status=result.status,
         header_fields=header_fields,
         check_cancelled=token.raise_if_cancelled,
+        overwrite_existing=replace_existing,
     )
     return BatchOutputRecord(
         path=record.path,
@@ -265,6 +267,21 @@ def _write_output(result, input_identity, plan_id, destination, token):
         size_bytes=record.size_bytes,
         committed=record.committed,
     )
+
+
+def _output_path_for(input_identity, plan_id, destination) -> str:
+    """Compute the deterministic destination path for one output.
+
+    Single source of truth shared by the auto-route collision pre-check and the
+    standalone writer's commit path: the path is ``output_filename(
+    output_logical_id(identity, plan_id))`` under ``destination``. Reusing this
+    one helper (rather than duplicating the formula) keeps the pre-checked path
+    and the written path from ever drifting.
+    """
+    from zecalibrator.io.output_writer import output_filename, output_logical_id
+
+    logical_id = output_logical_id(_identity_to_dict(input_identity), plan_id)
+    return os.path.join(os.fspath(destination), output_filename(logical_id))
 
 
 def _batch_generator(frames, request, library, policy, options, token, obs):

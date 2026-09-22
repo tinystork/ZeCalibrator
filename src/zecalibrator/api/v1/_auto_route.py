@@ -13,6 +13,7 @@ The resolver itself remains application-layer; it is NOT exported from
 
 from __future__ import annotations
 
+import os
 from typing import Iterable, Optional
 
 from zecalibrator.application.library import (
@@ -46,6 +47,7 @@ def auto_route_batch(
     *,
     cancel=None,
     progress=None,
+    collision_decision=None,
 ):
     """Auto-route batch: per light, inspect -> auto-route -> calibrate -> write.
 
@@ -103,10 +105,12 @@ def auto_route_batch(
     manifest_inputs = []
     manifest_items = []
     cancelled = False
+    decided_policy = None
     context_slot = _PreparedContextSlot()
 
     def _process(idx, frame):
         nonlocal cancelled
+        nonlocal decided_policy
         try:
             inspection_result, decoded_light = _decode_and_inspect(frame, token=token, obs=None)
         except OperationCancelled:
@@ -150,6 +154,27 @@ def auto_route_batch(
                 reason_details="; ".join(r.code for r in resolution.reasons),
             )
 
+        replace_existing = False
+        if destination is not None and collision_decision is not None:
+            planned = _batch._output_path_for(inspection.identity, plan.plan_id, destination)
+            if os.path.exists(planned):
+                if decided_policy is None:
+                    decided_policy = collision_decision(planned)
+                policy_value = decided_policy
+                if policy_value == "skip":
+                    return BatchItem(
+                        index=idx, disposition="SKIPPED",
+                        input_identity=inspection.identity, plan_id=plan.plan_id,
+                        reason_code="DESTINATION_EXISTS",
+                        reason_details=f"output already exists: {planned}",
+                    )
+                if policy_value != "overwrite":
+                    # "cancel" or any malformed/garbled decision fails safe to
+                    # cancel (overwrite/skip are never selected implicitly).
+                    raise OperationCancelled()
+                # policy_value == "overwrite" -> proceed with transactional replace
+                replace_existing = True
+
         try:
             result = _calibrate_frame_impl(frame, plan, ExecutionOptions(), token=token, obs=None, slot=context_slot, decoded_light=decoded_light)
         except OperationCancelled:
@@ -178,7 +203,7 @@ def auto_route_batch(
                              result=result, output=None, warnings=result.warnings)
 
         try:
-            output = _write_output(result, inspection.identity, plan.plan_id, destination, token)
+            output = _write_output(result, inspection.identity, plan.plan_id, destination, token, replace_existing=replace_existing)
         except OperationCancelled:
             raise
         except NoClobberViolation as exc:

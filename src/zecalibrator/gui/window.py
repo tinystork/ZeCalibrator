@@ -172,6 +172,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.add_masters_folder_btn, self.add_masters_file_btn,
             self.remove_masters_btn, self.clear_masters_btn,
             self.scan_masters_btn, self.confirm_masters_btn, self.build_managed_btn,
+            self.output_browse_btn,
         ]
         self._launch_widgets = [self.calibrate_btn, self.export_btn,
                                 self.advanced_preflight_btn, self.advanced_export_btn]
@@ -222,6 +223,16 @@ class MainWindow(QtWidgets.QMainWindow):
         self.managed_status_label = QtWidgets.QLabel("Add calibration masters to begin.")
         masters_layout.addWidget(self.managed_status_label)
         layout.addWidget(masters_box)
+
+        output_box = QtWidgets.QGroupBox("Output")
+        output_layout = QtWidgets.QHBoxLayout(output_box)
+        output_layout.addWidget(QtWidgets.QLabel("Output folder:"))
+        self.output_dir_edit = QtWidgets.QLineEdit()
+        self.output_dir_edit.setReadOnly(True)
+        output_layout.addWidget(self.output_dir_edit, 1)
+        self.output_browse_btn = QtWidgets.QPushButton("Browse…")
+        output_layout.addWidget(self.output_browse_btn)
+        layout.addWidget(output_box)
 
         actions_row = QtWidgets.QHBoxLayout()
         self.export_btn = QtWidgets.QPushButton("Calibrate / Export…")
@@ -455,6 +466,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.advanced_export_btn.clicked.connect(self._on_advanced_export)
         self.cancel_btn.clicked.connect(self._on_cancel)
         self.audit_link_btn.clicked.connect(self._on_open_manifest)
+        self.output_browse_btn.clicked.connect(self._on_browse_output)
         self.add_masters_folder_btn.clicked.connect(self._on_add_masters_folder)
         self.add_masters_file_btn.clicked.connect(self._on_add_masters_file)
         self.remove_masters_btn.clicked.connect(self._on_remove_masters)
@@ -477,6 +489,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._controller.batch_item.connect(self._on_batch_item)
         self._controller.operation_finished.connect(self._on_operation_finished)
         self._controller.operation_failed.connect(self._on_operation_failed)
+        self._controller.collision_query.connect(self._on_collision_query)
         self._controller.worker_ended.connect(self._on_worker_ended)
 
     def _apply_icon(self) -> None:
@@ -655,6 +668,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._apply_theme(self._settings.appearance_theme)
         self._sync_theme_combo()
         self.theme_combo.setEnabled(True)
+        if self._settings.last_output_dir:
+            self.output_dir_edit.setText(self._settings.last_output_dir)
         # Truthful idle state: startup settings load is complete; no fake progress.
         self.status_label.setText("Ready.")
         if self._settings_state in (STATE_MALFORMED, STATE_UNSUPPORTED):
@@ -938,6 +953,20 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         if path:
             self.imports_edit.setText(path)
+
+    def _on_browse_output(self) -> None:
+        start = self.output_dir_edit.text().strip() or self._settings.last_output_dir or ""
+        folder = QtWidgets.QFileDialog.getExistingDirectory(
+            self, "Select output folder", start
+        )
+        if not folder:
+            return
+        self.output_dir_edit.setText(folder)
+        self._settings = dataclasses.replace(
+            self._settings,
+            last_output_dir=folder,
+            window_width=self.width(), window_height=self.height(),
+        )
 
     def _on_index_library(self) -> None:
         root = self.library_root_edit.text().strip()
@@ -1401,7 +1430,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._set_standard_human_status("attention", self._first_blocking_human_reason())
             self.status_label.setText("Calibration not ready.")
             return
-        self._prompt_destination_and_export(None)
+        self._start_standard_export()
 
     def _on_advanced_export(self) -> None:
         # Advanced: explicit request from the additive/flat combos.
@@ -1427,14 +1456,44 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _continue_export_after_preflight(self) -> None:
         if self._standard_route_ready():
-            self._prompt_destination_and_export(None)
+            self._start_standard_export()
         else:
             self._set_standard_human_status("attention", self._first_blocking_human_reason())
             self.status_label.setText("Calibration not ready.")
 
+    def _standard_output_destination(self):
+        """Validate the persisted Standard output folder; return (destination, error).
+
+        UX preflight only: existence + writability are checked so the user gets a
+        human message BEFORE calibration starts. Writability is NOT a durable
+        guarantee and no reservation/locking machinery is built — the writer
+        remains the final authority for real write failures. No directory is ever
+        auto-created here.
+        """
+        value = self.output_dir_edit.text().strip()
+        if not value:
+            return None, "Please select an output folder before starting calibration."
+        if not os.path.isdir(value):
+            return None, (
+                "The selected output folder no longer exists. "
+                "Please choose a valid destination."
+            )
+        if not os.access(value, os.W_OK):
+            return None, (
+                "The selected output folder is not writable. "
+                "Please choose a valid destination."
+            )
+        return str(value), None
+
+    def _start_standard_export(self) -> None:
+        destination, error = self._standard_output_destination()
+        if error is not None:
+            QtWidgets.QMessageBox.warning(self, "Output folder", error)
+            return
+        self._start_export(None, destination)
+
     def _prompt_destination_and_export(self, request) -> None:
-        selected = self._selected_rows()
-        entries = [self._lights[i] for i in selected] if selected else list(self._lights)
+        # Advanced path only (kept unchanged): the modal destination chooser.
         start_dir = self._settings.last_output_dir or ""
         destination = QtWidgets.QFileDialog.getExistingDirectory(
             self, "Select output destination", start_dir
@@ -1446,6 +1505,11 @@ class MainWindow(QtWidgets.QMainWindow):
             last_output_dir=destination,
             window_width=self.width(), window_height=self.height(),
         )
+        self._start_export(request, destination)
+
+    def _start_export(self, request, destination) -> None:
+        selected = self._selected_rows()
+        entries = [self._lights[i] for i in selected] if selected else list(self._lights)
         self._batch_items.clear()
         self.results_table.setRowCount(0)
         snapshot = service.OperationSnapshot(
@@ -1519,6 +1583,45 @@ class MainWindow(QtWidgets.QMainWindow):
         self.results_table.setItem(row, 3, QtWidgets.QTableWidgetItem(item.get("plan_id") or ""))
         self.results_table.setItem(row, 4, QtWidgets.QTableWidgetItem(
             item.get("reason_code") or item.get("reason_details", "")))
+
+    def _on_collision_query(self, op_id: str, payload: dict) -> None:
+        """Show the ONE batch-level collision dialog and release the worker.
+
+        Runs on the GUI thread; the worker is blocked on its own thread waiting
+        on the channel. At most one such dialog appears per batch (the facade
+        caches the policy after the first collision). The safe default is
+        ``"cancel"`` (overwrite/skip are never selected implicitly).
+        """
+        if not self._is_current(op_id):
+            # Stale/foreign collision query: never prompt for a dead batch;
+            # release the worker with the safe default (cancel).
+            self._controller.resolve_collision("cancel")
+            return
+        box = QtWidgets.QMessageBox(self)
+        box.setWindowTitle("Output file already exists")
+        box.setIcon(QtWidgets.QMessageBox.Icon.Warning)
+        box.setText(
+            "An output file already exists in the selected folder.\n"
+            "Choose how existing output files should be handled for this batch."
+        )
+        overwrite_btn = box.addButton(
+            "Overwrite existing", QtWidgets.QMessageBox.ButtonRole.AcceptRole
+        )
+        skip_btn = box.addButton(
+            "Skip existing", QtWidgets.QMessageBox.ButtonRole.DestructiveRole
+        )
+        cancel_btn = box.addButton(
+            "Cancel", QtWidgets.QMessageBox.ButtonRole.RejectRole
+        )
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is overwrite_btn:
+            decision = "overwrite"
+        elif clicked is skip_btn:
+            decision = "skip"
+        else:
+            decision = "cancel"
+        self._controller.resolve_collision(decision)
 
     def _on_operation_finished(self, op_id: str, summary: dict) -> None:
         if not self._is_current(op_id):

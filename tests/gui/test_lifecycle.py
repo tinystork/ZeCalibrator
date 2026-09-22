@@ -193,8 +193,8 @@ def test_window_cancel_during_output_transaction(qapp, paths, tmp_path, monkeypa
         return real_write(*args, **kwargs)
 
     monkeypatch.setattr(batch_mod, "write_standalone_output", write_and_cancel)
-    monkeypatch.setattr(QtWidgets.QFileDialog, "getExistingDirectory",
-                        staticmethod(lambda *a, **k: str(out)))
+    # Standard export now reads the visible Output-folder field (no modal chooser).
+    w.output_dir_edit.setText(str(out))
     try:
         w._on_export()
         assert _pump(lambda: not w._controller.is_active)
@@ -262,9 +262,7 @@ def test_terminal_status_stable_after_loop_settles(qapp, paths, tmp_path):
     # 1) Normal export -> final label is the truthful export summary.
     w = _ready_window(qapp, paths, fixture)
     try:
-        from PySide6 import QtWidgets as _QW
-
-        _QW.QFileDialog.getExistingDirectory = staticmethod(lambda *a, **k: str(out))
+        w.output_dir_edit.setText(str(out))
         w.lights_list.item(0).setSelected(True)
         w._on_export()
         assert _pump(lambda: not w._controller.is_active)
@@ -275,6 +273,8 @@ def test_terminal_status_stable_after_loop_settles(qapp, paths, tmp_path):
 
     # 2) Manifest failure -> final label is a truthful failure (not "complete").
     w = _ready_window(qapp, paths, fixture)
+    out2 = tmp_path / "out_manifest_fail"
+    out2.mkdir()
     try:
         import zecalibrator.api.v1.batch as batch_mod
         import zecalibrator.io.batch_manifest as bm_mod
@@ -286,9 +286,7 @@ def test_terminal_status_stable_after_loop_settles(qapp, paths, tmp_path):
 
         batch_mod.write_batch_manifest = boom
         try:
-            from PySide6 import QtWidgets as _QW
-
-            _QW.QFileDialog.getExistingDirectory = staticmethod(lambda *a, **k: str(out))
+            w.output_dir_edit.setText(str(out2))
             w.lights_list.item(0).setSelected(True)
             w._on_export()
             assert _pump(lambda: not w._controller.is_active)

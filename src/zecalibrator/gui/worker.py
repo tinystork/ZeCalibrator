@@ -48,6 +48,7 @@ import os
 import queue
 import sys
 import threading
+import time
 from pathlib import Path
 
 from PySide6 import QtCore
@@ -67,6 +68,13 @@ _ROUTE_OUTCOME_MAP = {
     "NEEDS_ATTENTION": "NO_MATCH",
     "AMBIGUOUS": "AMBIGUOUS",
 }
+
+# Defence-in-depth bound for the Standard collision decision wait. This exists
+# ONLY to bound an abnormal teardown (the listener disappeared AND the token was
+# never cancelled); it is generous on purpose so a real user reading the dialog
+# is never timed out. On expiry the worker fails safe to "cancel" (never infers
+# overwrite/skip).
+_COLLISION_DECISION_TIMEOUT_S = 300.0
 
 # ---------------------------------------------------------------------------
 # Interpreter-teardown safety net (programmatic/embedding callers).
@@ -140,6 +148,36 @@ class ProgressMailbox:
             event = self._latest
             self._latest = None
             return event
+
+
+class CollisionDecisionChannel:
+    """One-shot thread-safe collision decision transport (GUI -> worker).
+
+    Plain-Python synchronization (never Qt ``Signal(object)`` marshalling): the
+    worker posts a ``collision_query`` relay carrying this channel, then blocks
+    on the event; the GUI thread shows the modal dialog, writes the decision
+    into the result slot and sets the event. A missing/garbled/lost decision
+    fails safe to ``"cancel"`` (overwrite/skip are never selected implicitly).
+    """
+
+    _VALID = ("overwrite", "skip", "cancel")
+
+    def __init__(self):
+        self._event = threading.Event()
+        self._result = None
+
+    def set(self, decision: str) -> None:
+        if decision not in self._VALID:
+            decision = "cancel"
+        self._result = decision
+        self._event.set()
+
+    def wait(self, timeout: float) -> bool:
+        return self._event.wait(timeout)
+
+    @property
+    def result(self) -> str:
+        return self._result if self._result in self._VALID else "cancel"
 
 
 def _tuple_or_none(value):
@@ -676,9 +714,36 @@ class _OperationWorker(QtCore.QObject):
         items = []
         cancelled = False
         manifest_error = None
+
+        def collision_decision(planned_path: str) -> str:
+            """Ask the GUI once per batch; block the worker thread (bounded)."""
+            channel = CollisionDecisionChannel()
+            folder = os.path.dirname(planned_path)
+            basename = os.path.basename(planned_path)
+            self._relay("collision_query", snap.op_id, {
+                "channel": channel,
+                "folder": folder,
+                "path": planned_path,
+                "basename": basename,
+            })
+            # Defence-in-depth: bound an abnormal teardown where the listener is
+            # gone and the token was never cancelled. The deadline is computed
+            # once (``time.monotonic()``) and is generous — it never times out a
+            # real user reading the dialog; only a genuinely orphaned wait
+            # expires and fails safe to "cancel".
+            deadline = time.monotonic() + _COLLISION_DECISION_TIMEOUT_S
+            while not channel.wait(0.05):
+                if token.is_cancelled():
+                    raise v1.OperationCancelled()
+                if time.monotonic() >= deadline:
+                    return "cancel"
+            # A missing/garbled/lost decision fails safe to "cancel".
+            return channel.result
+
         try:
             for item in auto_route_batch(
-                frames, handle, snap.policy, options, cancel=token, progress=progress
+                frames, handle, snap.policy, options, cancel=token, progress=progress,
+                collision_decision=collision_decision,
             ):
                 d = item.to_dict()
                 items.append(d)
@@ -986,6 +1051,7 @@ class WorkerController(QtCore.QObject):
     progress = QtCore.Signal(str, object)
     preflight_light = QtCore.Signal(str, object, object)
     batch_item = QtCore.Signal(str, object)
+    collision_query = QtCore.Signal(str, object)
     operation_finished = QtCore.Signal(str, object)
     operation_failed = QtCore.Signal(str, str, str)
     worker_ended = QtCore.Signal()
@@ -1042,6 +1108,7 @@ class WorkerController(QtCore.QObject):
         self._mailbox = None
         self._active_op_id = None
         self._gc_was_enabled = None
+        self._collision_channel = None
         self._thread.start()
         _register_thread(self._thread)
 
@@ -1085,8 +1152,30 @@ class WorkerController(QtCore.QObject):
             self.preflight_light.emit(op_id, payload[0], payload[1])
         elif kind == "batch_item":
             self.batch_item.emit(op_id, payload)
+        elif kind == "collision_query":
+            # The channel (plain Python object) never crosses a Qt signal: it is
+            # stored on the controller and the public signal carries only the
+            # JSON-safe display info. The GUI resolves it via ``resolve_collision``.
+            self._collision_channel = payload.get("channel")
+            self.collision_query.emit(op_id, {
+                "folder": payload.get("folder"),
+                "path": payload.get("path"),
+                "basename": payload.get("basename"),
+            })
         elif kind == "finished":
             self.operation_finished.emit(op_id, payload)
+
+    def resolve_collision(self, decision: str) -> None:
+        """Release a pending collision decision to the worker (main-thread side).
+
+        Writes ``decision`` into the pending channel's result slot and wakes the
+        worker's bounded wait. ``decision`` is validated by the channel (a
+        missing/garbled value fails safe to ``"cancel"``).
+        """
+        channel = self._collision_channel
+        self._collision_channel = None
+        if channel is not None:
+            channel.set(decision)
 
     @QtCore.Slot()
     def _drain_progress(self) -> None:
@@ -1203,4 +1292,4 @@ class WorkerController(QtCore.QObject):
         # them here.
 
 
-__all__ = ["ProgressMailbox", "WorkerController"]
+__all__ = ["CollisionDecisionChannel", "ProgressMailbox", "WorkerController"]

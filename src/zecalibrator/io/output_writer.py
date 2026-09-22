@@ -7,7 +7,11 @@ The whole file is written into an **exclusive temporary file in the destination
 filesystem**, flushed/closed, reopened and validated, then published through a
 platform-appropriate **no-clobber** publication primitive (``os.link`` on
 POSIX/NTFS, with an exclusive-create copy fallback where hard links are
-unavailable). ``os.replace`` alone is never used for a data output.
+unavailable). The only authorized overwrite is the private
+``_publish_replace_existing`` primitive (an explicitly authorised internal
+destructive publication operation, used solely for a user-approved
+"Overwrite existing" collision decision); ``os.replace`` is never used for a
+data output through any consumer-facing path.
 
 * No BSCALE/BZERO/BLANK/CHECKSUM/DATASUM are written.
 * The final whole-file SHA-256 is computed **after** closure and is never part of
@@ -243,6 +247,27 @@ def publish_no_clobber(tmp_path: str, final_path: str) -> None:
         _remove_temp(tmp_path)
 
 
+def _publish_replace_existing(tmp_path: str, final_path: str) -> None:
+    """Atomically replace ``final_path`` with an ALREADY-VALIDATED temp file.
+
+    PRIVATE destructive publication primitive — an explicitly authorised
+    internal operation, NOT a general consumer-facing output policy. The caller
+    must have already flushed/closed and re-validated the temp (science + DQ +
+    CALPROV payloads) before calling this; it performs no validation itself.
+
+    ``os.replace`` atomically swaps the temp over ``final_path``. The temp is
+    created in the destination directory, so it is on the same filesystem (no
+    cross-device rename). On failure the task-owned temp is removed and
+    ``final_path`` is left intact; there is no missing/partial publication
+    window.
+    """
+    try:
+        os.replace(tmp_path, final_path)
+    except Exception:
+        _remove_temp(tmp_path)
+        raise
+
+
 def write_standalone_output(
     data: np.ndarray,
     mask: np.ndarray,
@@ -254,12 +279,17 @@ def write_standalone_output(
     status: str,
     header_fields: Optional[Mapping[str, str]] = None,
     check_cancelled: Optional[Callable[[], None]] = None,
+    overwrite_existing: bool = False,
 ) -> StandaloneOutput:
     """Write one standalone FITS output transactionally (§5).
 
-    Exclusive temp file -> flush/close -> validate -> no-clobber publish. The
-    final whole-file SHA-256 is computed after closure and returned, never
-    embedded. On failure/cancellation only the task-owned temp file is removed.
+    Exclusive temp file -> flush/close -> validate -> publish. Publication is
+    no-clobber by default (``overwrite_existing=False``); when
+    ``overwrite_existing=True`` the already-validated temp atomically replaces
+    the destination via the private ``_publish_replace_existing`` primitive.
+    The final whole-file SHA-256 is computed after closure and returned, never
+    embedded. On failure/cancellation only the task-owned temp file is removed
+    and any previous destination remains intact until publication succeeds.
     """
     if check_cancelled is not None:
         check_cancelled()
@@ -304,7 +334,10 @@ def write_standalone_output(
         if check_cancelled is not None:
             check_cancelled()
 
-        publish_no_clobber(tmp_path, final_path)
+        if overwrite_existing:
+            _publish_replace_existing(tmp_path, final_path)
+        else:
+            publish_no_clobber(tmp_path, final_path)
     except Exception:
         _remove_temp(tmp_path)
         raise
