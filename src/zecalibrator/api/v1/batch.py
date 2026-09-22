@@ -45,6 +45,7 @@ from zecalibrator.io.batch_manifest import (
     write_batch_manifest,
 )
 from zecalibrator.io.master_source import FilesystemSource
+from zecalibrator.io.output_header import build_output_header_fields
 from zecalibrator.io.output_writer import (
     NoClobberViolation,
     write_standalone_output,
@@ -241,12 +242,14 @@ def _write_output(result, input_identity, plan_id, destination, token, replace_e
     # collision pre-check uses, so the pre-checked path and the written path can
     # never drift (the writer recomputes the identical path internally).
     _output_path_for(input_identity, plan_id, destination)
-    header_fields = {
-        "ZECALCAL": "zecalibrator",
-        "HIERARCH ZECALSCHEMA": result.provenance.plan.versions.provenance_schema,
-        "HIERARCH ZECALPLAN": plan_id[:16],
-        "HIERARCH ZECALSTAT": result.status,
-    }
+    plan = result.provenance.plan
+    header_fields = build_output_header_fields(
+        light_constraints=plan.light_constraints,
+        science_shape=result.data.shape,
+        status=result.status,
+        plan_id=plan_id,
+        provenance_schema=plan.versions.provenance_schema,
+    )
     record = write_standalone_output(
         result.data,
         result.mask,

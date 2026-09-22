@@ -167,7 +167,7 @@ def _remove_temp(path: Optional[str]) -> None:
 
 
 def _write_fits_bytes(
-    path: str, data: np.ndarray, mask: np.ndarray, calprov_bytes: bytes, header_fields: Mapping[str, str]
+    path: str, data: np.ndarray, mask: np.ndarray, calprov_bytes: bytes, header_fields: Mapping[str, object]
 ) -> None:
     from astropy.io import fits
 
@@ -291,7 +291,7 @@ def write_standalone_output(
     plan_id: str,
     destination: str,
     status: str,
-    header_fields: Optional[Mapping[str, str]] = None,
+    header_fields: Optional[Mapping[str, object]] = None,
     check_cancelled: Optional[Callable[[], None]] = None,
     overwrite_existing: bool = False,
 ) -> StandaloneOutput:
