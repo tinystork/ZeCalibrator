@@ -416,16 +416,28 @@ def enumerate_routes(
         flat_forms = {f.descriptor.flat_form for f in compatible_flats}
         if len(flat_forms) > 1:
             flat_ambiguous = True
-        # G2B: rank same-form flats to a single winner (same-civil-day rule);
-        # mixed flat_form remains a SCIENTIFIC route ambiguity (unchanged).
+        # G2B: applicability-before-ranking — rank only route-satisfiable flats.
+        # In Standard, corrected_unnormalized / normalized_response are always
+        # satisfiable (no dependency); a raw_response flat is never applicable
+        # (FLAT_UNSUPPORTED_RAW), so it is never ranked (a raw flat can never
+        # shadow a satisfiable flat).
         by_form: dict[str, list] = {}
         for f in compatible_flats:
             by_form.setdefault(f.descriptor.flat_form, []).append(f)
         for form in sorted(by_form.keys()):
+            ff = form
+            if ff == "raw_response":
+                # R3D-C Standard: a raw flat is unsupported (flat-master
+                # construction from raw stacks is future/Advanced). Never
+                # auto-construct a flat_dark dependency here, and never rank it.
+                reasons.append(Reason(FLAT_UNSUPPORTED_RAW, "flat_form", role="flat", observed=ff))
+                continue
+            if ff not in ("normalized_response", "corrected_unnormalized"):
+                reasons.append(Reason("UNDOCUMENTED_PROCESSING", "flat_form", role="flat", observed=ff))
+                continue
             f = _rank_one("flat", light, by_form[form])
             if f is None:
                 continue
-            ff = form
             if ff == "normalized_response":
                 flat_options.append(("apply", "already_normalized", {"flat": f}))
             elif ff == "corrected_unnormalized":
@@ -433,13 +445,6 @@ def enumerate_routes(
                 # the executor normalizes the corrected-but-unnormalized flat
                 # directly (no flat_dark/bias_flat, no normalization proof).
                 flat_options.append(("apply", "normalize_only", {"flat": f}))
-            elif ff == "raw_response":
-                # R3D-C Standard: a raw flat is unsupported (flat-master
-                # construction from raw stacks is future/Advanced). Never
-                # auto-construct a flat_dark dependency here.
-                reasons.append(Reason(FLAT_UNSUPPORTED_RAW, "flat_form", role="flat", observed=ff))
-            else:
-                reasons.append(Reason("UNDOCUMENTED_PROCESSING", "flat_form", role="flat", observed=ff))
 
     flat_unusable = bool(compatible_flats) and not flat_options
     if flat_unusable:

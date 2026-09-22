@@ -33,6 +33,7 @@ from zecalibrator.core.matching import (
 )
 from zecalibrator.core.selection import (
     RANKED_BELOW_WINNER,
+    ROUTE_UNSATISFIABLE,
     RULE_ADDITIVE,
     RULE_FLAT,
     RULE_MANUAL,
@@ -406,3 +407,111 @@ def test_select_role_candidates_policy_version():
         [candidate("d1", descriptor("dark", "included", content_sha256="a" * 64, mask_identity="b" * 64))],
     )
     assert sel.winner.policy_version == SELECTION_POLICY_VERSION
+
+
+# ---------------------------------------------------------------------------
+# Rework-1: route-satisfiability applicability filter (D1) + role attribution (D2)
+# ---------------------------------------------------------------------------
+def _raw_flat(cid, exposure_s, content_sha, mask_identity, acquired_at=None):
+    f = descriptor(
+        "flat", "not_applicable", exposure_s=exposure_s, flat_form="raw_response",
+        filter="NONE", optical_train_id="SYNTH-TRAIN-1",
+        content_sha256=content_sha, mask_identity=mask_identity,
+    )
+    return candidate(cid, f, acquired_at=acquired_at)
+
+
+def test_flat_route_unsatisfiable_newer_does_not_shadow_satisfiable():
+    # D1 regression: two same-form raw flats; the newer needs a 5s flat_dark that
+    # does not exist, the older 1s flat is satisfiable. Ranking must NOT pick the
+    # newer (route-unsatisfiable) flat over the older satisfiable one.
+    lt = light()
+    newer = _raw_flat("newer", 5.0, "a" * 64, "b" * 64, acquired_at="2024-06-01T00:00:00")
+    older = _raw_flat("older", 1.0, "c" * 64, "d" * 64, acquired_at="2024-01-01T00:00:00")
+    fd = candidate("fd", descriptor("flat_dark", "included", exposure_s=1.0, content_sha256="e" * 64, mask_identity="f" * 64))
+    r = match_calibration(
+        lt, request("control", "apply"), pool(flat=[newer, older], flat_dark=[fd]), policy()
+    )
+    assert r.outcome == OUTCOME_MATCHED
+    assert r.plan.masters["flat"].descriptor_id == older.descriptor.descriptor_id
+    assert r.plan.masters["flat_dark"].descriptor_id == fd.descriptor.descriptor_id
+    assert any(
+        rec.candidate_id == "newer" and rec.reason_code == ROUTE_UNSATISFIABLE and rec.role == "flat"
+        for rec in r.ranked_out
+    )
+
+
+def test_flat_dark_dependency_peers_are_compatible_only():
+    # D1 invariant lock: dependency roles (flat_dark/bias_flat) are selected only
+    # from candidates that passed the per-flat dependency compatibility check; an
+    # incompatible dependency candidate is a compatibility rejection, never a
+    # ranked-out peer (a future refactor must not reintroduce route-blind ranking).
+    lt = light(optical=OpticalIdentity(filter="NONE", optical_train_id="SYNTH-TRAIN-1"))
+    flat = descriptor(
+        "flat", "not_applicable", exposure_s=1.0, flat_form="raw_response",
+        filter="NONE", optical_train_id="SYNTH-TRAIN-1",
+    )
+    fd_bad = descriptor("flat_dark", "included", exposure_s=20.0, content_sha256="a" * 64, mask_identity="b" * 64)
+    fd_ok = descriptor("flat_dark", "included", exposure_s=1.0, content_sha256="c" * 64, mask_identity="d" * 64)
+    r = match_calibration(
+        lt, request("control", "apply"),
+        pool(
+            flat=[candidate("f1", flat)],
+            flat_dark=[
+                candidate("fd_bad", fd_bad, acquired_at="2024-06-01T00:00:00"),
+                candidate("fd_ok", fd_ok, acquired_at="2024-01-01T00:00:00"),
+            ],
+        ),
+        policy(),
+    )
+    assert r.outcome == OUTCOME_MATCHED
+    assert r.plan.masters["flat_dark"].descriptor_id == fd_ok.descriptor_id
+    assert all(rec.candidate_id != "fd_bad" for rec in r.ranked_out)
+    assert any(rec.candidate_id == "fd_bad" for rec in r.rejected_candidates)
+
+
+def test_ranked_out_carries_role_dark_bias_flat():
+    # D2: every RankedOutRecord is attributed to its role.
+    lt = light()
+    d_older = candidate("do", descriptor("dark", "included", content_sha256="a" * 64, mask_identity="b" * 64), acquired_at="2024-01-01T00:00:00")
+    d_newer = candidate("dn", descriptor("dark", "included", content_sha256="c" * 64, mask_identity="d" * 64), acquired_at="2024-06-01T00:00:00")
+    r = match_calibration(lt, request("dark_incl_bias"), pool(dark=[d_older, d_newer]), policy())
+    assert r.outcome == OUTCOME_MATCHED
+    assert [(rec.role, rec.candidate_id) for rec in r.ranked_out] == [("dark", "do")]
+
+
+def test_ranked_out_carries_role_bias():
+    lt = light()
+    b_older = candidate("bo", descriptor("bias", "not_applicable", exposure_s=0.001, content_sha256="a" * 64, mask_identity="b" * 64), acquired_at="2024-01-01T00:00:00")
+    b_newer = candidate("bn", descriptor("bias", "not_applicable", exposure_s=0.001, content_sha256="c" * 64, mask_identity="d" * 64), acquired_at="2024-06-01T00:00:00")
+    r = match_calibration(lt, request("bias_only"), pool(bias=[b_older, b_newer]), policy())
+    assert r.outcome == OUTCOME_MATCHED
+    assert [(rec.role, rec.candidate_id) for rec in r.ranked_out] == [("bias", "bo")]
+
+
+def test_ranked_out_carries_role_flat_dark():
+    lt = light(optical=OpticalIdentity(filter="NONE", optical_train_id="SYNTH-TRAIN-1"))
+    flat = descriptor(
+        "flat", "not_applicable", exposure_s=1.0, flat_form="raw_response",
+        filter="NONE", optical_train_id="SYNTH-TRAIN-1",
+    )
+    fd_older = candidate("fdo", descriptor("flat_dark", "included", exposure_s=1.0, content_sha256="a" * 64, mask_identity="b" * 64), acquired_at="2024-01-01T00:00:00")
+    fd_newer = candidate("fdn", descriptor("flat_dark", "included", exposure_s=1.0, content_sha256="c" * 64, mask_identity="d" * 64), acquired_at="2024-06-01T00:00:00")
+    r = match_calibration(
+        lt, request("control", "apply"),
+        pool(flat=[candidate("f1", flat)], flat_dark=[fd_older, fd_newer]), policy(),
+    )
+    assert r.outcome == OUTCOME_MATCHED
+    assert [(rec.role, rec.candidate_id) for rec in r.ranked_out] == [("flat_dark", "fdo")]
+
+
+def test_ranked_out_carries_role_flat():
+    lt = light()
+    f_older = _raw_flat("fo", 1.0, "a" * 64, "b" * 64, acquired_at="2024-01-01T00:00:00")
+    f_newer = _raw_flat("fn", 1.0, "c" * 64, "d" * 64, acquired_at="2024-06-01T00:00:00")
+    fd = candidate("fd", descriptor("flat_dark", "included", exposure_s=1.0, content_sha256="e" * 64, mask_identity="f" * 64))
+    r = match_calibration(
+        lt, request("control", "apply"), pool(flat=[f_older, f_newer], flat_dark=[fd]), policy()
+    )
+    assert r.outcome == OUTCOME_MATCHED
+    assert [(rec.role, rec.candidate_id) for rec in r.ranked_out] == [("flat", "fo")]

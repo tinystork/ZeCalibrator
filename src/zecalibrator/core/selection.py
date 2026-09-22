@@ -34,6 +34,14 @@ Ranking rules (see ``selection_policy_version``):
 ``day(x)`` is the calendar date of DATE-OBS **as recorded (UTC)** — an explicit,
 documented choice, not an implicit assumption. Naive DATE-OBS values are
 interpreted as UTC; offset values are normalized to UTC before taking the date.
+
+**Applicability before ranking:** ranking runs only among candidates that are
+*applicable* for their role. Route-satisfiability (e.g. a ``raw_response`` flat
+whose ``flat_dark``/``bias_flat`` dependency is unavailable) is an **applicability
+filter applied before ranking** — NOT a compatibility criterion and NOT a
+ranking peer. A compatible-but-route-unsatisfiable candidate is recorded with
+``ROUTE_UNSATISFIABLE`` (never ``RANKED_BELOW_WINNER``), so it can never shadow a
+satisfiable peer.
 """
 
 from __future__ import annotations
@@ -53,6 +61,11 @@ STATUS_AMBIGUOUS_TIE = "AMBIGUOUS_TIE"
 # Ranked-out peer reason code (never a compatibility code — the peer WAS
 # compatible; it simply lost the ranking).
 RANKED_BELOW_WINNER = "RANKED_BELOW_WINNER"
+
+# Applicability reason code: a compatible-but-route-unsatisfiable candidate that
+# was excluded by the applicability filter before ranking (never a compatibility
+# code, never RANKED_BELOW_WINNER).
+ROUTE_UNSATISFIABLE = "ROUTE_UNSATISFIABLE"
 
 # Rule labels recorded in the selection audit.
 RULE_NO_CANDIDATE = "no_candidate"
@@ -259,8 +272,17 @@ class MasterSelectionRecord:
 
 @dataclass(frozen=True)
 class RankedOutRecord:
-    """A compatible peer that lost the ranking (recorded, never silently dropped)."""
+    """A compatible peer that lost the ranking (recorded, never silently dropped).
 
+    ``role`` attributes the record to the role whose ranking produced it (the
+    flattened ``MatchResult.ranked_out`` is otherwise ambiguous across roles).
+    ``reason_code`` is ``RANKED_BELOW_WINNER`` for a peer that lost a ranking, or
+    ``ROUTE_UNSATISFIABLE`` for a compatible-but-route-unsatisfiable peer that was
+    excluded by the applicability filter before ranking (never a compatibility
+    code).
+    """
+
+    role: str
     candidate_id: str
     content_sha256: str
     acquired_at: Optional[str]
@@ -269,6 +291,7 @@ class RankedOutRecord:
 
     def to_dict(self) -> Mapping[str, object]:
         return {
+            "role": self.role,
             "candidate_id": self.candidate_id,
             "content_sha256": self.content_sha256,
             "acquired_at": self.acquired_at,
@@ -369,6 +392,7 @@ def _ranked_out(role: str, light, candidates: Sequence) -> tuple[RankedOutRecord
     for c in candidates:
         out.append(
             RankedOutRecord(
+                role=role,
                 candidate_id=c.candidate_id,
                 content_sha256=c.descriptor.content_sha256,
                 acquired_at=getattr(c, "acquired_at", None),
@@ -377,6 +401,15 @@ def _ranked_out(role: str, light, candidates: Sequence) -> tuple[RankedOutRecord
             )
         )
     return tuple(out)
+
+
+def selection_key(role: str, light, candidate) -> SelectionKey:
+    """Return the deterministic :class:`SelectionKey` for ``candidate`` under ``role``.
+
+    Public so callers (e.g. the matcher's applicability filter) can build audit
+    records with the same key the ranking itself would have used.
+    """
+    return _key_for(role, light, candidate)
 
 
 # ---------------------------------------------------------------------------
@@ -443,6 +476,7 @@ __all__ = [
     "RankedOutRecord",
     "RoleSelection",
     "RANKED_BELOW_WINNER",
+    "ROUTE_UNSATISFIABLE",
     "RULE_ADDITIVE",
     "RULE_FLAT",
     "RULE_MANUAL",
@@ -456,4 +490,5 @@ __all__ = [
     "light_acquisition_date",
     "parse_date_obs",
     "select_role_candidates",
+    "selection_key",
 ]

@@ -51,9 +51,12 @@ from zecalibrator.core.plans import (
     VersionSet,
 )
 from zecalibrator.core.selection import (
+    ROUTE_UNSATISFIABLE,
     SELECTION_POLICY_VERSION,
     STATUS_AMBIGUOUS_TIE,
+    RankedOutRecord,
     select_role_candidates,
+    selection_key,
 )
 
 OUTCOME_MATCHED = "MATCHED"
@@ -699,6 +702,7 @@ def _flat_dependency_options(
     *,
     light=None,
     manual_selection: Optional[Mapping[str, str]] = None,
+    probe: bool = False,
 ):
     """Return ``(options, manifest_records, structural, audit_records, unverified,
     selection_records, ranked_out_records, dep_no_candidate, dep_tie)``.
@@ -714,6 +718,12 @@ def _flat_dependency_options(
     ``ranked_out_records`` carry the ranking audit; ``dep_no_candidate`` lists
     dependency roles with no compatible candidate; ``dep_tie`` is True when a
     dependency role reported AMBIGUOUS_TIE.
+
+    ``probe=True`` returns only the satisfiability signal (``options`` is ``[{}]``
+    when at least one executable dependency route exists, else ``[]``) without
+    ranking dependency roles or producing any audit records — it is used by the
+    applicability filter to decide route-satisfiability before ranking the flat
+    role.
     """
     manual = dict(manual_selection or {})
     ff = flat.flat_form
@@ -781,6 +791,16 @@ def _flat_dependency_options(
         unverified.extend(unv)
         bias_flat_compat.append(bf)
 
+    if probe:
+        # Applicability probe: satisfiable iff at least one executable dependency
+        # route exists (flat_dark incl, flat_dark removed + bias, or short-flat bias).
+        satisfiable = bool(
+            fd_incl_compat
+            or (fd_removed_compat and bias_flat_compat)
+            or (flat_short and bias_flat_compat)
+        )
+        return ([{}] if satisfiable else []), [], [], [], [], (), (), (), False
+
     fd_incl_sel = select_role_candidates("flat_dark", light, fd_incl_compat, manual_choice=manual.get("flat_dark"))
     fd_removed_sel = select_role_candidates("flat_dark", light, fd_removed_compat, manual_choice=manual.get("flat_dark"))
     bias_flat_sel = select_role_candidates("bias_flat", light, bias_flat_compat, manual_choice=manual.get("bias_flat"))
@@ -823,6 +843,24 @@ def _flat_dependency_options(
         options, manifest_records, structural, audit_records, unverified,
         tuple(selection_records), tuple(ranked_out_records), tuple(dep_no_candidate), dep_tie,
     )
+
+
+def _flat_route_satisfiable(flat: MasterDescriptor, candidates, policy: MatchPolicy) -> bool:
+    """True when ``flat`` has at least one executable dependency route.
+
+    Route-satisfiability is an **applicability** filter applied BEFORE ranking,
+    never a compatibility criterion. ``corrected_unnormalized`` /
+    ``normalized_response`` are always satisfiable (no dependency); a
+    ``raw_response`` flat is satisfiable iff ``_flat_dependency_options`` (probe
+    mode) yields at least one executable option — the dependency logic is reused
+    verbatim, never reimplemented.
+    """
+    if flat.flat_form in ("corrected_unnormalized", "normalized_response"):
+        return True
+    if flat.flat_form != "raw_response":
+        return False
+    opts, *_rest = _flat_dependency_options(flat, None, candidates, policy, probe=True)
+    return bool(opts)
 
 
 # ---------------------------------------------------------------------------
@@ -956,11 +994,55 @@ def match_calibration(
     flat_dep_no_candidate: tuple[str, ...] = ()
     flat_dep_missing = False
     mixed_flat_form = False
+    satisfiable_flat_ids: set = set()
 
     if request.flat_mode == "apply":
         compatible_ids_by_role["flat"] = {c.candidate_id for c in compatible_flats}
-        by_form: dict[str, list[Candidate]] = {}
+
+        # Route-satisfiability is an APPLICABILITY filter (not a compatibility
+        # criterion), applied BEFORE ranking so a route-unsatisfiable flat can
+        # never shadow a satisfiable peer. See _flat_route_satisfiable.
+        satisfiable_flats: list[Candidate] = []
+        unsatisfiable_flats: list[Candidate] = []
         for f in compatible_flats:
+            if _flat_route_satisfiable(f.descriptor, candidates, policy):
+                satisfiable_flats.append(f)
+            else:
+                unsatisfiable_flats.append(f)
+        satisfiable_flat_ids = {c.candidate_id for c in satisfiable_flats}
+
+        # Audit: compatible-but-route-unsatisfiable peers are recorded with a
+        # DISTINCT reason code (never RANKED_BELOW_WINNER, never a compat code).
+        # When NO satisfiable flat exists, also run the full dependency options
+        # helper so the flat's own dependency rejection reasons (exposure
+        # mismatch / dependency-missing) are recorded — never a silent fallback.
+        for f in unsatisfiable_flats:
+            ranked_out_records.append(RankedOutRecord(
+                role="flat",
+                candidate_id=f.candidate_id,
+                content_sha256=f.descriptor.content_sha256,
+                acquired_at=f.acquired_at,
+                reason_code=ROUTE_UNSATISFIABLE,
+                key=selection_key("flat", light, f),
+            ))
+            if not satisfiable_flats:
+                _opts, recs, struct, audit, dep_unv, _dsel, _drank, dep_no_cand, _dtie = _flat_dependency_options(
+                    f.descriptor, f, candidates, policy,
+                    light=light, manual_selection=manual,
+                )
+                rejected.extend(audit)
+                rejected.extend(recs)
+                manifest_rejected.extend(recs)
+                structural.extend(struct)
+                unverified.extend(dep_unv)
+                if dep_no_cand:
+                    flat_dep_no_candidate = tuple(dict.fromkeys(flat_dep_no_candidate + dep_no_cand))
+
+        if not satisfiable_flats and unsatisfiable_flats:
+            flat_dep_missing = True
+
+        by_form: dict[str, list[Candidate]] = {}
+        for f in satisfiable_flats:
             by_form.setdefault(f.descriptor.flat_form, []).append(f)
         form_winners: list[tuple[str, Candidate]] = []
         for form in sorted(by_form.keys()):
@@ -994,11 +1076,11 @@ def match_calibration(
             if dep_tie:
                 role_tie = True
             flat_route_options = [dict(o) for o in opts]
-            if not flat_route_options and opts is not None:
+            if not flat_route_options:
                 flat_dep_missing = True
         else:
-            # flat_mode apply but no compatible flat: no route (flat is in
-            # no_candidate via composition).
+            # flat_mode apply but no satisfiable flat: no route (a route-
+            # unsatisfiable flat is recorded in ranked_out as ROUTE_UNSATISFIABLE).
             flat_route_options = []
 
     # -- assemble chosen routes ---------------------------------------------
@@ -1018,8 +1100,13 @@ def match_calibration(
     if manual:
         known_ids = {c.candidate_id for role_cands in candidates.values() for c in role_cands}
         rejected_ids = {rec.candidate_id for rec in manifest_rejected}
+        # A manual choice must name a USABLE candidate for its role: for the flat
+        # role, a route-unsatisfiable flat is not usable (applicability filter).
+        usable_ids_by_role = dict(compatible_ids_by_role)
+        if request.flat_mode == "apply":
+            usable_ids_by_role["flat"] = satisfiable_flat_ids
         unsatisfied = any(
-            cid not in known_ids or cid not in compatible_ids_by_role.get(role, ())
+            cid not in known_ids or cid not in usable_ids_by_role.get(role, ())
             for role, cid in manual.items()
         )
         if unsatisfied:
