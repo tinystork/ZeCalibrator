@@ -308,6 +308,35 @@ def test_scan_folder_inputs_recursive_does_not_follow_dir_symlink(tmp_path):
     assert unsupported == 0
 
 
+def test_scan_folder_inputs_recursive_admits_regular_files_only(tmp_path):
+    """Recursive scan admits only regular files (symlink-following, exactly like
+    the non-recursive branch): a dangling symlink named ``*.fit`` and a FIFO
+    named ``*.fits`` are skipped ENTIRELY and never counted as unsupported.
+    Skipped gracefully when neither entry kind is creatable on the platform."""
+    (tmp_path / "real.fit").write_bytes(b"")
+
+    made_dangling = False
+    try:
+        (tmp_path / "dangling.fit").symlink_to(tmp_path / "does-not-exist.fit")
+        made_dangling = True
+    except (OSError, NotImplementedError):
+        pass
+
+    made_fifo = False
+    try:
+        os.mkfifo(str(tmp_path / "pipe.fits"))
+        made_fifo = True
+    except (OSError, NotImplementedError, AttributeError):
+        pass
+
+    if not (made_dangling or made_fifo):
+        pytest.skip("neither dangling symlink nor FIFO creation permitted on this platform")
+
+    paths, unsupported = service.scan_folder_inputs(str(tmp_path), recursive=True)
+    assert paths == [str(tmp_path / "real.fit")]
+    assert unsupported == 0
+
+
 # ---------------------------------------------------------------------------
 # Static boundary: no private module imports under gui/
 # ---------------------------------------------------------------------------

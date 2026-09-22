@@ -115,9 +115,14 @@ def scan_folder_inputs(folder: str, *, recursive: bool = False) -> Tuple[list, i
     Traversal uses ``os.walk(root, followlinks=False)`` with ``dirnames`` sorted
     in place and ``filenames`` iterated in sorted order:
 
-    * Only real directories are recursed into; directory symlinks/junctions are
-      NOT followed (``followlinks=False`` semantics), which also makes the walk
-      loop-safe even for a symlink pointing back to an ancestor.
+    * Only entries for which ``os.path.islink()`` is False are descended into
+      (``followlinks=False`` semantics). On Windows, CPython reports directory
+      junctions as symlinks (``os.lstat`` -> ``S_IFLNK``), so junctions are not
+      followed either; this relies on that CPython behaviour rather than on an
+      explicit ``os.walk`` junction guarantee. The scan root itself is never
+      checked: if the selected folder is itself a symlink or junction, its
+      contents ARE scanned; only nested links are skipped.
+      (Linux/POSIX behaviour is defined by ``os.path.islink`` directly.)
     * Ordering is deterministic: depth-first, directories lexicographically by
       name, files lexicographically by name within each directory.
     * No duplicate paths (each real path is yielded exactly once by ``os.walk``).
@@ -131,8 +136,11 @@ def scan_folder_inputs(folder: str, *, recursive: bool = False) -> Tuple[list, i
         for root, dirnames, filenames in os.walk(folder_path, followlinks=False):
             dirnames.sort()
             for name in sorted(filenames):
+                entry_path = Path(root) / name
+                if not entry_path.is_file():
+                    continue
                 if is_supported_input_file(name):
-                    inputs.append(str(Path(root) / name))
+                    inputs.append(str(entry_path))
                 else:
                     unsupported += 1
         return inputs, unsupported
