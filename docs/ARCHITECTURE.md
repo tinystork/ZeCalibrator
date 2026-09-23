@@ -1018,3 +1018,45 @@ the frozen science contract (strict physical raw FITS decode, immutable evidence
 DQ, signed float32 and CPU primitives), with no matching/UI/integrations/GPU/
 master-building or Phase4 work. Stop at G3 acceptance/HOLD; do not infer this
 G2-only amendment as permission to weaken later gates.
+
+---
+
+## G2B master selection (R1) — four distinct concepts
+
+G2B (`zecalibrator.selection.v1`) separates four concepts that a consumer must be
+able to read as distinct:
+
+1. **Compatibility** — is a master scientifically usable? (`_candidate_compatibility`,
+   unchanged.)
+2. **Ranking** — which compatible master to prefer? (`core/selection.py`; additive
+   most-recent-first then candidate_id; flat same-civil-day / nearest / later-date
+   tie-breaks; never a validity age.)
+3. **Composition** — what was actually applied? (`CalibrationComposition`, availability-
+   relative level NONE/PARTIAL/COMPLETE + `applied_roles`/`skipped_roles`/
+   `no_candidate_roles`/`additive_state`/`flat_applied`.)
+4. **Passthrough** — no applicable master → raw CFA in, unchanged CFA out, with an
+   explicit non-blocking `NO_APPLICABLE_MASTER` audit entry and `ZECALLEVEL=NONE` /
+   `ZECALCOMP=none` header cards.
+
+**LEVEL semantics (frozen, availability-relative — NOT a physical guarantee):**
+`NONE` = no master bound; `PARTIAL` = ≥1 bound and ≥1 role that had a compatible
+candidate left unapplied (or a dependent role unsatisfied); `COMPLETE` = ≥1 bound
+and every role that had a compatible candidate was applied. `COMPLETE` does **not**
+assert that a dark/flat correction was available — the explicit applied/skipped
+roles and `additive_state`/`flat_applied` carry the truth.
+
+**Passthrough contract:** `control`/`bias_only` are READY routes; no compatible
+master at all, or all supplied masters incompatible, yields a READY passthrough
+(level NONE) with the rejection reasons preserved — never a hard failure, never
+silent. The derived Standard route is PRIVATE (not public `api.v1`); public strict
+matching (`resolve_calibration`) keeps `NO_MATCH` for an unsatisfiable explicit
+request.
+
+**Additive library migration:** `io/library_index.py` additively adds the
+`acquired_at` column on `open(initialize=True)` (idempotent, non-destructive,
+schema-version unchanged); pre-G2B revisions load with `acquired_at=None`.
+
+**Owner-decision items:** (a) provenance-schema question (additive fields added
+without a schema bump); (b) ZSSS readiness — public strict matching vs private
+Standard derivation; (c) the frozen `research/phase1/cases.json` declaration that
+now disagrees with the matcher (local override documented, file untouched).

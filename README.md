@@ -9,6 +9,12 @@ useful release applies existing calibration masters; it does not build them.
 > `master_matching`, `provenance`, `cancel`, and `calibrate_batch` (Phase 6
 > batch + transactional FITS outputs + CLI). Qualification remains SYNTH-BASE-1
 > synthetic-only. See [`TODO.md`](TODO.md) for the accepted gate ledger.
+>
+> **G2B master selection (in progress, branch `feat/zc-g2b-master-selection`)**
+> adds acquisition-date master ranking (`zecalibrator.selection.v1`) and an
+> honest composition/passthrough contract: a light with no applicable master is a
+> READY passthrough (raw CFA in, unchanged CFA out), never an error; partial
+> calibrations apply the available corrections and report which.
 
 ## License
 

@@ -341,3 +341,29 @@ reconstruction (NO compatibility bypass). Because `additive_history_state` joins
 the hashed descriptor projection and `VersionSet.provenance_schema` joins the
 plan projection, old descriptor/plan ids may fail strict re-verification against
 a v2 schema — that is expected and accepted for this pre-beta branch.
+
+---
+
+## G2B master selection provenance (R1, additive)
+
+G2B (`zecalibrator.selection.v1`) adds **additive** (non-digest, no schema-version
+bump) provenance fields recording master selection and composition:
+
+- `CalibrationPlan.selection` / `selection_policy_version` / `ranked_out` /
+  `composition` — NON-DIGEST audit blocks (`plan_digest_dict` unchanged; two plans
+  identical except the selection block share a `plan_id`).
+- `ProvenanceRecord.selection` / `ranked_out` / `composition` — masters selected
+  (with rule + key), ranked-out peers (with `RANKED_BELOW_WINNER` /
+  `ROUTE_UNSATISFIABLE` reasons), and the composition (applied/skipped/no-candidate
+  roles + level).
+- `DecisionEnvelope` / `ResolveResult` expose `selection` / `ranked_out` /
+  `composition`; `CalibrationResult` exposes a `composition` surface; the batch
+  item/manifest carry the composition level + applied roles (additive key).
+- Output header: `HIERARCH ZECALLEVEL` (NONE/PARTIAL/COMPLETE) + `HIERARCH
+  ZECALCOMP` (applied roles or "none"), emitted only when determined. No
+  BSCALE/BZERO/BLANK/CHECKSUM/DATASUM are emitted.
+
+**Owner decision (open):** the provenance-schema version is NOT bumped for these
+additive keys. A future owner decision may formalize the CALPROV provenance schema
+around `selection`/`ranked_out`/`composition`; R1 keeps them additive and
+documented, never silently reinterpreted.

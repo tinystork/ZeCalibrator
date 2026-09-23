@@ -2,6 +2,18 @@
 
 ## Current gate / mission
 
+- **In progress: G2B master selection (R0 → R1)** — mission
+  `ZC-G2B-MASTER-SELECTION-20260923`, branch `feat/zc-g2b-master-selection`.
+  R0 + rework-1 + rework-2 ACCEPTED (Junior verification + Nono review `ACCEPT`).
+  R1 (this work) wires the accepted core policy into the consumer layer:
+  passthrough/partial route classification (control/bias_only/passthrough are
+  READY with an explicit availability-relative composition), public composition
+  exposure, additive provenance fields, ZECALLEVEL/ZECALCOMP output-header cards,
+  and GUI/CLI presentation. No version-constant bump; `zecalibrator.selection.v1`
+  remains the only new version string. Derived Standard routing stays PRIVATE
+  (owner decision pending); public strict matching stays `NO_MATCH` for an
+  unsatisfiable explicit request.
+
 - **Current: G7 LOCAL TECHNICAL CANDIDATE ACCEPT (technical only)** —
   `ZC-P7-M1-GUI-20260918`, branch `feat/zc-p7-gui`, base/HEAD
   `de6daf862fa5c662d6814d5b31dc322ae6605895` (verified beta == origin/beta;
