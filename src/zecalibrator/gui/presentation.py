@@ -151,6 +151,12 @@ def human_reason_text(summary: Mapping) -> str:
     """
     outcome = summary.get("outcome")
     codes = tuple(summary.get("reason_codes") or ())
+    if "ADDITIVE_PREREQUISITE_MISSING" in codes:
+        return (
+            "A flat master was supplied but cannot be applied: no additive "
+            "correction (dark or bias) was applied, so a flat alone would "
+            "corrupt the raw image. The image is passed through unchanged."
+        )
     if outcome == "MATCHED":
         # G2B R1: a resolved route may be a full correction, a partial
         # correction, or a passthrough (no correction applied) — all are

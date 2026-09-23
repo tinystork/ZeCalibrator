@@ -228,9 +228,26 @@ def _numeric_field_reason(light_val, master_val, mismatch_code: str, field: str)
     return None
 
 
-def _temp_reason(lt: Optional[float], mt: Optional[float]) -> Optional[str]:
-    """Standard-optional temperature tier (R3D-G): missing on either side is
-    UNVERIFIED (no reason); only a known both-sides out-of-tolerance is fatal."""
+def _temp_reason(light_md: SensorMetadata, master_md: SensorMetadata) -> Optional[str]:
+    """Temperature tier (R3D-G + G2C thermal parity).
+
+    When BOTH sides know the cooling SETPOINT (finite), the setpoint governs
+    COMPLETELY: numeric equality under the existing ``TEMP_PARSER_TOLERANCE_C``,
+    and the measured CCD-TEMP must NOT produce a blocking TEMPERATURE_MISMATCH in
+    that case (equal known setpoints must not diverge on a small measured
+    difference). When the setpoint is NOT known on both sides, the pre-existing
+    measured-CCD-TEMP clause is preserved byte-for-byte (missing on either side
+    -> no reason, as today).
+    """
+    ls = light_md.temperature_setpoint_c
+    ms = master_md.temperature_setpoint_c
+    if _is_finite(ls) and _is_finite(ms):
+        if abs(float(ls) - float(ms)) > TEMP_PARSER_TOLERANCE_C:
+            return "TEMPERATURE_MISMATCH: acquisition.temperature_setpoint_c"
+        return None
+    # Setpoint not known on both sides -> preserve the measured CCD-TEMP clause.
+    lt = light_md.temperature_c
+    mt = master_md.temperature_c
     if lt is None or mt is None:
         return None
     if not _is_finite(lt) or not _is_finite(mt):
@@ -331,7 +348,7 @@ def _validate_compatibility(
     if exposure_reference is not None:
         reasons.append(_exposure_reason(exposure_reference, m.exposure_s))
         if not prepared_flat:
-            reasons.append(_temp_reason(light.temperature_c, m.temperature_c))
+            reasons.append(_temp_reason(light, m))
 
     if check_filter:
         reasons.append(_field_reason(light.filter, m.filter, "FILTER_MISMATCH", "optical.filter"))

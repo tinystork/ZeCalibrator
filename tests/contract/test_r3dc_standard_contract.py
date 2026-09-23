@@ -263,7 +263,7 @@ def test_missing_acquisition_facts_unverified_and_ready():
     fields = {r.field for r in res.unverified}
     assert "acquisition.gain" in fields
     assert "acquisition.offset" in fields
-    assert "acquisition.temperature_c" in fields
+    assert "acquisition.temperature_setpoint_c" in fields
     assert all(not r.blocking for r in res.unverified)
 
 

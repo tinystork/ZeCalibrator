@@ -322,6 +322,7 @@ class Acquisition:
     readout_mode: Optional[str] = None
     adc_mode: Optional[str] = None
     temperature_c: Optional[float] = None
+    temperature_setpoint_c: Optional[float] = None
     exposure_s: Optional[float] = None
     saturation_limit_adu: Optional[float] = None
     saturation_evidence: str = "unknown"
@@ -331,7 +332,7 @@ class Acquisition:
     def __post_init__(self) -> None:
         if self.saturation_evidence not in ("qualified", "unknown"):
             raise ValueError(f"saturation_evidence must be 'qualified' or 'unknown', got {self.saturation_evidence!r}")
-        for name in ("gain", "offset", "temperature_c", "exposure_s", "saturation_limit_adu", "bias_exposure_max_s"):
+        for name in ("gain", "offset", "temperature_c", "temperature_setpoint_c", "exposure_s", "saturation_limit_adu", "bias_exposure_max_s"):
             v = getattr(self, name)
             if v is not None:
                 f = float(v)
@@ -344,12 +345,19 @@ class Acquisition:
         object.__setattr__(self, "short_flat_profile", bool(self.short_flat_profile))
 
     def to_dict(self) -> Mapping[str, object]:
+        # ``temperature_setpoint_c`` IS serialized here (so it survives the
+        # persisted library-index descriptor round-trip), but it is a MATCHING
+        # criterion and is DELIBERATELY excluded from the frozen scientific
+        # identity: the descriptor digest projects an allowlist (temperature_c
+        # only) and the plan digest projects explicit acquisition subpaths that
+        # exclude the setpoint (see ZC-G2C-THERMAL-FLAT-SAFETY G2).
         return {
             "gain": self.gain,
             "offset": self.offset,
             "readout_mode": self.readout_mode,
             "adc_mode": self.adc_mode,
             "temperature_c": self.temperature_c,
+            "temperature_setpoint_c": self.temperature_setpoint_c,
             "exposure_s": self.exposure_s,
             "saturation_limit_adu": self.saturation_limit_adu,
             "saturation_evidence": self.saturation_evidence,
@@ -429,9 +437,13 @@ class LightConstraints:
     """Frozen, validated light-side matching constraints (ARCHITECTURE §3.3).
 
     Matching-relevant light facts (including the qualified bias range and
-    short-flat profile) live on :class:`Acquisition`, which is projected as a
-    whole subtree in the plan digest. ``evidence`` is audit-only (original cards/
-    declaration/units) and is excluded from plan identity by design.
+    short-flat profile) live on :class:`Acquisition`, which is projected in the
+    plan digest as an EXPLICIT subpath allowlist (gain/offset/readout_mode/
+    adc_mode/temperature_c/exposure_s/saturation_*/bias_exposure_max_s/
+    short_flat_profile). ``temperature_setpoint_c`` is a matching criterion and
+    is deliberately excluded from that projection. ``evidence`` is audit-only
+    (original cards/declaration/units) and is excluded from plan identity by
+    design.
     """
 
     geometry: Geometry
@@ -691,13 +703,14 @@ def _validity_from_dict(value) -> ValidityEvidence:
 
 
 def _acquisition_from_dict(value) -> Acquisition:
-    _reject_unknown_keys(value, frozenset({"gain", "offset", "readout_mode", "adc_mode", "temperature_c", "exposure_s", "saturation_limit_adu", "saturation_evidence", "bias_exposure_max_s", "short_flat_profile"}), "acquisition")
+    _reject_unknown_keys(value, frozenset({"gain", "offset", "readout_mode", "adc_mode", "temperature_c", "temperature_setpoint_c", "exposure_s", "saturation_limit_adu", "saturation_evidence", "bias_exposure_max_s", "short_flat_profile"}), "acquisition")
     return Acquisition(
         gain=value.get("gain"),
         offset=value.get("offset"),
         readout_mode=value.get("readout_mode"),
         adc_mode=value.get("adc_mode"),
         temperature_c=value.get("temperature_c"),
+        temperature_setpoint_c=value.get("temperature_setpoint_c"),
         exposure_s=value.get("exposure_s"),
         saturation_limit_adu=value.get("saturation_limit_adu"),
         saturation_evidence=value.get("saturation_evidence", "unknown"),

@@ -32,6 +32,7 @@ from zecalibrator.core.plans import (
     MatchPolicy,
 )
 from zecalibrator.core.routes import (
+    ADDITIVE_PREREQUISITE_MISSING,
     OUTCOME_AMBIGUOUS,
     OUTCOME_NEEDS_ATTENTION,
     OUTCOME_READY,
@@ -94,9 +95,16 @@ def resolve_route(
         # Standard-contract tiers as the enumerator (missing gain/offset/temp/
         # orientation/roi_origin are UNVERIFIED non-blocking; known mismatches
         # stay blocking; the contract-flat coherence default is accepted).
+        # G2C/H1: when the RAW flat-only guard skipped a supplied, compatible flat,
+        # the plan composition must record the precise skip reason (never the
+        # generic NOT_REQUIRED).
+        flat_skipped_raw_prereq = any(
+            r.code == ADDITIVE_PREREQUISITE_MISSING for r in enumeration.reasons
+        )
         result = match_calibration(
             light, request, snapshot.candidates, policy, standard_contract=True,
             external_rejected=enumeration.rejected_masters,
+            flat_skipped_raw_prereq=flat_skipped_raw_prereq,
         )
         unverified = _merge_unverified(enumeration.unverified, result.unverified)
         if result.outcome == OUTCOME_MATCHED and result.plan is not None:

@@ -98,8 +98,11 @@ def test_flat_only_is_ready():
     assert res.outcome == OUTCOME_READY
     assert res.plan is not None
     assert res.plan.composition.additive_state == "none"
-    assert res.plan.composition.flat_applied is True
-    assert res.plan.composition.applied_roles == ("flat",)
+    # G2C RAW flat-only guard: a flat alone on an uncorrected RAW light is
+    # skipped (never applied); the route is a pixel-identical passthrough.
+    assert res.plan.composition.flat_applied is False
+    assert res.plan.composition.applied_roles == ()
+    assert any(r.code == "ADDITIVE_PREREQUISITE_MISSING" for r in res.reasons)
 
 
 def test_dark_only_is_ready():

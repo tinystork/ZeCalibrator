@@ -301,6 +301,7 @@ def light_constraints_from_sensor_metadata(md: SensorMetadata) -> LightConstrain
             readout_mode=md.readout_mode,
             adc_mode=md.adc_mode,
             temperature_c=md.temperature_c,
+            temperature_setpoint_c=md.temperature_setpoint_c,
             exposure_s=md.exposure_s,
             saturation_limit_adu=md.saturation_limit_adu,
             saturation_evidence=md.saturation_evidence,

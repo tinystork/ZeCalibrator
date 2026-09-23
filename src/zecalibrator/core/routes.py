@@ -88,6 +88,10 @@ BIAS_REQUIRED = "BIAS_REQUIRED"
 FLAT_UNUSABLE = "FLAT_UNUSABLE"
 FLAT_UNSUPPORTED_RAW = "FLAT_UNSUPPORTED_RAW"
 NO_APPLICABLE_MASTER = "NO_APPLICABLE_MASTER"
+# G2C: a RAW sensor-domain light with NO qualified additive correction applied
+# must NOT receive a flat alone (unsafe multiplicative flat on uncorrected RAW).
+# Non-blocking audit: the flat is skipped; the route is passthrough RAW.
+ADDITIVE_PREREQUISITE_MISSING = "ADDITIVE_PREREQUISITE_MISSING"
 
 # Semantic source for a Standard-contract-default assignment (R3D-C). A supplied
 # master whose bias_state/flat_form was assigned by the contract (derivable from
@@ -542,8 +546,30 @@ def enumerate_routes(
 
     # ------------------------------------------------------------------- combine
     routes: list[Route] = []
+    flat_prereq_missing_emitted = False
     for amode, am in additive_options:
-        for fmode, fprep, fm in flat_options:
+        additive_applied = bool(am)
+        effective_flat_options = flat_options
+        # G2C RAW flat-only guard: a RAW sensor-domain light with NO additive
+        # master applied by this additive option MUST NOT receive a flat alone
+        # (a multiplicative flat on an uncorrected RAW light spatially modulates
+        # the pedestal). The flat is SKIPPED (not applied); the additive option
+        # still resolves to its own passthrough route. The prerequisite is about
+        # what the resolved plan ACTUALLY applied — never "a dark exists in the
+        # library". bias_only / dark_incl_bias / dark_bias_removed all apply a
+        # real additive correction and keep their flat pairing.
+        if light.raw_domain_declaration == "raw" and not additive_applied:
+            if any(o[0] == "apply" for o in flat_options):
+                if not flat_prereq_missing_emitted:
+                    reasons.append(Reason(
+                        ADDITIVE_PREREQUISITE_MISSING, "flat", role="flat",
+                        parent="additive",
+                        expected="additive correction applied",
+                        observed=amode, blocking=False,
+                    ))
+                    flat_prereq_missing_emitted = True
+                effective_flat_options = [("none", None, {})]
+        for fmode, fprep, fm in effective_flat_options:
             masters = dict(am)
             masters.update(fm)
             routes.append(Route(amode, fmode, fprep, masters))
@@ -594,6 +620,7 @@ def enumerate_routes(
 
 
 __all__ = [
+    "ADDITIVE_PREREQUISITE_MISSING",
     "BIAS_REQUIRED",
     "BIAS_STATE_UNKNOWN",
     "FLAT_UNSUPPORTED_RAW",

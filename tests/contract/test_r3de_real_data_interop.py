@@ -354,7 +354,7 @@ def test_dark_missing_gain_temp_unverified_non_blocking():
     fields = {r.field for r in res.unverified}
     assert "acquisition.gain" in fields
     assert "acquisition.offset" in fields
-    assert "acquisition.temperature_c" in fields
+    assert "acquisition.temperature_setpoint_c" in fields
     assert all(not r.blocking for r in res.unverified)
 
 

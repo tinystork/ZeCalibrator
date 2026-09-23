@@ -617,7 +617,8 @@ class CalibrationPlan:
 
         return Acquisition(
             gain=d.get("gain"), offset=d.get("offset"), readout_mode=d.get("readout_mode"),
-            adc_mode=d.get("adc_mode"), temperature_c=d.get("temperature_c"), exposure_s=d.get("exposure_s"),
+            adc_mode=d.get("adc_mode"), temperature_c=d.get("temperature_c"),
+            temperature_setpoint_c=d.get("temperature_setpoint_c"), exposure_s=d.get("exposure_s"),
             saturation_limit_adu=d.get("saturation_limit_adu"), saturation_evidence=d.get("saturation_evidence", "unknown"),
             bias_exposure_max_s=d.get("bias_exposure_max_s"),
             short_flat_profile=d.get("short_flat_profile", False),

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import dataclasses
 import os
+import math
 import sqlite3
 from typing import Iterable, Mapping, Optional
 
@@ -476,7 +477,8 @@ def _explicit_bias_removed(spec: MasterImportSpec) -> bool:
 
 
 def _descriptor_from_spec(
-    spec: MasterImportSpec, *, shape, content_sha256, size_bytes, mask_identity
+    spec: MasterImportSpec, *, shape, content_sha256, size_bytes, mask_identity,
+    temperature_setpoint_c=None,
 ):
     from zecalibrator.core.descriptors import (
         Acquisition,
@@ -512,6 +514,15 @@ def _descriptor_from_spec(
         readout_mode=decl.readout_mode,
         adc_mode=decl.adc_mode,
         temperature_c=decl.temperature_c,
+        # The cooling setpoint is a MATCHING criterion, never part of the frozen
+        # descriptor identity; it is read explicitly from the master's FITS header
+        # (SET-TEMP) by the admission path and carried here alongside the measured
+        # CCD-TEMP (temperature_c). It is NOT serialized into Acquisition.to_dict.
+        temperature_setpoint_c=(
+            temperature_setpoint_c
+            if temperature_setpoint_c is not None
+            else getattr(decl, "temperature_setpoint_c", None)
+        ),
         exposure_s=decl.exposure_s,
         saturation_limit_adu=decl.saturation_limit_adu,
         saturation_evidence=decl.saturation_evidence,
@@ -587,6 +598,32 @@ def _descriptor_from_spec(
     )
 
 
+def _fits_setpoint(source, path, hdu) -> Optional[float]:
+    """Read the SET-TEMP cooling setpoint from a master's FITS header (explicit).
+
+    Mirrors the light decoder's ``SET-TEMP -> temperature_setpoint_c`` read. The
+    setpoint is a MATCHING criterion, distinct from the measured CCD-TEMP. Returns
+    the finite numeric value when present and parseable, else ``None`` (never
+    invented). HIERARCH-encoded SET-TEMP normalizes like its plain counterpart.
+    """
+    cards = source.read_header(path, hdu=hdu)
+    for c in cards:
+        kw = str(getattr(c, "keyword", "") or "").upper()
+        if kw.startswith("HIERARCH "):
+            kw = kw[len("HIERARCH "):]
+        if kw != "SET-TEMP":
+            continue
+        v = getattr(c, "value", None)
+        if v is None:
+            return None
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return None
+        return f if math.isfinite(f) else None
+    return None
+
+
 def _build_candidate(path, spec, source, mask_path):
     from zecalibrator.core.descriptors import DescriptorSnapshot
     from zecalibrator.core.plans import Candidate, FitsFileLocator, MaskPayloadLocator
@@ -608,6 +645,7 @@ def _build_candidate(path, spec, source, mask_path):
     desc = _descriptor_from_spec(
         spec, shape=shape, content_sha256=ident.content_sha256,
         size_bytes=ident.size_bytes, mask_identity=mask_identity,
+        temperature_setpoint_c=_fits_setpoint(source, path, spec.hdu),
     )
     return Candidate(
         candidate_id=desc.descriptor_id,

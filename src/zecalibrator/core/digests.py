@@ -190,7 +190,20 @@ PLAN_PROJECTION: tuple[str, ...] = (
     "request.flat_mode",
     "light_constraints.geometry",
     "light_constraints.detector",
-    "light_constraints.acquisition",
+    # The light acquisition is projected as an EXPLICIT allowlist of subpaths
+    # (never a blacklist). ``temperature_setpoint_c`` is deliberately absent: it
+    # is a MATCHING criterion, fully serialized, but NOT part of the frozen plan
+    # identity (ZC-G2C-THERMAL-FLAT-SAFETY G2).
+    "light_constraints.acquisition.gain",
+    "light_constraints.acquisition.offset",
+    "light_constraints.acquisition.readout_mode",
+    "light_constraints.acquisition.adc_mode",
+    "light_constraints.acquisition.temperature_c",
+    "light_constraints.acquisition.exposure_s",
+    "light_constraints.acquisition.saturation_limit_adu",
+    "light_constraints.acquisition.saturation_evidence",
+    "light_constraints.acquisition.bias_exposure_max_s",
+    "light_constraints.acquisition.short_flat_profile",
     "light_constraints.optical",
     "light_constraints.raw_domain_declaration",
     "policy_parameters.exposure_tolerance",

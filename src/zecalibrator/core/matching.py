@@ -238,20 +238,28 @@ def _standard_optional_reasons(light, master, code: str, field: str, *, numeric:
     return []
 
 
-def _standard_temperature_reasons(light, master, policy: MatchPolicy) -> list[Reason]:
-    """Standard auto-route temperature tier (R3D-C): missing -> UNVERIFIED
-    (non-blocking); both known + out-of-tolerance -> blocking TEMPERATURE_MISMATCH."""
-    field = "acquisition.temperature_c"
-    if _unknown(light) or _unknown(master):
-        return [Reason(_UNVERIFIED, field, expected=light, observed=master, blocking=False)]
-    if not _finite(light) or not _finite(master):
-        return [Reason(_UNVERIFIED, field, expected=light, observed=master, blocking=False)]
-    lt, mt = float(light), float(master)
-    tol = policy.temperature_tolerance
-    bound = max(tol.absolute, tol.relative * max(abs(lt), abs(mt)))
-    if abs(lt - mt) > bound:
-        return [Reason("TEMPERATURE_MISMATCH", field, expected=light, observed=master)]
-    return []
+def _standard_temperature_reasons(light_acq, master_acq, policy: MatchPolicy) -> list[Reason]:
+    """Standard auto-route temperature tier (R3D-C + G2C thermal fix).
+
+    The cooling SETPOINT governs when both sides know it (finite): equal known
+    setpoints are compatible and CCD-TEMP must NOT override them; genuinely
+    different known setpoints are a blocking TEMPERATURE_MISMATCH under the
+    EXISTING policy tolerance (numeric equality, no arbitrary window). When the
+    setpoint is not known on both sides, the clause degrades honestly to a
+    non-blocking UNVERIFIED note — never a fabricated equality, and never a hard
+    mismatch caused only by a small CCD-TEMP difference.
+    """
+    field = "acquisition.temperature_setpoint_c"
+    ls = light_acq.temperature_setpoint_c
+    ms = master_acq.temperature_setpoint_c
+    if _finite(ls) and _finite(ms):
+        lt, mt = float(ls), float(ms)
+        tol = policy.temperature_tolerance
+        bound = max(tol.absolute, tol.relative * max(abs(lt), abs(mt)))
+        if abs(lt - mt) > bound:
+            return [Reason("TEMPERATURE_MISMATCH", field, expected=ls, observed=ms)]
+        return []
+    return [Reason(_UNVERIFIED, field, expected=ls, observed=ms, blocking=False)]
 
 
 def _split_reasons(reasons: Iterable[Reason]) -> tuple[list[Reason], list[Reason]]:
@@ -411,7 +419,30 @@ def _string_reason(light, master, code: str, field: str) -> list[Reason]:
     return []
 
 
-def _temperature_reason(light, master, policy: MatchPolicy) -> list[Reason]:
+def _temperature_reason(light_acq, master_acq, policy: MatchPolicy) -> list[Reason]:
+    """Strict temperature tier (G2C thermal fix).
+
+    When BOTH sides know the cooling SETPOINT (finite), the setpoint governs
+    COMPLETELY: numeric equality under the EXISTING policy tolerance, and
+    CCD-TEMP must NOT be emitted as a blocking reason in that case (it must not
+    override equal known setpoints). Genuinely different known setpoints are a
+    blocking TEMPERATURE_MISMATCH. When the setpoint is NOT known on both sides,
+    the pre-existing CCD-TEMP clause is preserved byte-for-byte (no silent Strict
+    redefinition).
+    """
+    ls = light_acq.temperature_setpoint_c
+    ms = master_acq.temperature_setpoint_c
+    if _finite(ls) and _finite(ms):
+        lt, mt = float(ls), float(ms)
+        tol = policy.temperature_tolerance
+        bound = max(tol.absolute, tol.relative * max(abs(lt), abs(mt)))
+        if abs(lt - mt) > bound:
+            return [Reason("TEMPERATURE_MISMATCH", "acquisition.temperature_setpoint_c", expected=ls, observed=ms)]
+        return []
+
+    # Setpoint not known on both sides -> preserve today's CCD-TEMP clause exactly.
+    light = light_acq.temperature_c
+    master = master_acq.temperature_c
     if _unknown(light) or _unknown(master):
         reasons = [Reason(_MISSING, "acquisition.temperature_c", expected=light, observed=master)]
         if _unknown(light) and _unknown(master):
@@ -629,9 +660,9 @@ def _candidate_compatibility(
     if check in (_CHECK_DARK_EXPOSURE, _CHECK_FLATDARK_EXPOSURE):
         reasons += _exposure_reason(reference_exposure, desc.acquisition.exposure_s, policy)
         if standard_contract:
-            reasons += _standard_temperature_reasons(reference.acquisition.temperature_c, desc.acquisition.temperature_c, policy)
+            reasons += _standard_temperature_reasons(reference.acquisition, desc.acquisition, policy)
         else:
-            reasons += _temperature_reason(reference.acquisition.temperature_c, desc.acquisition.temperature_c, policy)
+            reasons += _temperature_reason(reference.acquisition, desc.acquisition, policy)
     elif check in (_CHECK_BIAS_RANGE, _CHECK_FLATBIAS_RANGE):
         reasons += _bias_exposure_reason(desc.acquisition.exposure_s, reference_bias_range)
 
@@ -904,6 +935,7 @@ def match_calibration(
     manual_selection: Optional[Mapping[str, str]] = None,
     standard_contract: bool = False,
     external_rejected: Sequence = (),
+    flat_skipped_raw_prereq: bool = False,
 ) -> MatchResult:
     manual = dict(manual_selection or {})
     roles = request.required_roles
@@ -1196,7 +1228,7 @@ def match_calibration(
         reasons = tuple(r for rec in rejected for r in rec.reasons) + tuple(structural)
         composition = _compute_composition(
             request, None, compatible_ids_by_role, flat_dep_no_candidate, flat_dep_missing,
-            rejected_masters, supplied_roles,
+            rejected_masters, supplied_roles, flat_skipped_raw_prereq,
         )
         return MatchResult(
             outcome=OUTCOME_NO_MATCH,
@@ -1248,7 +1280,7 @@ def match_calibration(
     chosen = routes[0]
     composition = _compute_composition(
         request, chosen, compatible_ids_by_role, flat_dep_no_candidate, flat_dep_missing,
-        rejected_masters, supplied_roles,
+        rejected_masters, supplied_roles, flat_skipped_raw_prereq,
     )
     plan = _build_plan(
         light, request, chosen, policy,
@@ -1409,6 +1441,7 @@ def _compute_composition(
     flat_dep_missing: bool,
     rejected_masters: tuple = (),
     supplied_roles: tuple = (),
+    flat_skipped_raw_prereq: bool = False,
 ) -> CalibrationComposition:
     applied = tuple(sorted(chosen.keys())) if chosen is not None else ()
     required = list(request.required_roles)
@@ -1439,7 +1472,15 @@ def _compute_composition(
             continue
         compat_ids = compatible_ids_by_role.get(role, set())
         if compat_ids:
-            skipped.append(SkippedRole(role, "NOT_REQUIRED", ""))
+            # G2C/H1: a supplied, compatible flat skipped BECAUSE the RAW
+            # additive prerequisite is missing must record the precise reason
+            # (never overload NOT_REQUIRED).
+            reason = (
+                "ADDITIVE_PREREQUISITE_MISSING"
+                if (role == "flat" and flat_skipped_raw_prereq)
+                else "NOT_REQUIRED"
+            )
+            skipped.append(SkippedRole(role, reason, ""))
         elif role not in rejected_roles:
             skipped.append(SkippedRole(role, "NOT_APPLICABLE_FOR_ROUTE", ""))
 

@@ -163,6 +163,7 @@ def scan_folder_inputs(folder: str, *, recursive: bool = False) -> Tuple[list, i
 EVIDENCE_SOURCE_MAP: Mapping[str, Tuple[str, ...]] = {
     "exposure_s": ("EXPTIME", "EXPOSURE"),
     "temperature_c": ("CCD-TEMP", "TEMPCCD"),
+    "temperature_setpoint_c": ("SET-TEMP",),
     "gain": ("GAIN", "EGAIN"),
     "offset": ("OFFSET", "PEDESTAL"),
     "readout_mode": ("READOUTM", "READMODE"),
@@ -177,7 +178,7 @@ _BINNING_SCALAR_KEYWORDS = ("BINNING",)
 _BINNING_PAIR_KEYWORDS = ("XBINNING", "YBINNING")
 
 # Fields whose candidate value is a float, and those kept as a string.
-_NUMERIC_EVIDENCE_FIELDS = frozenset({"exposure_s", "temperature_c", "gain", "offset"})
+_NUMERIC_EVIDENCE_FIELDS = frozenset({"exposure_s", "temperature_c", "temperature_setpoint_c", "gain", "offset"})
 
 
 def _coerce_evidence_value(field: str, raw):

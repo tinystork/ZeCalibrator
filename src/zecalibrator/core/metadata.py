@@ -44,6 +44,7 @@ FIELD_BY_KEYWORD: Mapping[str, str] = MappingProxyType(
         "INSTRUME": "detector_model",
         "BAYERPAT": "cfa",
         "CCD-TEMP": "temperature_c",
+        "SET-TEMP": "temperature_setpoint_c",
         "GAIN": "gain",
         "FILTER": "filter",
         "BSCALE": "bscale",
@@ -601,6 +602,7 @@ class ImportDeclaration:
     roi_origin: Optional[tuple[int, int]] = None
     exposure_s: Optional[float] = None
     temperature_c: Optional[float] = None
+    temperature_setpoint_c: Optional[float] = None
     filter: Optional[str] = None
     optical_train_id: Optional[str] = None
     bias_exposure_max_s: Optional[float] = None
@@ -659,6 +661,7 @@ class SensorMetadata:
     declaration: Optional[ImportDeclaration] = None
     exposure_s: Optional[float] = None
     temperature_c: Optional[float] = None
+    temperature_setpoint_c: Optional[float] = None
     gain: Optional[float] = None
     offset: Optional[float] = None
     readout_mode: Optional[str] = None
@@ -917,6 +920,7 @@ def build_sensor_metadata(
 
     exposure_s = resolve("exposure_seconds", "exposure_s")
     temperature_c = resolve("temperature_c", "temperature_c")
+    temperature_setpoint_c = resolve("temperature_setpoint_c", "temperature_setpoint_c")
     gain = resolve("gain", "gain")
     filter_ = resolve("filter", "filter", _str_or_none)
     detector_model = resolve("detector_model", "detector_model", _str_or_none)
@@ -992,6 +996,7 @@ def build_sensor_metadata(
         declaration=declaration,
         exposure_s=exposure_s,
         temperature_c=temperature_c,
+        temperature_setpoint_c=temperature_setpoint_c,
         gain=gain,
         offset=offset,
         readout_mode=readout_mode,

@@ -46,7 +46,9 @@ def test_detect_header_candidates_exact_approved_table():
 
 
 def test_unapproved_alias_produces_no_candidate():
-    cards = [("SET-TEMP", 20.0), ("READMODE_ALIAS", "X"), ("FOO", 1.0)]
+    # SET-TEMP is now an approved source for ``temperature_setpoint_c`` (G2C);
+    # genuinely unapproved aliases still produce no candidate.
+    cards = [("TEMP_ALIAS", 20.0), ("READMODE_ALIAS", "X"), ("FOO", 1.0)]
     candidates, conflicts = service.detect_header_candidates(cards)
     assert candidates == {}
     assert conflicts == {}

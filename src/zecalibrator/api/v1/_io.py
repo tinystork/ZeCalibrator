@@ -313,6 +313,7 @@ def apply_roi_extent(metadata, evidence, actual_shape):
         declaration=metadata.declaration,
         exposure_s=metadata.exposure_s,
         temperature_c=metadata.temperature_c,
+        temperature_setpoint_c=metadata.temperature_setpoint_c,
         gain=metadata.gain,
         offset=metadata.offset,
         readout_mode=metadata.readout_mode,

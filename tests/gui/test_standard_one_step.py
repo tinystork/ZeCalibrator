@@ -181,7 +181,11 @@ def test_siril_flat_without_r4_evidence_indexed_and_unverified(qapp, paths, tmp_
         assert "validity_evidence.saturation_limit_known" in fields
         assert "validity_evidence.illumination" in fields
         assert "validity_evidence.exposure_quality" in fields
-        assert resolution.routes and resolution.routes[0].masters.get("flat") is not None
+        # G2C RAW flat-only guard: on a RAW light with no dark/bias the flat is
+        # skipped (not applied) — the route is a passthrough, never a flat-only
+        # multiplicative correction on an uncorrected RAW light.
+        assert resolution.routes and resolution.routes[0].masters.get("flat") is None
+        assert any(r.code == "ADDITIVE_PREREQUISITE_MISSING" for r in resolution.reasons)
     finally:
         _shutdown(w)
 
