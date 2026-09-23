@@ -20,7 +20,7 @@ def test_api_version_independent_of_product_version():
 
     assert v1.API_VERSION != zecalibrator.__version__
     assert v1.API_VERSION == "1.0"
-    assert zecalibrator.__version__ == "0.0.2"
+    assert zecalibrator.__version__ == "0.0.3"
 
 
 def test_get_api_info_matches_static_surface():
