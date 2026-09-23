@@ -74,7 +74,7 @@ from zecalibrator.core.matching import (
     _sorted_candidates,
     _split_reasons,
 )
-from zecalibrator.core.plans import Candidate, MatchPolicy
+from zecalibrator.core.plans import Candidate, MatchPolicy, RejectedMasterRecord
 from zecalibrator.core.selection import STATUS_AMBIGUOUS_TIE, select_role_candidates
 
 OUTCOME_READY = "READY"
@@ -120,12 +120,14 @@ class RouteEnumeration:
     reasons: Tuple[Reason, ...]
     unverified: Tuple[Reason, ...]
     contract_defaults: Tuple[Mapping[str, object], ...] = ()
+    rejected_masters: Tuple = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "routes", tuple(self.routes))
         object.__setattr__(self, "reasons", tuple(self.reasons))
         object.__setattr__(self, "unverified", tuple(self.unverified))
         object.__setattr__(self, "contract_defaults", tuple(self.contract_defaults))
+        object.__setattr__(self, "rejected_masters", tuple(self.rejected_masters))
 
 
 def _hashable(value):
@@ -187,14 +189,16 @@ def _compatible_candidates(
     flat_extra: bool,
     standard_contract: bool = False,
 ) -> Tuple[list, list, list]:
-    """Return ``(compatible, blocking_reasons, unverified)`` for one role.
+    """Return ``(compatible, rejected, unverified)`` for one role.
 
     Reuses the existing ``_candidate_compatibility`` helper verbatim (no
     reimplementation of compatibility). Candidates whose semantic
     ``master_type`` differs from ``role`` are skipped (never trusted by key).
+    ``rejected`` is a list of ``(candidate, blocking_reasons)`` so the
+    considered-but-rejected masters can be recorded in the audit.
     """
     compatible = []
-    blocking_reasons = []
+    rejected = []
     unverified = []
     for c in _sorted_candidates(_collapse_duplicates(candidates.get(role, ()))):
         if _role_of(c.descriptor) != role:
@@ -214,11 +218,11 @@ def _compatible_candidates(
         )
         blocking, unv = _split_reasons(reasons)
         if blocking:
-            blocking_reasons.extend(blocking)
+            rejected.append((c, blocking))
         else:
             compatible.append(c)
             unverified.extend(unv)
-    return compatible, blocking_reasons, unverified
+    return compatible, rejected, unverified
 
 
 def _contract_default_records(desc, role: str) -> list[dict]:
@@ -294,18 +298,20 @@ def enumerate_routes(
     light_bias_range = light.acquisition.bias_exposure_max_s
 
     # ------------------------------------------------------------------ additive
-    compatible_darks, dark_reject, dark_unv = _compatible_candidates(
+    compatible_darks, dark_rejected, dark_unv = _compatible_candidates(
         light, candidates, "dark", policy,
         check=_CHECK_DARK_EXPOSURE, reference_exposure=light_exposure, reference_bias_range=None,
         check_filter=False, check_optical=False, expected_units="ADU", flat_extra=False,
         standard_contract=True,
     )
-    compatible_biases, bias_reject, bias_unv = _compatible_candidates(
+    compatible_biases, bias_rejected, bias_unv = _compatible_candidates(
         light, candidates, "bias", policy,
         check=_CHECK_BIAS_RANGE, reference_exposure=None, reference_bias_range=light_bias_range,
         check_filter=False, check_optical=False, expected_units="ADU", flat_extra=False,
         standard_contract=True,
     )
+    dark_reject = [r for _, rs in dark_rejected for r in rs]
+    bias_reject = [r for _, rs in bias_rejected for r in rs]
     reasons.extend(dark_reject)
     reasons.extend(bias_reject)
     unverified.extend(dark_unv)
@@ -435,6 +441,7 @@ def enumerate_routes(
     # ---------------------------------------------------------------------- flat
     compatible_flats = []
     flat_reject = []
+    flat_rejected = []
     flat_unv = []
     flat_supplied = False
     for c in _sorted_candidates(_collapse_duplicates(candidates.get("flat", ()))):
@@ -456,6 +463,7 @@ def enumerate_routes(
         blocking, unv = _split_reasons(rs)
         if blocking:
             flat_reject.extend(blocking)
+            flat_rejected.append((c, blocking))
         else:
             compatible_flats.append(c)
             flat_unv.extend(unv)
@@ -559,7 +567,30 @@ def enumerate_routes(
 
     reasons = _dedup_reasons(reasons)
     unverified = _dedup_unverified(unverified)
-    return RouteEnumeration(outcome, tuple(routes), tuple(reasons), tuple(unverified), tuple(contract_defaults))
+
+    # Considered-but-rejected masters (never silently invisible): a supplied
+    # master evaluated and rejected by compatibility is recorded with its role
+    # and reason codes, so a passthrough plan still records what was supplied.
+    rejected_masters: list[RejectedMasterRecord] = []
+    seen: set = set()
+    for role, rejected in (("dark", dark_rejected), ("bias", bias_rejected), ("flat", flat_rejected)):
+        for c, blocking in rejected:
+            content = c.descriptor.content_sha256
+            key = (role, c.candidate_id, content)
+            if key in seen:
+                continue
+            seen.add(key)
+            rejected_masters.append(RejectedMasterRecord(
+                role=role,
+                candidate_id=c.candidate_id,
+                content_sha256=content,
+                reason_codes=tuple(dict.fromkeys(r.code for r in blocking)),
+            ))
+
+    return RouteEnumeration(
+        outcome, tuple(routes), tuple(reasons), tuple(unverified), tuple(contract_defaults),
+        tuple(rejected_masters),
+    )
 
 
 __all__ = [

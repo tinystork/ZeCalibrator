@@ -95,7 +95,8 @@ def resolve_route(
         # orientation/roi_origin are UNVERIFIED non-blocking; known mismatches
         # stay blocking; the contract-flat coherence default is accepted).
         result = match_calibration(
-            light, request, snapshot.candidates, policy, standard_contract=True
+            light, request, snapshot.candidates, policy, standard_contract=True,
+            external_rejected=enumeration.rejected_masters,
         )
         unverified = _merge_unverified(enumeration.unverified, result.unverified)
         if result.outcome == OUTCOME_MATCHED and result.plan is not None:

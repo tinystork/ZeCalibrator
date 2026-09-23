@@ -47,6 +47,7 @@ from zecalibrator.core.plans import (
     MasterBinding,
     MatchPolicy,
     PolicyParameters,
+    RejectedMasterRecord,
     SkippedRole,
     VersionSet,
 )
@@ -902,6 +903,7 @@ def match_calibration(
     *,
     manual_selection: Optional[Mapping[str, str]] = None,
     standard_contract: bool = False,
+    external_rejected: Sequence = (),
 ) -> MatchResult:
     manual = dict(manual_selection or {})
     roles = request.required_roles
@@ -1171,12 +1173,14 @@ def match_calibration(
                         structural.append(Reason("MANUAL_SELECTION_NO_MATCH", "manual_selection", role=role, expected=cid, observed=None))
 
     unverified = _dedup_unverified(unverified)
+    rejected_masters = _build_rejected_masters(manifest_rejected, external_rejected)
 
     def _no_match():
         reason_codes = _dedup([r.code for r in structural] + [code for rec in manifest_rejected for code in rec.reason_codes])
         reasons = tuple(r for rec in rejected for r in rec.reasons) + tuple(structural)
         composition = _compute_composition(
             request, None, compatible_ids_by_role, flat_dep_no_candidate, flat_dep_missing,
+            rejected_masters,
         )
         return MatchResult(
             outcome=OUTCOME_NO_MATCH,
@@ -1228,6 +1232,7 @@ def match_calibration(
     chosen = routes[0]
     composition = _compute_composition(
         request, chosen, compatible_ids_by_role, flat_dep_no_candidate, flat_dep_missing,
+        rejected_masters,
     )
     plan = _build_plan(
         light, request, chosen, policy,
@@ -1303,12 +1308,46 @@ def _build_ambiguous_coherent_sets(
     return tuple(sets)
 
 
+def _build_rejected_masters(manifest_rejected, external_rejected=()):
+    """Build the considered-but-rejected master audit from compatibility-rejected
+    candidates plus any externally-supplied rejected masters (derived route).
+
+    Nothing supplied may be invisible: each rejected candidate appears once with
+    its structured reason codes.
+    """
+    seen: set = set()
+    out: list[RejectedMasterRecord] = []
+    for rec in manifest_rejected:
+        content = (
+            rec.descriptor_snapshot.descriptor.content_sha256
+            if rec.descriptor_snapshot is not None else ""
+        )
+        key = (rec.role, rec.candidate_id, content)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(RejectedMasterRecord(
+            role=rec.role,
+            candidate_id=rec.candidate_id,
+            content_sha256=content,
+            reason_codes=rec.reason_codes,
+        ))
+    for r in external_rejected:
+        key = (r.role, r.candidate_id, r.content_sha256)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(r)
+    return tuple(out)
+
+
 def _compute_composition(
     request: CalibrationRequest,
     chosen: Optional[Mapping[str, Candidate]],
     compatible_ids_by_role: Mapping[str, set],
     flat_dep_no_candidate: tuple[str, ...],
     flat_dep_missing: bool,
+    rejected_masters: tuple = (),
 ) -> CalibrationComposition:
     applied = tuple(sorted(chosen.keys())) if chosen is not None else ()
     required = list(request.required_roles)
@@ -1339,6 +1378,7 @@ def _compute_composition(
         additive_state=_additive_state(applied),
         flat_applied="flat" in applied,
         no_candidate_roles=tuple(sorted(set(no_candidate))),
+        rejected_masters=tuple(rejected_masters),
     )
 
 

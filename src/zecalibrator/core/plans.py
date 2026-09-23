@@ -345,6 +345,45 @@ class SkippedRole:
 
 
 @dataclass(frozen=True)
+class RejectedMasterRecord:
+    """A supplied master that was evaluated and rejected by compatibility.
+
+    Records the *considered-but-rejected* master with its structured reason codes,
+    so the persisted provenance never hides a supplied master. ``role`` is the
+    semantic master role; ``reason_codes`` are the compatibility rejection codes
+    (e.g. GEOMETRY_MISMATCH / BINNING_MISMATCH).
+    """
+
+    role: str
+    candidate_id: str
+    content_sha256: str
+    reason_codes: tuple[str, ...]
+    detail: str = ""
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "reason_codes", tuple(self.reason_codes))
+
+    def to_dict(self) -> Mapping[str, object]:
+        return {
+            "role": self.role,
+            "candidate_id": self.candidate_id,
+            "content_sha256": self.content_sha256,
+            "reason_codes": list(self.reason_codes),
+            "detail": self.detail,
+        }
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, object]) -> "RejectedMasterRecord":
+        return cls(
+            role=d["role"],
+            candidate_id=d["candidate_id"],
+            content_sha256=d.get("content_sha256", ""),
+            reason_codes=tuple(d.get("reason_codes", ())),
+            detail=d.get("detail", ""),
+        )
+
+
+@dataclass(frozen=True)
 class CalibrationComposition:
     """Honest, availability-relative record of what a plan actually applied.
 
@@ -359,7 +398,11 @@ class CalibrationComposition:
 
     Roles with no compatible candidate are recorded in ``no_candidate_roles``;
     roles that had a candidate but were skipped are recorded in
-    ``skipped_roles`` with their reason codes. Nothing is silently hidden.
+    ``skipped_roles`` with their reason codes; supplied masters that were
+    evaluated and rejected by compatibility are recorded in
+    ``rejected_masters`` (a role absent from the library is ``no_candidate``;
+    ``no_candidate_roles`` keeps that meaning and is never overloaded). Nothing
+    is silently hidden.
     """
 
     applied_roles: tuple[str, ...]
@@ -368,6 +411,7 @@ class CalibrationComposition:
     additive_state: str  # none | bias_only | dark_incl_bias | dark_bias_removed
     flat_applied: bool
     no_candidate_roles: tuple[str, ...]
+    rejected_masters: tuple[RejectedMasterRecord, ...] = ()
 
     def __post_init__(self) -> None:
         if self.level not in ("NONE", "PARTIAL", "COMPLETE"):
@@ -377,6 +421,7 @@ class CalibrationComposition:
         object.__setattr__(self, "applied_roles", tuple(self.applied_roles))
         object.__setattr__(self, "skipped_roles", tuple(self.skipped_roles))
         object.__setattr__(self, "no_candidate_roles", tuple(self.no_candidate_roles))
+        object.__setattr__(self, "rejected_masters", tuple(self.rejected_masters))
 
     def to_dict(self) -> Mapping[str, object]:
         return {
@@ -386,6 +431,7 @@ class CalibrationComposition:
             "additive_state": self.additive_state,
             "flat_applied": self.flat_applied,
             "no_candidate_roles": list(self.no_candidate_roles),
+            "rejected_masters": [r.to_dict() for r in self.rejected_masters],
         }
 
     @classmethod
@@ -397,6 +443,7 @@ class CalibrationComposition:
             additive_state=d.get("additive_state", "none"),
             flat_applied=bool(d.get("flat_applied", False)),
             no_candidate_roles=tuple(d.get("no_candidate_roles", ())),
+            rejected_masters=tuple(RejectedMasterRecord.from_dict(r) for r in d.get("rejected_masters", ())),
         )
 
 
@@ -647,6 +694,7 @@ __all__ = [
     "PROVENANCE_SCHEMA_VERSION",
     "PolicyError",
     "PolicyParameters",
+    "RejectedMasterRecord",
     "SCIENCE_CONTRACT_VERSION",
     "SkippedRole",
     "Tolerance",
