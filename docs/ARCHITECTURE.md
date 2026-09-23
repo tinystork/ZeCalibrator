@@ -1033,7 +1033,10 @@ able to read as distinct:
    tie-breaks; never a validity age.)
 3. **Composition** — what was actually applied? (`CalibrationComposition`, availability-
    relative level NONE/PARTIAL/COMPLETE + `applied_roles`/`skipped_roles`/
-   `no_candidate_roles`/`additive_state`/`flat_applied`.)
+   `no_candidate_roles`/`additive_state`/`flat_applied`/`rejected_masters`. The
+   audit is complete: every role present in the library appears as applied /
+   rejected(with reason) / skipped(`NOT_REQUIRED` or `NOT_APPLICABLE_FOR_ROUTE`) /
+   no-candidate — nothing supplied is invisible.)
 4. **Passthrough** — no applicable master → raw CFA in, unchanged CFA out, with an
    explicit non-blocking `NO_APPLICABLE_MASTER` audit entry and `ZECALLEVEL=NONE` /
    `ZECALCOMP=none` header cards.

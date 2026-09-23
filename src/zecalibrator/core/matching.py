@@ -1173,14 +1173,30 @@ def match_calibration(
                         structural.append(Reason("MANUAL_SELECTION_NO_MATCH", "manual_selection", role=role, expected=cid, observed=None))
 
     unverified = _dedup_unverified(unverified)
-    rejected_masters = _build_rejected_masters(manifest_rejected, external_rejected)
+
+    # -- audit completeness (D-5): every supplied role is classified ---------
+    supplied_roles = tuple(sorted(role for role, cs in candidates.items() if cs))
+    audit_rejected: list[RejectionRecord] = []
+    for role in ("dark", "bias", "flat"):
+        if role in compatible_ids_by_role:
+            continue  # already evaluated by the resolved route
+        compat_ids, rejected_recs = _evaluate_role_for_audit(
+            light, candidates, role, policy,
+            light_exposure=light_exposure, light_bias_range=light_bias_range,
+            standard_contract=standard_contract,
+        )
+        if compat_ids:
+            compatible_ids_by_role[role] = compat_ids
+        audit_rejected.extend(rejected_recs)
+
+    rejected_masters = _build_rejected_masters(manifest_rejected, external_rejected, audit_rejected)
 
     def _no_match():
         reason_codes = _dedup([r.code for r in structural] + [code for rec in manifest_rejected for code in rec.reason_codes])
         reasons = tuple(r for rec in rejected for r in rec.reasons) + tuple(structural)
         composition = _compute_composition(
             request, None, compatible_ids_by_role, flat_dep_no_candidate, flat_dep_missing,
-            rejected_masters,
+            rejected_masters, supplied_roles,
         )
         return MatchResult(
             outcome=OUTCOME_NO_MATCH,
@@ -1232,7 +1248,7 @@ def match_calibration(
     chosen = routes[0]
     composition = _compute_composition(
         request, chosen, compatible_ids_by_role, flat_dep_no_candidate, flat_dep_missing,
-        rejected_masters,
+        rejected_masters, supplied_roles,
     )
     plan = _build_plan(
         light, request, chosen, policy,
@@ -1308,16 +1324,60 @@ def _build_ambiguous_coherent_sets(
     return tuple(sets)
 
 
-def _build_rejected_masters(manifest_rejected, external_rejected=()):
+def _evaluate_role_for_audit(light, candidates, role, policy, *, light_exposure, light_bias_range, standard_contract):
+    """Evaluate one top-level role (dark/bias/flat) purely for the audit.
+
+    Returns ``(compatible_ids, rejected)`` where ``rejected`` is a list of
+    ``RejectionRecord`` for candidates that failed compatibility. This is
+    scientific compatibility only (no bias-state ``need`` filter, no route
+    applicability), so a supplied-but-unused role is classified honestly.
+    """
+    if role == "dark":
+        check = _CHECK_DARK_EXPOSURE
+        ref_exposure, ref_bias_range = light_exposure, None
+        check_filter = check_optical = flat_extra = False
+    elif role == "bias":
+        check = _CHECK_BIAS_RANGE
+        ref_exposure, ref_bias_range = None, light_bias_range
+        check_filter = check_optical = flat_extra = False
+    else:  # flat
+        check = _CHECK_NONE
+        ref_exposure = ref_bias_range = None
+        check_filter = check_optical = flat_extra = True
+
+    compatible_ids: set = set()
+    rejected: list[RejectionRecord] = []
+    for c in _sorted_candidates(_collapse_duplicates(candidates.get(role, ()))):
+        if _role_of(c.descriptor) != role:
+            continue
+        expected_units = "ADU"
+        if role == "flat":
+            expected_units = "dimensionless" if c.descriptor.flat_form == "normalized_response" else "ADU"
+        reasons = _candidate_compatibility(
+            light, c.descriptor, policy=policy,
+            check=check, reference_exposure=ref_exposure, reference_bias_range=ref_bias_range,
+            check_filter=check_filter, check_optical=check_optical, expected_units=expected_units,
+            flat_extra=flat_extra, standard_contract=standard_contract,
+        )
+        blocking, _unv = _split_reasons(reasons)
+        if blocking:
+            rejected.append(RejectionRecord(c.candidate_id, role, tuple(blocking), c.descriptor_snapshot))
+        else:
+            compatible_ids.add(c.candidate_id)
+    return compatible_ids, rejected
+
+
+def _build_rejected_masters(manifest_rejected, external_rejected=(), audit_rejected=()):
     """Build the considered-but-rejected master audit from compatibility-rejected
-    candidates plus any externally-supplied rejected masters (derived route).
+    candidates (required + audit-evaluated) plus any externally-supplied rejected
+    masters (derived route).
 
     Nothing supplied may be invisible: each rejected candidate appears once with
     its structured reason codes.
     """
     seen: set = set()
     out: list[RejectedMasterRecord] = []
-    for rec in manifest_rejected:
+    for rec in list(manifest_rejected) + list(audit_rejected):
         content = (
             rec.descriptor_snapshot.descriptor.content_sha256
             if rec.descriptor_snapshot is not None else ""
@@ -1348,25 +1408,44 @@ def _compute_composition(
     flat_dep_no_candidate: tuple[str, ...],
     flat_dep_missing: bool,
     rejected_masters: tuple = (),
+    supplied_roles: tuple = (),
 ) -> CalibrationComposition:
     applied = tuple(sorted(chosen.keys())) if chosen is not None else ()
     required = list(request.required_roles)
     no_candidate: list[str] = []
     skipped: list[SkippedRole] = []
+    partial = False
     for role in required:
         compat_ids = compatible_ids_by_role.get(role, set())
         if not compat_ids:
             no_candidate.append(role)
+            partial = True
         elif chosen is None or role not in chosen:
             reason = "FLAT_ADDITIVE_DEPENDENCY_MISSING" if (role == "flat" and flat_dep_missing) else "NOT_APPLIED"
             skipped.append(SkippedRole(role, reason, ""))
+            partial = True
     for dr in flat_dep_no_candidate:
         if dr not in no_candidate:
             no_candidate.append(dr)
+            partial = True
+
+    # D-5: every supplied role (has candidates in the library) must be classified
+    # as applied / rejected / skipped(NOT_REQUIRED | NOT_APPLICABLE_FOR_ROUTE) /
+    # no-candidate. These AUDIT skips never affect the level (the level is relative
+    # to the resolved request's required roles).
+    rejected_roles = {r.role for r in rejected_masters}
+    for role in supplied_roles:
+        if role in applied or role in required:
+            continue
+        compat_ids = compatible_ids_by_role.get(role, set())
+        if compat_ids:
+            skipped.append(SkippedRole(role, "NOT_REQUIRED", ""))
+        elif role not in rejected_roles:
+            skipped.append(SkippedRole(role, "NOT_APPLICABLE_FOR_ROUTE", ""))
 
     if not applied:
         level = "NONE"
-    elif skipped or no_candidate:
+    elif partial:
         level = "PARTIAL"
     else:
         level = "COMPLETE"

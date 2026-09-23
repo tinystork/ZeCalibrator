@@ -355,7 +355,12 @@ bump) provenance fields recording master selection and composition:
 - `ProvenanceRecord.selection` / `ranked_out` / `composition` — masters selected
   (with rule + key), ranked-out peers (with `RANKED_BELOW_WINNER` /
   `ROUTE_UNSATISFIABLE` reasons), and the composition (applied/skipped/no-candidate
-  roles + level).
+  roles + level). The composition is audit-complete: every role present in the
+  library appears as `applied_roles`, `rejected_masters` (compatibility-rejected
+  with reason codes), `skipped_roles` (`NOT_REQUIRED` for a compatible role the
+  route does not use, `NOT_APPLICABLE_FOR_ROUTE` for a supplied role never
+  evaluated), or `no_candidate_roles` (no compatible candidate existed) — nothing
+  supplied is invisible.
 - `DecisionEnvelope` / `ResolveResult` expose `selection` / `ranked_out` /
   `composition`; `CalibrationResult` exposes a `composition` surface; the batch
   item/manifest carry the composition level + applied roles (additive key).

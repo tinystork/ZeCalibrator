@@ -397,12 +397,16 @@ class CalibrationComposition:
       compatible candidate was applied.
 
     Roles with no compatible candidate are recorded in ``no_candidate_roles``;
-    roles that had a candidate but were skipped are recorded in
-    ``skipped_roles`` with their reason codes; supplied masters that were
-    evaluated and rejected by compatibility are recorded in
-    ``rejected_masters`` (a role absent from the library is ``no_candidate``;
-    ``no_candidate_roles`` keeps that meaning and is never overloaded). Nothing
-    is silently hidden.
+    roles that had a candidate but were skipped are recorded in ``skipped_roles``
+    with their reason codes (``NOT_REQUIRED`` for a compatible role the resolved
+    route does not use, ``NOT_APPLICABLE_FOR_ROUTE`` for a supplied role the route
+    never evaluated, ``FLAT_ADDITIVE_DEPENDENCY_MISSING`` / ``NOT_APPLIED`` for an
+    unsatisfied dependency); supplied masters that were evaluated and rejected by
+    compatibility are recorded in ``rejected_masters``. Every role present in the
+    library appears as applied / rejected / skipped(with reason) / no-candidate —
+    nothing supplied is invisible. ``no_candidate_roles`` keeps its meaning
+    "no compatible candidate existed" (a role absent from the library) and is
+    never overloaded.
     """
 
     applied_roles: tuple[str, ...]
