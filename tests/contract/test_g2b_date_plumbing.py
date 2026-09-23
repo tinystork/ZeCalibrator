@@ -244,3 +244,87 @@ def test_read_date_obs_single_value():
     assert read_date_obs([("DATE-OBS", "2024-01-02"), ("DATE-OBS", "2024-01-03")]) is None
     assert read_date_obs([("EXPTIME", 1.0)]) is None
     assert read_date_obs([]) is None
+
+
+# ---------------------------------------------------------------------------
+# Rework-2 D-1: additive library-index migration (backward-compatible write)
+# ---------------------------------------------------------------------------
+def _write_old_schema_index(path):
+    """Create a pre-G2B index file (no ``acquired_at`` column)."""
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+    conn.execute("CREATE TABLE revisions (revision TEXT PRIMARY KEY, ordinal INTEGER NOT NULL)")
+    conn.execute(
+        "CREATE TABLE entries (revision TEXT NOT NULL, role TEXT NOT NULL, candidate_id TEXT NOT NULL, "
+        "snapshot_json TEXT NOT NULL, locators_json TEXT NOT NULL, mask_locator_json TEXT, "
+        "PRIMARY KEY (revision, role, candidate_id))"
+    )
+    conn.execute("INSERT INTO meta VALUES ('schema_version', ?)", (LIBRARY_INDEX_SCHEMA,))
+    conn.commit()
+    conn.close()
+
+
+def _entry_columns(path):
+    conn = sqlite3.connect(path)
+    try:
+        return [r[1] for r in conn.execute("PRAGMA table_info(entries)").fetchall()]
+    finally:
+        conn.close()
+
+
+def test_publish_into_pre_g2b_index_persists_acquired_at(tmp_path):
+    p = str(tmp_path / "old.sqlite")
+    _write_old_schema_index(p)
+    assert "acquired_at" not in _entry_columns(p)
+
+    dk = descriptor("dark", "included", content_sha256="a" * 64, mask_identity="b" * 64)
+    c = candidate("d1", dk, acquired_at="2024-01-02T03:04:05")
+    idx = LibraryIndex(p).open(initialize=True)
+    try:
+        idx.publish_revision("r1", {"dark": (c,)})
+        snap = idx.load_snapshot()
+    finally:
+        idx.close()
+    assert snap.candidates["dark"][0].acquired_at == "2024-01-02T03:04:05"
+
+
+def test_migration_is_additive_only(tmp_path):
+    # Prove the pre-R0 reader invariant: the ALTER is additive-only — every old
+    # column is preserved and only ``acquired_at`` is appended, so a pre-R0 reader
+    # (which neither SELECTs nor INSERTs ``acquired_at``) still works.
+    p = str(tmp_path / "old.sqlite")
+    _write_old_schema_index(p)
+    before = _entry_columns(p)
+    idx = LibraryIndex(p).open(initialize=True)
+    idx.close()
+    after = _entry_columns(p)
+    assert after == before + ["acquired_at"]
+
+
+def test_initialize_false_never_migrates(tmp_path):
+    p = str(tmp_path / "old.sqlite")
+    _write_old_schema_index(p)
+    idx = LibraryIndex(p).open(initialize=False)
+    idx.close()
+    assert "acquired_at" not in _entry_columns(p)
+
+
+def test_fresh_index_unchanged(tmp_path):
+    p = str(tmp_path / "fresh.sqlite")
+    idx = LibraryIndex(p).open(initialize=True)
+    idx.close()
+    assert "acquired_at" in _entry_columns(p)  # fresh schema already has the column
+
+
+def test_no_schema_version_change(tmp_path):
+    p = str(tmp_path / "old.sqlite")
+    _write_old_schema_index(p)
+    idx = LibraryIndex(p).open(initialize=True)
+    idx.close()
+    conn = sqlite3.connect(p)
+    try:
+        row = conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
+    finally:
+        conn.close()
+    assert row[0] == LIBRARY_INDEX_SCHEMA
+    assert LIBRARY_INDEX_SCHEMA == "zecalibrator.library.v1"

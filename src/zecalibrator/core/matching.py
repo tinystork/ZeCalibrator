@@ -654,10 +654,22 @@ def _candidate_compatibility(
     return out
 
 
+def _min_date(a: Optional[str], b: Optional[str]) -> Optional[str]:
+    if a is None:
+        return b
+    if b is None:
+        return a
+    return min(a, b)
+
+
 def _collapse_duplicates(candidates: Sequence[Candidate]) -> list[Candidate]:
     by_key: dict[tuple[str, str], Candidate] = {}
     order: list[tuple[str, str]] = []
-    for c in candidates:
+    # Deterministic representative: sort by candidate_id (stable) so the merged
+    # candidate is independent of pool order; the merged acquired_at is also picked
+    # deterministically (earliest) so two identical-content masters with different
+    # DATE-OBS never make the winner pool-order dependent (N-5).
+    for c in sorted(candidates, key=lambda c: (c.candidate_id, c.descriptor.content_sha256)):
         key = c.identity_key
         if key in by_key:
             merged = by_key[key]
@@ -668,7 +680,7 @@ def _collapse_duplicates(candidates: Sequence[Candidate]) -> list[Candidate]:
                 descriptor_snapshot=merged.descriptor_snapshot,
                 locators=locs,
                 mask_locator=merged.mask_locator or c.mask_locator,
-                acquired_at=merged.acquired_at,
+                acquired_at=_min_date(merged.acquired_at, c.acquired_at),
             )
         else:
             by_key[key] = c
@@ -799,7 +811,12 @@ def _flat_dependency_options(
             or (fd_removed_compat and bias_flat_compat)
             or (flat_short and bias_flat_compat)
         )
-        return ([{}] if satisfiable else []), [], [], [], [], (), (), (), False
+        structural = []
+        if not satisfiable:
+            routable_fd = [c for c in fd_pool if c.descriptor.bias_state in ("included", "removed")]
+            if len(routable_fd) == 0:
+                structural.append(Reason("FLAT_ADDITIVE_DEPENDENCY_MISSING", "flat_dark", role="flat", parent="flat"))
+        return ([{}] if satisfiable else []), manifest_records, structural, audit_records, unverified, (), (), (), False
 
     fd_incl_sel = select_role_candidates("flat_dark", light, fd_incl_compat, manual_choice=manual.get("flat_dark"))
     fd_removed_sel = select_role_candidates("flat_dark", light, fd_removed_compat, manual_choice=manual.get("flat_dark"))
@@ -845,22 +862,33 @@ def _flat_dependency_options(
     )
 
 
-def _flat_route_satisfiable(flat: MasterDescriptor, candidates, policy: MatchPolicy) -> bool:
-    """True when ``flat`` has at least one executable dependency route.
+def _flat_route_satisfiable(flat: MasterDescriptor, candidates, policy: MatchPolicy):
+    """Return ``(satisfiable, cause)`` for ``flat``'s preparation route.
 
     Route-satisfiability is an **applicability** filter applied BEFORE ranking,
     never a compatibility criterion. ``corrected_unnormalized`` /
     ``normalized_response`` are always satisfiable (no dependency); a
     ``raw_response`` flat is satisfiable iff ``_flat_dependency_options`` (probe
     mode) yields at least one executable option — the dependency logic is reused
-    verbatim, never reimplemented.
+    verbatim, never reimplemented. When unsatisfiable, ``cause`` is the
+    dependency-level reason (e.g. ``FLAT_ADDITIVE_DEPENDENCY_MISSING`` or an
+    exposure/bias mismatch code) for the audit.
     """
     if flat.flat_form in ("corrected_unnormalized", "normalized_response"):
-        return True
+        return True, ""
     if flat.flat_form != "raw_response":
-        return False
-    opts, *_rest = _flat_dependency_options(flat, None, candidates, policy, probe=True)
-    return bool(opts)
+        return False, "UNDOCUMENTED_PROCESSING"
+    opts, manifest_records, structural, _audit, _unv, _sel, _rank, _nocand, _tie = _flat_dependency_options(
+        flat, None, candidates, policy, probe=True,
+    )
+    if opts:
+        return True, ""
+    if structural:
+        return False, structural[0].code
+    if manifest_records:
+        codes = sorted({code for rec in manifest_records for code in rec.reason_codes})
+        return False, codes[0] if codes else "DEPENDENCY_INCOMPATIBLE"
+    return False, "ROUTE_UNSATISFIABLE"
 
 
 # ---------------------------------------------------------------------------
@@ -976,12 +1004,19 @@ def match_calibration(
 
     role_tie = False
     additive_winners: dict[str, Candidate] = {}
+    tie_candidates_by_role: dict[str, list[Candidate]] = {}
+    ambiguous_reasons: list[Reason] = []
     for role in additive_role_order:
         compat = per_role_compatible[role]
         compatible_ids_by_role[role] = {c.candidate_id for c in compat}
         sel = select_role_candidates(role, light, compat, manual_choice=manual.get(role))
         if sel.status == STATUS_AMBIGUOUS_TIE:
             role_tie = True
+            tie_candidates_by_role[role] = [c for c in compat if c.candidate_id in set(sel.tie_candidates)]
+            ambiguous_reasons.append(Reason(
+                "AMBIGUOUS_TIE", role=role, field=role, expected=sel.tie_candidates,
+                observed=None, blocking=False,
+            ))
             continue
         if sel.winner is not None:
             additive_winners[role] = _find_candidate(compat, sel.winner.chosen_candidate_id)
@@ -995,6 +1030,7 @@ def match_calibration(
     flat_dep_missing = False
     mixed_flat_form = False
     satisfiable_flat_ids: set = set()
+    form_winners_list: list[tuple[str, Candidate]] = []
 
     if request.flat_mode == "apply":
         compatible_ids_by_role["flat"] = {c.candidate_id for c in compatible_flats}
@@ -1003,20 +1039,22 @@ def match_calibration(
         # criterion), applied BEFORE ranking so a route-unsatisfiable flat can
         # never shadow a satisfiable peer. See _flat_route_satisfiable.
         satisfiable_flats: list[Candidate] = []
-        unsatisfiable_flats: list[Candidate] = []
+        unsatisfiable_flats: list[tuple[Candidate, str]] = []
         for f in compatible_flats:
-            if _flat_route_satisfiable(f.descriptor, candidates, policy):
+            sat, cause = _flat_route_satisfiable(f.descriptor, candidates, policy)
+            if sat:
                 satisfiable_flats.append(f)
             else:
-                unsatisfiable_flats.append(f)
+                unsatisfiable_flats.append((f, cause))
         satisfiable_flat_ids = {c.candidate_id for c in satisfiable_flats}
 
         # Audit: compatible-but-route-unsatisfiable peers are recorded with a
-        # DISTINCT reason code (never RANKED_BELOW_WINNER, never a compat code).
-        # When NO satisfiable flat exists, also run the full dependency options
-        # helper so the flat's own dependency rejection reasons (exposure
-        # mismatch / dependency-missing) are recorded — never a silent fallback.
-        for f in unsatisfiable_flats:
+        # DISTINCT reason code (never RANKED_BELOW_WINNER, never a compat code)
+        # and the dependency-level cause. When NO satisfiable flat exists, also run
+        # the full dependency options helper so the flat's own dependency rejection
+        # reasons (exposure mismatch / dependency-missing) are recorded — never a
+        # silent fallback.
+        for f, cause in unsatisfiable_flats:
             ranked_out_records.append(RankedOutRecord(
                 role="flat",
                 candidate_id=f.candidate_id,
@@ -1024,6 +1062,7 @@ def match_calibration(
                 acquired_at=f.acquired_at,
                 reason_code=ROUTE_UNSATISFIABLE,
                 key=selection_key("flat", light, f),
+                detail=cause,
             ))
             if not satisfiable_flats:
                 _opts, recs, struct, audit, dep_unv, _dsel, _drank, dep_no_cand, _dtie = _flat_dependency_options(
@@ -1044,21 +1083,30 @@ def match_calibration(
         by_form: dict[str, list[Candidate]] = {}
         for f in satisfiable_flats:
             by_form.setdefault(f.descriptor.flat_form, []).append(f)
-        form_winners: list[tuple[str, Candidate]] = []
         for form in sorted(by_form.keys()):
             fl = by_form[form]
             sel = select_role_candidates("flat", light, fl, manual_choice=manual.get("flat"))
             if sel.status == STATUS_AMBIGUOUS_TIE:
                 role_tie = True
+                tie_candidates_by_role["flat"] = [c for c in fl if c.candidate_id in set(sel.tie_candidates)]
+                ambiguous_reasons.append(Reason(
+                    "AMBIGUOUS_TIE", role="flat", field="flat", expected=sel.tie_candidates,
+                    observed=None, blocking=False,
+                ))
                 continue
             if sel.winner is not None:
-                form_winners.append((form, _find_candidate(fl, sel.winner.chosen_candidate_id)))
+                form_winners_list.append((form, _find_candidate(fl, sel.winner.chosen_candidate_id)))
                 selection_records.append(sel.winner)
                 ranked_out_records.extend(sel.ranked_out)
-        if len(form_winners) > 1:
+        if len(form_winners_list) > 1:
             mixed_flat_form = True
-        elif form_winners:
-            flat_winner_cand = form_winners[0][1]
+            ambiguous_reasons.append(Reason(
+                "MIXED_FLAT_FORM", role="flat", field="flat_form",
+                expected=tuple(sorted(f for f, _ in form_winners_list)),
+                observed=None, blocking=False,
+            ))
+        elif form_winners_list:
+            flat_winner_cand = form_winners_list[0][1]
 
         if flat_winner_cand is not None:
             opts, recs, struct, audit, dep_unv, dep_sel, dep_ranked, dep_no_cand, dep_tie = _flat_dependency_options(
@@ -1144,11 +1192,20 @@ def match_calibration(
         )
 
     def _ambiguous():
-        coherent = tuple(routes)
+        # Evidence payload: AMBIGUOUS must carry the real competing alternatives
+        # (never an empty mapping) plus a non-blocking diagnostic reason.
+        if role_tie or mixed_flat_form:
+            coherent = _build_ambiguous_coherent_sets(
+                additive_role_order, additive_winners, tie_candidates_by_role,
+                form_winners_list, flat_winner_cand, request,
+            )
+        else:
+            coherent = tuple(routes)
         return MatchResult(
             outcome=OUTCOME_AMBIGUOUS,
             rejected_candidates=tuple(rejected),
             reason_codes=(),
+            reasons=tuple(ambiguous_reasons),
             coherent_sets=coherent,
             unverified=tuple(unverified),
             selection=tuple(selection_records),
@@ -1198,6 +1255,51 @@ def _additive_state(applied: tuple[str, ...]) -> str:
     if "bias" in applied:
         return "bias_only"
     return "none"
+
+
+def _build_ambiguous_coherent_sets(
+    additive_role_order,
+    additive_winners: Mapping[str, Candidate],
+    tie_candidates_by_role: Mapping[str, Sequence[Candidate]],
+    form_winners_list: Sequence[Tuple[str, Candidate]],
+    flat_winner_cand: Optional[Candidate],
+    request: CalibrationRequest,
+) -> tuple[Mapping[str, Candidate], ...]:
+    """Build the competing coherent sets for a ranking-path AMBIGUOUS outcome.
+
+    One alternative per tied candidate (exact-key tie) or per flat-form winner
+    (mixed ``flat_form``). Deterministic order: candidates are sorted by
+    ``(candidate_id, content_sha256)`` within a tie, and form winners are kept in
+    their already-sorted form order. Never emits an empty mapping.
+    """
+    alternatives: dict[str, list[Candidate]] = {}
+    for role in additive_role_order:
+        if role in tie_candidates_by_role:
+            tied = list(tie_candidates_by_role[role])
+            tied.sort(key=lambda c: (c.candidate_id, c.descriptor.content_sha256))
+            alternatives[role] = tied
+        elif role in additive_winners:
+            alternatives[role] = [additive_winners[role]]
+    if request.flat_mode == "apply":
+        if "flat" in tie_candidates_by_role:
+            tied = list(tie_candidates_by_role["flat"])
+            tied.sort(key=lambda c: (c.candidate_id, c.descriptor.content_sha256))
+            alternatives["flat"] = tied
+        elif form_winners_list:
+            alternatives["flat"] = [c for _, c in form_winners_list]
+        elif flat_winner_cand is not None:
+            alternatives["flat"] = [flat_winner_cand]
+
+    sets: list[dict[str, Candidate]] = [{}]
+    for role in alternatives:
+        next_sets: list[dict[str, Candidate]] = []
+        for s in sets:
+            for c in alternatives[role]:
+                s2 = dict(s)
+                s2[role] = c
+                next_sets.append(s2)
+        sets = next_sets
+    return tuple(sets)
 
 
 def _compute_composition(

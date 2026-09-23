@@ -74,7 +74,7 @@ from zecalibrator.core.matching import (
     _split_reasons,
 )
 from zecalibrator.core.plans import Candidate, MatchPolicy
-from zecalibrator.core.selection import select_role_candidates
+from zecalibrator.core.selection import STATUS_AMBIGUOUS_TIE, select_role_candidates
 
 OUTCOME_READY = "READY"
 OUTCOME_NEEDS_ATTENTION = "NEEDS_ATTENTION"
@@ -155,16 +155,21 @@ def _find_candidate(cands, candidate_id: str) -> Optional[Candidate]:
     return None
 
 
-def _rank_one(role: str, light: LightConstraints, cands) -> Optional[Candidate]:
-    """Return the single ranking winner for ``role`` (or ``None``).
+def _rank_one(role: str, light: LightConstraints, cands):
+    """Return ``(winner, tied)`` for ``role``.
 
     Reuses :func:`zecalibrator.core.selection.select_role_candidates` (the one
-    ranking implementation) — never a second ranking.
+    ranking implementation) — never a second ranking. ``winner`` is the single
+    ranked :class:`Candidate` (or ``None`` when absent); ``tied`` is the tuple of
+    tied candidates when the selector reported ``AMBIGUOUS_TIE`` (else ``()``).
     """
     sel = select_role_candidates(role, light, cands)
+    if sel.status == STATUS_AMBIGUOUS_TIE:
+        tied = [c for c in cands if c.candidate_id in set(sel.tie_candidates)]
+        return None, tuple(tied)
     if sel.winner is None:
-        return None
-    return _find_candidate(cands, sel.winner.chosen_candidate_id)
+        return None, ()
+    return _find_candidate(cands, sel.winner.chosen_candidate_id), ()
 
 
 def _compatible_candidates(
@@ -321,15 +326,53 @@ def enumerate_routes(
     additive_options: list[tuple[str, bool, dict]] = []
     additive_ambiguous = False
 
+    def _tie_reason(role, tied):
+        return Reason(
+            "AMBIGUOUS_TIE", role=role, field=role,
+            expected=tuple(sorted({c.candidate_id for c in tied})),
+            observed=None, blocking=False,
+        )
+
+    def _emit_ranked(role, light, cands, amode, partial, *, base=None):
+        """Rank ``cands`` for ``role``; append one option per winner (or, on a tie,
+        one option per tied candidate). Returns the tied tuple (or ``()``)."""
+        winner, tied = _rank_one(role, light, cands)
+        if tied:
+            for c in tied:
+                m = dict(base or {})
+                m[role] = c
+                additive_options.append((amode, partial, m))
+            return tied
+        if winner is not None:
+            m = dict(base or {})
+            m[role] = winner
+            additive_options.append((amode, partial, m))
+        return ()
+
+    def _emit_pair(role1, light, cands1, role2, cands2, amode, partial):
+        """Rank two roles and combine winners into ``dark_bias_removed`` options
+        (cartesian product on any tie). Returns ``(tie1, tie2)``."""
+        w1, t1 = _rank_one(role1, light, cands1)
+        w2, t2 = _rank_one(role2, light, cands2)
+        c1 = list(t1) if t1 else ([w1] if w1 is not None else [])
+        c2 = list(t2) if t2 else ([w2] if w2 is not None else [])
+        if not c1 or not c2:
+            return t1, t2
+        for a in c1:
+            for b in c2:
+                additive_options.append((amode, partial, {role1: a, role2: b}))
+        return t1, t2
+
     if not compatible_darks:
         if not compatible_biases:
             additive_options.append(("control", True, {}))
         else:
             # G2B: same-role bias peers are ranked (most-recent-first) instead of
             # each producing a separate route.
-            b = _rank_one("bias", light, compatible_biases)
-            if b is not None:
-                additive_options.append(("bias_only", True, {"bias": b}))
+            tied = _emit_ranked("bias", light, compatible_biases, "bias_only", True)
+            if tied:
+                additive_ambiguous = True
+                reasons.append(_tie_reason("bias", tied))
     else:
         included = [d for d in compatible_darks if d.descriptor.bias_state == "included"]
         removed = [d for d in compatible_darks if d.descriptor.bias_state == "removed"]
@@ -342,23 +385,25 @@ def enumerate_routes(
             additive_ambiguous = True
             # G2B: rank each bias-state group to a single winner; the
             # included-vs-removed SCIENTIFIC route ambiguity is unchanged.
-            d_incl = _rank_one("dark", light, included)
-            if d_incl is not None:
-                additive_options.append(("dark_incl_bias", False, {"dark": d_incl}))
+            d_incl_tie = _emit_ranked("dark", light, included, "dark_incl_bias", False)
+            if d_incl_tie:
+                reasons.append(_tie_reason("dark", d_incl_tie))
             if compatible_biases:
-                d_rem = _rank_one("dark", light, removed)
-                b = _rank_one("bias", light, compatible_biases)
-                if d_rem is not None and b is not None:
-                    additive_options.append(("dark_bias_removed", False, {"dark": d_rem, "bias": b}))
+                d_rem_tie, b_tie = _emit_pair("dark", light, removed, "bias", compatible_biases, "dark_bias_removed", False)
+                if d_rem_tie:
+                    reasons.append(_tie_reason("dark", d_rem_tie))
+                if b_tie:
+                    reasons.append(_tie_reason("bias", b_tie))
             else:
                 reasons.append(
                     Reason(BIAS_REQUIRED, role="bias", parent="dark",
                            expected="compatible bias", observed=None)
                 )
         elif included:
-            d_incl = _rank_one("dark", light, included)
-            if d_incl is not None:
-                additive_options.append(("dark_incl_bias", False, {"dark": d_incl}))
+            d_incl_tie = _emit_ranked("dark", light, included, "dark_incl_bias", False)
+            if d_incl_tie:
+                additive_ambiguous = True
+                reasons.append(_tie_reason("dark", d_incl_tie))
         else:  # removed only
             if not compatible_biases:
                 reasons.append(
@@ -367,10 +412,13 @@ def enumerate_routes(
                 )
                 additive_options = []
             else:
-                d_rem = _rank_one("dark", light, removed)
-                b = _rank_one("bias", light, compatible_biases)
-                if d_rem is not None and b is not None:
-                    additive_options.append(("dark_bias_removed", False, {"dark": d_rem, "bias": b}))
+                d_rem_tie, b_tie = _emit_pair("dark", light, removed, "bias", compatible_biases, "dark_bias_removed", False)
+                if d_rem_tie:
+                    additive_ambiguous = True
+                    reasons.append(_tie_reason("dark", d_rem_tie))
+                if b_tie:
+                    additive_ambiguous = True
+                    reasons.append(_tie_reason("bias", b_tie))
 
     # ---------------------------------------------------------------------- flat
     compatible_flats = []
@@ -435,7 +483,20 @@ def enumerate_routes(
             if ff not in ("normalized_response", "corrected_unnormalized"):
                 reasons.append(Reason("UNDOCUMENTED_PROCESSING", "flat_form", role="flat", observed=ff))
                 continue
-            f = _rank_one("flat", light, by_form[form])
+            f, tied = _rank_one("flat", light, by_form[form])
+            if tied:
+                flat_ambiguous = True
+                reasons.append(Reason(
+                    "AMBIGUOUS_TIE", role="flat", field="flat",
+                    expected=tuple(sorted({c.candidate_id for c in tied})),
+                    observed=None, blocking=False,
+                ))
+                for c in tied:
+                    if ff == "normalized_response":
+                        flat_options.append(("apply", "already_normalized", {"flat": c}))
+                    elif ff == "corrected_unnormalized":
+                        flat_options.append(("apply", "normalize_only", {"flat": c}))
+                continue
             if f is None:
                 continue
             if ff == "normalized_response":

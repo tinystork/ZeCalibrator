@@ -23,6 +23,8 @@ from _phase4_fixtures import (
 )
 from zecalibrator.core.descriptors import (
     LightEvidence,
+    NormalizationProvenance,
+    NormalizationScalars,
     OpticalIdentity,
     ProcessingProvenance,
 )
@@ -163,6 +165,10 @@ def test_identical_full_key_ambiguous_tie():
     b = candidate("same", descriptor("dark", "included", content_sha256="c" * 64, mask_identity="d" * 64), acquired_at="2024-01-01")
     r = match_calibration(lt, request(), pool(dark=[a, b]), policy())
     assert r.outcome == OUTCOME_AMBIGUOUS
+    # D-2: AMBIGUOUS must carry the competing alternatives + a diagnostic signal.
+    assert len(r.coherent_sets) == 2
+    assert all(len(s) == 1 and "dark" in s for s in r.coherent_sets)
+    assert any(reason.code == "AMBIGUOUS_TIE" and reason.field == "dark" for reason in r.reasons)
 
 
 def test_newer_incompatible_older_compatible_wins():
@@ -515,3 +521,78 @@ def test_ranked_out_carries_role_flat():
     )
     assert r.outcome == OUTCOME_MATCHED
     assert [(rec.role, rec.candidate_id) for rec in r.ranked_out] == [("flat", "fo")]
+
+
+# ---------------------------------------------------------------------------
+# Rework-2: ambiguity evidence (D-2/D-3) + determinism (N-5)
+# ---------------------------------------------------------------------------
+def _normalized_flat(cid, content_sha):
+    sc = NormalizationScalars(mono=1.0)
+    pp = ProcessingProvenance(
+        source="synthetic_fixture", additive_history_state="known",
+        additive_correction_history=("flat_dark_subtracted",),
+        normalization=NormalizationProvenance(algorithm="median", population="mono-valid", scalars=sc),
+    )
+    f = descriptor(
+        "flat", "not_applicable", exposure_s=1.0, flat_form="normalized_response",
+        normalization_algorithm="median", normalization_scalars=sc,
+        pixel_domain="normalized_response", physical_units="dimensionless",
+        filter="NONE", optical_train_id="SYNTH-TRAIN-1", processing=pp,
+        content_sha256=content_sha, mask_identity="b" * 64,
+    )
+    return candidate(cid, f)
+
+
+def test_mixed_flat_form_ambiguous_with_competing_sets():
+    # D-2: mixed flat_form must carry one coherent set per form winner (pre-R0
+    # shape), never an empty mapping, plus a non-blocking diagnostic reason.
+    lt = light()
+    pp = ProcessingProvenance(
+        source="synthetic_fixture", additive_history_state="known",
+        additive_correction_history=("flat_dark_subtracted",),
+    )
+    corr = descriptor(
+        "flat", "not_applicable", exposure_s=1.0, flat_form="corrected_unnormalized",
+        filter="NONE", optical_train_id="SYNTH-TRAIN-1", processing=pp,
+        content_sha256="c" * 64, mask_identity="d" * 64,
+    )
+    norm = _normalized_flat("norm", "e" * 64)
+    r = match_calibration(
+        lt, request("control", "apply"),
+        pool(flat=[candidate("corr", corr), norm]), policy(),
+    )
+    assert r.outcome == OUTCOME_AMBIGUOUS
+    assert len(r.coherent_sets) == 2
+    assert all(len(s) == 1 and "flat" in s for s in r.coherent_sets)
+    assert any(reason.code == "MIXED_FLAT_FORM" for reason in r.reasons)
+
+
+def test_routes_exact_key_tie_ambiguous():
+    # D-3: an exact-key tie in enumerate_routes must surface AMBIGUOUS with the
+    # competing routes/evidence, never NEEDS_ATTENTION with zero routes.
+    from zecalibrator.core.routes import enumerate_routes, OUTCOME_AMBIGUOUS as R_AMBIGUOUS
+
+    lt = light()
+    a = candidate("same", descriptor("dark", "included", content_sha256="a" * 64, mask_identity="b" * 64), acquired_at="2024-01-01")
+    b = candidate("same", descriptor("dark", "included", content_sha256="c" * 64, mask_identity="d" * 64), acquired_at="2024-01-01")
+    rr = enumerate_routes(lt, {"dark": (a, b)}, policy())
+    assert rr.outcome == R_AMBIGUOUS
+    assert len(rr.routes) >= 2
+    assert any(reason.code == "AMBIGUOUS_TIE" for reason in rr.reasons)
+
+
+def test_collapse_duplicates_deterministic_across_pool_order():
+    # N-5: two identical-content masters with different DATE-OBS must collapse to
+    # a deterministic representative so the winner/plan_id is pool-order independent.
+    lt = light()
+    d = descriptor("dark", "included", content_sha256="a" * 64, mask_identity="b" * 64)
+    third = candidate("third", descriptor("dark", "included", content_sha256="c" * 64, mask_identity="d" * 64), acquired_at="2024-06-01T00:00:00")
+    c1 = candidate("dup", d, acquired_at="2024-01-01T00:00:00")
+    c2 = candidate("dup", d, acquired_at="2024-12-31T00:00:00")
+    r1 = match_calibration(lt, request(), pool(dark=[c1, c2, third]), policy())
+    r2 = match_calibration(lt, request(), pool(dark=[c2, c1, third]), policy())
+    assert r1.outcome == r2.outcome == OUTCOME_MATCHED
+    assert r1.plan.plan_id == r2.plan.plan_id
+    assert r1.selection[0].chosen_candidate_id == r2.selection[0].chosen_candidate_id
+    # deterministic merged date: earliest (2024-01-01) so ``third`` (2024-06-01) wins.
+    assert r1.selection[0].chosen_candidate_id == "third"

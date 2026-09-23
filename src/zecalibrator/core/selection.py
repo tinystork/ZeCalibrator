@@ -288,6 +288,7 @@ class RankedOutRecord:
     acquired_at: Optional[str]
     reason_code: str
     key: SelectionKey
+    detail: str = ""
 
     def to_dict(self) -> Mapping[str, object]:
         return {
@@ -297,7 +298,20 @@ class RankedOutRecord:
             "acquired_at": self.acquired_at,
             "reason_code": self.reason_code,
             "key": dict(self.key.to_dict()),
+            "detail": self.detail,
         }
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, object]) -> "RankedOutRecord":
+        return cls(
+            role=d["role"],
+            candidate_id=d["candidate_id"],
+            content_sha256=d["content_sha256"],
+            acquired_at=d.get("acquired_at"),
+            reason_code=d["reason_code"],
+            key=SelectionKey.from_dict(d["key"]),
+            detail=d.get("detail", ""),
+        )
 
 
 @dataclass(frozen=True)

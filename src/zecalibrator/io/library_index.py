@@ -121,12 +121,35 @@ class LibraryIndex:
             except Exception:
                 conn.close()
                 raise
+            if initialize:
+                self._migrate_additive(conn)
 
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA busy_timeout=10000")
         conn.execute("PRAGMA synchronous=NORMAL")
         self._conn = conn
         return self
+
+    def _migrate_additive(self, conn: sqlite3.Connection) -> None:
+        """Apply the additive G2B ``acquired_at`` column migration to an existing
+        index (``open(initialize=True)`` only).
+
+        Non-destructive, idempotent and additive: adds a nullable
+        ``acquired_at TEXT`` column to ``entries`` only when it is absent; existing
+        rows keep ``NULL`` (the read path maps that to ``acquired_at=None``). No
+        data is rewritten and no table/row is replaced, so the file remains
+        readable by a pre-G2B reader (the v1 schema plus one extra nullable column
+        is still a valid v1 index). A failed ALTER raises a typed
+        :class:`LibraryIndexError` — never a silent skip that later breaks at
+        INSERT time.
+        """
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(entries)").fetchall()}
+        if "acquired_at" in cols:
+            return
+        try:
+            conn.execute("ALTER TABLE entries ADD COLUMN acquired_at TEXT")
+        except sqlite3.OperationalError as exc:
+            raise LibraryIndexError(f"additive migration failed: {exc}") from exc
 
     def close(self) -> None:
         if self._conn is not None:
