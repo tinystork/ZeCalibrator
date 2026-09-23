@@ -26,6 +26,7 @@ from zecalibrator.core.routes import (
     BIAS_STATE_UNKNOWN,
     FLAT_UNSUPPORTED_RAW,
     FLAT_UNUSABLE,
+    NO_APPLICABLE_MASTER,
     OUTCOME_AMBIGUOUS,
     OUTCOME_NEEDS_ATTENTION,
     OUTCOME_READY,
@@ -324,17 +325,25 @@ def test_mixed_bias_states_ambiguous():
 
 
 # ---------------------------------------------------------------------------
-# Partial routes (control / bias_only) are never reported as READY/full.
+# G2B R1: control (passthrough) and bias_only (partial) are legitimate READY
+# routes; the level is carried by the plan composition, never a route flag.
 # ---------------------------------------------------------------------------
-def test_control_and_bias_only_are_partial():
+def test_control_and_bias_only_are_ready():
     lt = light()
-    assert enumerate_routes(lt, {}, policy()).outcome == OUTCOME_NEEDS_ATTENTION
+    enum = enumerate_routes(lt, {}, policy())
+    assert enum.outcome == OUTCOME_READY
+    assert enum.routes[0].additive_mode == "control"
+    assert enum.routes[0].flat_mode == "none"
+    # The "nothing applicable" fact is surfaced as a non-blocking audit entry.
+    assert any(r.code == NO_APPLICABLE_MASTER and not r.blocking for r in enum.reasons)
+
     bias = descriptor("bias", "not_applicable", exposure_s=0.001)
     res = resolve_route(lt, snapshot(bias=[candidate("b1", bias)]), policy())
-    assert res.outcome == OUTCOME_NEEDS_ATTENTION
-    assert res.plan is None
-    assert res.routes[0].partial is True
-    assert res.routes[0].additive_mode == "bias_only"
+    assert res.outcome == OUTCOME_READY
+    assert res.plan is not None
+    assert res.route.additive_mode == "bias_only"
+    assert res.plan.composition.additive_state == "bias_only"
+    assert res.plan.composition.applied_roles == ("bias",)
 
 
 # ---------------------------------------------------------------------------

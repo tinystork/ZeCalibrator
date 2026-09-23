@@ -252,7 +252,7 @@ def test_prepared_flat_gain_mismatch_does_not_block():
     assert all(r.code != "GAIN_MISMATCH" for r in res.reasons)
 
 
-def test_prepared_flat_cfa_phase_mismatch_still_blocks():
+def test_prepared_flat_cfa_phase_mismatch_flat_passthrough():
     from _phase4_fixtures import acquisition, candidate, descriptor, geo, light, policy
     from zecalibrator.application.library import LibrarySnapshot
     from zecalibrator.application.routes import resolve_route
@@ -280,9 +280,14 @@ def test_prepared_flat_cfa_phase_mismatch_still_blocks():
     )
     res = resolve_route(lt, snap, policy())
 
-    # A genuine CFA-phase contradiction still blocks at route level.
-    assert res.outcome == OUTCOME_NEEDS_ATTENTION
-    assert res.plan is None
+    # G2B R1: a CFA-phase-mismatched flat is scientifically inapplicable -> the
+    # flat is not applied (passthrough) and the dark correction still applies;
+    # the CFA_PHASE_MISMATCH reason is preserved (never silent).
+    assert res.outcome == OUTCOME_READY
+    assert res.plan is not None
+    assert res.route.flat_mode == "none"
+    assert "dark" in res.plan.masters
+    assert "flat" not in res.plan.masters
     assert any(r.code == "CFA_PHASE_MISMATCH" for r in res.reasons)
 
 
@@ -353,7 +358,7 @@ def test_dark_missing_gain_temp_unverified_non_blocking():
     assert all(not r.blocking for r in res.unverified)
 
 
-def test_dark_known_gain_mismatch_blocks():
+def test_dark_known_gain_mismatch_passthrough():
     from _phase4_fixtures import acquisition, candidate, descriptor, light, policy
     from zecalibrator.application.library import LibrarySnapshot
     from zecalibrator.application.routes import resolve_route
@@ -371,7 +376,12 @@ def test_dark_known_gain_mismatch_blocks():
     )
     res = resolve_route(lt, snap, policy())
 
-    assert res.outcome == OUTCOME_NEEDS_ATTENTION
+    # G2B R1: a known dark gain mismatch makes the dark inapplicable -> READY
+    # passthrough (never a hard failure); GAIN_MISMATCH stays blocking
+    # (candidate-level rejection) and is preserved.
+    assert res.outcome == OUTCOME_READY
+    assert res.plan is not None
+    assert res.plan.composition.level == "NONE"
     assert any(r.code == "GAIN_MISMATCH" and r.blocking for r in res.reasons)
 
 

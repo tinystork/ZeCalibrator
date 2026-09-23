@@ -20,8 +20,8 @@ A :class:`Route` is a fully-resolved scientific choice:
 
 Additive classification is strict and never invents a hidden default:
 
-* no compatible dark, no compatible bias  -> ``control`` (partial).
-* no compatible dark, compatible bias     -> ``bias_only`` (partial, never full).
+* no compatible dark, no compatible bias  -> ``control`` (passthrough).
+* no compatible dark, compatible bias     -> ``bias_only`` (partial).
 * compatible darks all ``included``       -> ``dark_incl_bias``.
 * compatible darks all ``removed``        -> ``dark_bias_removed`` (requires a
   compatible bias; none => no route => ``NEEDS_ATTENTION``).
@@ -41,17 +41,18 @@ Flat classification:
   required via ``_flat_evidence_reasons``);
   ``corrected_unnormalized`` -> ``normalize_only`` (additive correction already
   occurred; executor normalizes directly, no flat_dark/bias_flat, no proof);
-  ``raw_response`` -> reuse ``_flat_dependency_options`` for flat_dark/bias
-  dependencies (``flat_dark_incl_bias`` / ``flat_dark_bias_removed`` /
-  ``bias_only_flat``); zero dependencies => ``NEEDS_ATTENTION`` (flat supplied
-  but unusable, never silently ``flat none``).
+  ``raw_response`` -> unsupported in Standard (``FLAT_UNSUPPORTED_RAW``; a raw
+  flat can never auto-construct a flat_dark dependency here).
 * mixed ``flat_form`` values            -> ``AMBIGUOUS``.
 
-Combine + count (Cartesian additive x flat): 0 complete (full) routes =>
-``NEEDS_ATTENTION``; exactly 1 => ``READY``; more than 1 => ``AMBIGUOUS``. A
-``control``/``bias_only`` route is *partial* and is therefore reported as
-``NEEDS_ATTENTION`` rather than ``READY``. The resolver never ranks or picks a
-winner arbitrarily.
+Combine + count (Cartesian additive x flat): 0 routes => ``NEEDS_ATTENTION``;
+exactly 1 => ``READY`` (including ``control``/``bias_only`` passthrough/partial
+routes); more than 1 => ``AMBIGUOUS``. The resolver never ranks or picks a winner
+arbitrarily. A flat that was supplied but rejected for a *scientific*
+incompatibility (geometry/detector/filter/train/units) falls back to flat ``none``
+(passthrough) with the rejection reasons preserved; a flat rejected for
+*quality/usage* reasons (``_flat_evidence_reasons``) stays ``NEEDS_ATTENTION``
+(never silently ignored).
 """
 
 from __future__ import annotations
@@ -86,7 +87,7 @@ BIAS_STATE_UNKNOWN = "BIAS_STATE_UNKNOWN"
 BIAS_REQUIRED = "BIAS_REQUIRED"
 FLAT_UNUSABLE = "FLAT_UNUSABLE"
 FLAT_UNSUPPORTED_RAW = "FLAT_UNSUPPORTED_RAW"
-PARTIAL_ADDITIVE = "PARTIAL_ADDITIVE"
+NO_APPLICABLE_MASTER = "NO_APPLICABLE_MASTER"
 
 # Semantic source for a Standard-contract-default assignment (R3D-C). A supplied
 # master whose bias_state/flat_form was assigned by the contract (derivable from
@@ -105,7 +106,6 @@ class Route:
     flat_mode: str
     flat_prep_mode: Optional[str]
     masters: Mapping[str, Candidate]
-    partial: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "masters", MappingProxyType(dict(self.masters)))
@@ -265,6 +265,18 @@ def _flat_filter_unrelated(light: LightConstraints, desc) -> bool:
     return mf is not None and lf is not None and mf != lf
 
 
+def _flat_quality_rejection(flat_reject) -> bool:
+    """True when a supplied flat was rejected for quality/usage (never silent).
+
+    ``_flat_evidence_reasons`` / ``_normalization_coherence_reasons`` set
+    ``role="flat"`` on their reasons; the general compatibility reasons (geometry/
+    detector/filter/train/units/gain/offset) do not. A flat rejected only for the
+    latter is scientifically inapplicable (passthrough), while a flat rejected for
+    the former is quality-refused and must stay NEEDS_ATTENTION.
+    """
+    return any(r.role == "flat" for r in flat_reject)
+
+
 def enumerate_routes(
     light: LightConstraints,
     candidates: Mapping[str, Sequence[Candidate]],
@@ -323,7 +335,7 @@ def enumerate_routes(
                 )
             )
 
-    additive_options: list[tuple[str, bool, dict]] = []
+    additive_options: list[tuple[str, dict]] = []
     additive_ambiguous = False
 
     def _tie_reason(role, tied):
@@ -333,7 +345,7 @@ def enumerate_routes(
             observed=None, blocking=False,
         )
 
-    def _emit_ranked(role, light, cands, amode, partial, *, base=None):
+    def _emit_ranked(role, light, cands, amode, *, base=None):
         """Rank ``cands`` for ``role``; append one option per winner (or, on a tie,
         one option per tied candidate). Returns the tied tuple (or ``()``)."""
         winner, tied = _rank_one(role, light, cands)
@@ -341,15 +353,15 @@ def enumerate_routes(
             for c in tied:
                 m = dict(base or {})
                 m[role] = c
-                additive_options.append((amode, partial, m))
+                additive_options.append((amode, m))
             return tied
         if winner is not None:
             m = dict(base or {})
             m[role] = winner
-            additive_options.append((amode, partial, m))
+            additive_options.append((amode, m))
         return ()
 
-    def _emit_pair(role1, light, cands1, role2, cands2, amode, partial):
+    def _emit_pair(role1, light, cands1, role2, cands2, amode):
         """Rank two roles and combine winners into ``dark_bias_removed`` options
         (cartesian product on any tie). Returns ``(tie1, tie2)``."""
         w1, t1 = _rank_one(role1, light, cands1)
@@ -360,16 +372,16 @@ def enumerate_routes(
             return t1, t2
         for a in c1:
             for b in c2:
-                additive_options.append((amode, partial, {role1: a, role2: b}))
+                additive_options.append((amode, {role1: a, role2: b}))
         return t1, t2
 
     if not compatible_darks:
         if not compatible_biases:
-            additive_options.append(("control", True, {}))
+            additive_options.append(("control", {}))
         else:
             # G2B: same-role bias peers are ranked (most-recent-first) instead of
             # each producing a separate route.
-            tied = _emit_ranked("bias", light, compatible_biases, "bias_only", True)
+            tied = _emit_ranked("bias", light, compatible_biases, "bias_only")
             if tied:
                 additive_ambiguous = True
                 reasons.append(_tie_reason("bias", tied))
@@ -385,11 +397,11 @@ def enumerate_routes(
             additive_ambiguous = True
             # G2B: rank each bias-state group to a single winner; the
             # included-vs-removed SCIENTIFIC route ambiguity is unchanged.
-            d_incl_tie = _emit_ranked("dark", light, included, "dark_incl_bias", False)
+            d_incl_tie = _emit_ranked("dark", light, included, "dark_incl_bias")
             if d_incl_tie:
                 reasons.append(_tie_reason("dark", d_incl_tie))
             if compatible_biases:
-                d_rem_tie, b_tie = _emit_pair("dark", light, removed, "bias", compatible_biases, "dark_bias_removed", False)
+                d_rem_tie, b_tie = _emit_pair("dark", light, removed, "bias", compatible_biases, "dark_bias_removed")
                 if d_rem_tie:
                     reasons.append(_tie_reason("dark", d_rem_tie))
                 if b_tie:
@@ -400,7 +412,7 @@ def enumerate_routes(
                            expected="compatible bias", observed=None)
                 )
         elif included:
-            d_incl_tie = _emit_ranked("dark", light, included, "dark_incl_bias", False)
+            d_incl_tie = _emit_ranked("dark", light, included, "dark_incl_bias")
             if d_incl_tie:
                 additive_ambiguous = True
                 reasons.append(_tie_reason("dark", d_incl_tie))
@@ -412,7 +424,7 @@ def enumerate_routes(
                 )
                 additive_options = []
             else:
-                d_rem_tie, b_tie = _emit_pair("dark", light, removed, "bias", compatible_biases, "dark_bias_removed", False)
+                d_rem_tie, b_tie = _emit_pair("dark", light, removed, "bias", compatible_biases, "dark_bias_removed")
                 if d_rem_tie:
                     additive_ambiguous = True
                     reasons.append(_tie_reason("dark", d_rem_tie))
@@ -454,10 +466,16 @@ def enumerate_routes(
     flat_ambiguous = False
     if not compatible_flats:
         if flat_supplied:
-            # R3D-C: a flat was supplied but every candidate was rejected
-            # (incompatible). The rejection reasons are already blocking in
-            # ``reasons``; never silently fall back to ``flat none``.
-            flat_options = []
+            # A flat was supplied but every candidate was rejected. Distinguish
+            # scientific incompatibility (geometry/detector/filter/train/units —
+            # no ``role``) from quality/usage refusal (``_flat_evidence_reasons``
+            # sets ``role="flat"``): an incompatible flat falls back to flat
+            # ``none`` (passthrough) with its reasons preserved, while a
+            # quality-refused flat stays NEEDS_ATTENTION (never silently ignored).
+            if _flat_quality_rejection(flat_reject):
+                flat_options = []
+            else:
+                flat_options.append(("none", None, {}))
         else:
             flat_options.append(("none", None, {}))
     else:
@@ -516,11 +534,11 @@ def enumerate_routes(
 
     # ------------------------------------------------------------------- combine
     routes: list[Route] = []
-    for amode, partial, am in additive_options:
+    for amode, am in additive_options:
         for fmode, fprep, fm in flat_options:
             masters = dict(am)
             masters.update(fm)
-            routes.append(Route(amode, fmode, fprep, masters, partial))
+            routes.append(Route(amode, fmode, fprep, masters))
 
     forced_ambiguous = additive_ambiguous or flat_ambiguous
     if not routes:
@@ -528,15 +546,16 @@ def enumerate_routes(
     elif forced_ambiguous:
         outcome = OUTCOME_AMBIGUOUS
     elif len(routes) == 1:
-        outcome = OUTCOME_READY if not routes[0].partial else OUTCOME_NEEDS_ATTENTION
+        # G2B R1: control / bias_only / passthrough are legitimate READY routes;
+        # the level is carried by the plan composition, not by a route flag.
+        outcome = OUTCOME_READY
     else:
         outcome = OUTCOME_AMBIGUOUS
 
-    if outcome == OUTCOME_NEEDS_ATTENTION and routes and all(r.partial for r in routes):
-        reasons.append(
-            Reason(PARTIAL_ADDITIVE, "additive_mode",
-                   observed=tuple(sorted({r.additive_mode for r in routes})))
-        )
+    # A READY passthrough (no master bound) is surfaced truthfully as a
+    # non-blocking audit entry (never silent, never an error).
+    if outcome == OUTCOME_READY and routes and not routes[0].masters:
+        reasons.append(Reason(NO_APPLICABLE_MASTER, blocking=False))
 
     reasons = _dedup_reasons(reasons)
     unverified = _dedup_unverified(unverified)
@@ -548,10 +567,10 @@ __all__ = [
     "BIAS_STATE_UNKNOWN",
     "FLAT_UNSUPPORTED_RAW",
     "FLAT_UNUSABLE",
+    "NO_APPLICABLE_MASTER",
     "OUTCOME_AMBIGUOUS",
     "OUTCOME_NEEDS_ATTENTION",
     "OUTCOME_READY",
-    "PARTIAL_ADDITIVE",
     "STANDARD_MASTER_CONTRACT",
     "Route",
     "RouteEnumeration",

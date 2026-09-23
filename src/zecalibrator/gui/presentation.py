@@ -152,10 +152,22 @@ def human_reason_text(summary: Mapping) -> str:
     outcome = summary.get("outcome")
     codes = tuple(summary.get("reason_codes") or ())
     if outcome == "MATCHED":
-        # A resolved route never renders a failure sentence (the audit reasons
-        # may still carry non-blocking/informative notes such as an incompatible
-        # dark with an indeterminate bias state).
-        return "A compatible calibration set was found."
+        # G2B R1: a resolved route may be a full correction, a partial
+        # correction, or a passthrough (no correction applied) — all are
+        # successful outcomes; the note says which. A legacy summary without a
+        # composition block keeps the historical note.
+        comp = summary.get("composition")
+        if comp is None:
+            return "A compatible calibration set was found."
+        applied = tuple(comp.get("applied_roles") or summary.get("applied_roles") or ())
+        if not applied:
+            return "No correction applied — image passed through unchanged."
+        additive = comp.get("additive_state")
+        if additive in ("dark_incl_bias", "dark_bias_removed"):
+            # A dark correction was applied (full additive route).
+            return "A compatible calibration set was found."
+        names = [r for r in ("bias", "flat") if r in applied]
+        return "Partial correction applied: " + (", ".join(names) if names else "partial") + "."
     if outcome == "AMBIGUOUS":
         if "BIAS_STATE_UNKNOWN" in codes or "BIAS_REQUIRED" in codes:
             return (

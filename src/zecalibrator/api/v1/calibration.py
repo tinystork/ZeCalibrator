@@ -133,6 +133,9 @@ def _wrap(
         status=engine.status,
         reason_code=engine.reason_code,
         warnings=engine.warnings,
+        selection=plan.selection,
+        ranked_out=plan.ranked_out,
+        composition=dict(plan.composition.to_dict()) if plan.composition is not None else None,
     )
     return CalibrationResult(engine, provenance)
 

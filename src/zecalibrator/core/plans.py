@@ -406,10 +406,10 @@ class CalibrationPlan:
     identities and actual policy parameters. ``plan_id`` is derived and excludes
     retrieval locators and execution fields.
 
-    ``selection`` / ``selection_policy_version`` / ``composition`` are NON-DIGEST
-    audit blocks: they are carried by ``to_dict``/``from_dict`` but never enter
-    ``plan_digest_dict`` (so two plans identical except for the selection block
-    share the same ``plan_id``).
+    ``selection`` / ``selection_policy_version`` / ``ranked_out`` / ``composition``
+    are NON-DIGEST audit blocks: they are carried by ``to_dict``/``from_dict`` but
+    never enter ``plan_digest_dict`` (so two plans identical except for the
+    selection block share the same ``plan_id``).
     """
 
     plan_id: str
@@ -421,10 +421,12 @@ class CalibrationPlan:
     selection: tuple = ()
     selection_policy_version: str = ""
     composition: Optional["CalibrationComposition"] = None
+    ranked_out: tuple = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "masters", MappingProxyType(dict(self.masters)))
         object.__setattr__(self, "selection", tuple(self.selection))
+        object.__setattr__(self, "ranked_out", tuple(self.ranked_out))
 
     @classmethod
     def build(
@@ -437,6 +439,7 @@ class CalibrationPlan:
         selection: tuple = (),
         selection_policy_version: str = "",
         composition: Optional["CalibrationComposition"] = None,
+        ranked_out: tuple = (),
     ) -> "CalibrationPlan":
         plan = cls(
             plan_id="",
@@ -448,6 +451,7 @@ class CalibrationPlan:
             selection=tuple(selection),
             selection_policy_version=selection_policy_version,
             composition=composition,
+            ranked_out=tuple(ranked_out),
         )
         object.__setattr__(plan, "plan_id", plan.recompute_plan_id())
         return plan
@@ -481,6 +485,7 @@ class CalibrationPlan:
             "selection": [s.to_dict() for s in self.selection],
             "selection_policy_version": self.selection_policy_version,
             "composition": dict(self.composition.to_dict()) if self.composition is not None else None,
+            "ranked_out": [r.to_dict() for r in self.ranked_out],
         }
     @classmethod
     def from_dict(cls, d: Mapping[str, object]) -> "CalibrationPlan":
@@ -498,6 +503,7 @@ class CalibrationPlan:
             selection=tuple(cls._selection_from_dict(s) for s in d.get("selection", ())),
             selection_policy_version=d.get("selection_policy_version", ""),
             composition=CalibrationComposition.from_dict(d["composition"]) if d.get("composition") is not None else None,
+            ranked_out=tuple(cls._ranked_out_from_dict(r) for r in d.get("ranked_out", ())),
         )
         if d.get("plan_id") is not None and d["plan_id"] != plan.plan_id:
             raise ValueError(f"plan digest mismatch: recorded {d['plan_id']!r}, recomputed {plan.plan_id!r}")
@@ -508,6 +514,12 @@ class CalibrationPlan:
         from zecalibrator.core.selection import MasterSelectionRecord
 
         return MasterSelectionRecord.from_dict(d)
+
+    @staticmethod
+    def _ranked_out_from_dict(d: Mapping[str, object]):
+        from zecalibrator.core.selection import RankedOutRecord
+
+        return RankedOutRecord.from_dict(d)
 
     @staticmethod
     def _light_from_dict(d: Mapping[str, object]) -> LightConstraints:

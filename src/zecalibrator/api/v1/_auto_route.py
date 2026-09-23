@@ -200,7 +200,8 @@ def auto_route_batch(
         if destination is None:
             return BatchItem(index=idx, disposition=disposition,
                              input_identity=inspection.identity, plan_id=plan.plan_id,
-                             result=result, output=None, warnings=result.warnings)
+                             result=result, output=None, warnings=result.warnings,
+                             composition=dict(plan.composition.to_dict()) if plan.composition is not None else None)
 
         try:
             output = _write_output(result, inspection.identity, plan.plan_id, destination, token, replace_existing=replace_existing)
@@ -218,7 +219,8 @@ def auto_route_batch(
                              warnings=result.warnings)
         return BatchItem(index=idx, disposition=disposition,
                          input_identity=inspection.identity, plan_id=plan.plan_id,
-                         result=None, output=output, warnings=result.warnings)
+                         result=None, output=output, warnings=result.warnings,
+                         composition=dict(plan.composition.to_dict()) if plan.composition is not None else None)
 
     emit_batch_progress(obs, "batch_start", 0, total)
     try:

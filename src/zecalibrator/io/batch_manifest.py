@@ -49,6 +49,7 @@ _ITEM_KEYS = frozenset({
     "reason_details",
     "warnings",
     "output",
+    "composition",
 })
 
 _OUTPUT_KEYS = frozenset({

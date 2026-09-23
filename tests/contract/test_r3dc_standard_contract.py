@@ -268,6 +268,9 @@ def test_missing_acquisition_facts_unverified_and_ready():
 
 
 def test_known_gain_mismatch_stays_blocking():
+    # G2B R1: a known dark gain mismatch makes the dark scientifically
+    # inapplicable -> the route is a READY passthrough (never a hard failure);
+    # the GAIN_MISMATCH reason is preserved and stays blocking (candidate-level).
     lt = light()  # gain=100
     dk = descriptor(
         "dark", "included",
@@ -275,7 +278,10 @@ def test_known_gain_mismatch_stays_blocking():
         acquisition_obj=acquisition(gain=999),
     )
     res = resolve_route(lt, snapshot(dark=[candidate("d1", dk)]), policy())
-    assert res.outcome == OUTCOME_NEEDS_ATTENTION
+    assert res.outcome == OUTCOME_READY
+    assert res.route.additive_mode == "control"
+    assert res.plan is not None
+    assert res.plan.composition.level == "NONE"
     assert any(r.code == "GAIN_MISMATCH" for r in res.reasons)
     assert all(r.blocking for r in res.reasons if r.code == "GAIN_MISMATCH")
 

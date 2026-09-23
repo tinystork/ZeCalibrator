@@ -201,9 +201,10 @@ def test_prepared_flat_gain_mismatch_execution_succeeds(make_frame_fixture):
     assert np.allclose(result.data, np.full((4, 4), 90.0, dtype=np.float32), atol=1e-4)
 
 
-def test_known_dark_gain_mismatch_planner_blocks(tmp_path):
-    # The planner (Standard auto-route) still refuses a known dark gain
-    # mismatch; a valid Standard plan is never produced.
+def test_known_dark_gain_mismatch_planner_passthrough(tmp_path):
+    # G2B R1: a known dark gain mismatch makes the dark inapplicable; the
+    # Standard planner produces a READY passthrough (never a hard failure) with
+    # the GAIN_MISMATCH reason preserved.
     light_path = _write_fits(tmp_path / "light.fits", 100.0)
     source = _light_source(light_path, gain=120.0)
     inspection = v1.inspect_frame(source)
@@ -229,8 +230,9 @@ def test_known_dark_gain_mismatch_planner_blocks(tmp_path):
     finally:
         handle.close()
 
-    assert resolution.outcome == OUTCOME_NEEDS_ATTENTION
-    assert resolution.plan is None
+    assert resolution.outcome == OUTCOME_READY
+    assert resolution.plan is not None
+    assert resolution.plan.composition.level == "NONE"
     assert any(r.code == "GAIN_MISMATCH" for r in resolution.reasons)
 
 

@@ -169,24 +169,25 @@ def test_config_controls_locked_during_active_work(qapp, paths, tmp_path):
     assert w.add_btn.isEnabled()
 
 
-def test_preflight_details_visible_for_no_match(qapp, paths, tmp_path):
-    """F2/F7: selecting a preflight row shows structured rejection details.
+def test_preflight_details_visible_for_passthrough(qapp, paths, tmp_path):
+    """F2/F7: selecting a preflight row shows structured details.
 
     Auto-route (Standard) resolves the route automatically; a light with an
-    incompatible exposure yields NEEDS_ATTENTION (NO_MATCH) and its details are
-    visible in the Advanced pane.
+    incompatible exposure is a READY passthrough (MATCHED) whose details are
+    still visible in the Advanced pane.
     """
     fixture = make_synth_fixture(tmp_path)
     w = _make_window(qapp, paths, fixture)
     try:
-        # Incompatible exposure -> no compatible dark -> needs attention.
+        # Incompatible exposure -> no compatible dark -> passthrough (MATCHED).
         decl = json.loads(open(fixture["decl"]).read())
         decl["exposure_s"] = 11.0
         w._lights[0].declaration = v1.ImportDeclaration(**decl)
         w._on_preflight()
         assert _pump(lambda: not w._controller.is_active)
         assert w._preflight_summaries
-        assert w._preflight_summaries[0]["outcome"] == "NO_MATCH"
+        assert w._preflight_summaries[0]["outcome"] == "MATCHED"
+        assert w._preflight_summaries[0]["level"] == "NONE"
 
         w.preflight_table.setCurrentCell(0, 0)
         text = w.details_view.toPlainText()
@@ -340,15 +341,16 @@ def test_default_index_path_is_under_user_data(qapp, paths):
 
 def test_row_identity_no_plan_collision_same_path_hdu(qapp, paths, tmp_path):
     """S4: two rows with the SAME path/HDU but different evidence must not share a plan.
-    A NO_MATCH row must never execute another row's MATCHED plan."""
+    Each row resolves its own plan (G2B R1: the exposure-11 light is a passthrough,
+    never reusing the exposure-10 row's dark plan)."""
     fixture = make_synth_fixture(tmp_path)
     w = _make_window(qapp, paths, fixture)
     try:
-        # First row: dark_incl_bias at exposure 10 -> MATCHED.
+        # First row: dark_incl_bias at exposure 10 -> MATCHED (dark).
         first = _LightEntry(fixture["light"], hdu=0,
                             declaration=v1.ImportDeclaration(**json.loads(open(fixture["decl"]).read())),
                             roi_extent=v1.RoiExtentEvidence(**json.loads(open(fixture["roi"]).read())))
-        # Second row: same path/hdu but exposure 11 -> NO_MATCH.
+        # Second row: same path/hdu but exposure 11 -> passthrough (no dark).
         decl2 = json.loads(open(fixture["decl"]).read())
         decl2["exposure_s"] = 11.0
         second = _LightEntry(fixture["light"], hdu=0,
@@ -358,18 +360,15 @@ def test_row_identity_no_plan_collision_same_path_hdu(qapp, paths, tmp_path):
         w._refresh_lights_list()
         w._on_preflight()
         assert _pump(lambda: not w._controller.is_active)
-        # Distinct outcomes with distinct row ids.
+        # Distinct outcomes with distinct row ids and DISTINCT plans (different
+        # light exposure -> different plan_id); no collision between rows.
         outcomes = [s["outcome"] for s in w._preflight_summaries]
-        assert outcomes == ["MATCHED", "NO_MATCH"], outcomes
+        assert outcomes == ["MATCHED", "MATCHED"], outcomes
         assert first.row_id in w._plans
-        assert second.row_id not in w._plans, "NO_MATCH row must not carry a plan"
-
-        # Selecting the NO_MATCH row must refuse in-memory calibration (no plan).
-        warned = []
-        w.lights_list.setCurrentRow(1)
-        QtWidgets.QMessageBox.information = staticmethod(lambda *a, **k: warned.append(True))
-        w._on_calibrate_in_memory()
-        assert warned, "selecting the NO_MATCH row must not execute the MATCHED row's plan"
+        assert second.row_id in w._plans
+        assert w._plans[first.row_id].plan_id != w._plans[second.row_id].plan_id
+        assert "dark" in w._plans[first.row_id].masters
+        assert "dark" not in w._plans[second.row_id].masters
     finally:
         _close(w)
 
@@ -544,17 +543,17 @@ def test_standard_summary_counts_truthful_human_outcomes(qapp, paths, tmp_path):
     fixture = make_synth_fixture(tmp_path)
     w = _make_window(qapp, paths, fixture)
     try:
-        # Incompatible exposure -> auto-route needs attention.
+        # Incompatible exposure -> auto-route passthrough (a SUCCESSFUL outcome).
         decl = json.loads(open(fixture["decl"]).read())
         decl["exposure_s"] = 11.0
         w._lights[0].declaration = v1.ImportDeclaration(**decl)
         w._on_preflight()
         assert _pump(lambda: not w._controller.is_active)
-        assert w._preflight_summaries[0]["outcome"] == "NO_MATCH"
-        assert "needs attention" in w.standard_summary_label.text()
+        assert w._preflight_summaries[0]["outcome"] == "MATCHED"
+        assert "image ready" in w.standard_summary_label.text()
         # Human outcome table shows the human label, not the technical token.
-        assert w.standard_results_table.item(0, 1).text() == "Needs attention"
-        assert "partial correction" in w.standard_results_table.item(0, 2).text()
+        assert w.standard_results_table.item(0, 1).text() == "Ready"
+        assert "image passed through unchanged" in w.standard_results_table.item(0, 2).text()
     finally:
         _close(w)
 

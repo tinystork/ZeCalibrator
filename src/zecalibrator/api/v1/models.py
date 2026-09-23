@@ -79,6 +79,7 @@ from zecalibrator.core.plans import (
     default_match_policy,
 )
 from zecalibrator.core.precision import PrecisionInfo
+from zecalibrator.core.selection import MasterSelectionRecord, RankedOutRecord
 from zecalibrator.io.master_source import FilesystemSource, InMemorySource
 
 from ._meta import ApiInfo, CAPABILITIES, PROVENANCE_SCHEMA
@@ -358,7 +359,8 @@ _PROVENANCE_TOP_KEYS = frozenset({
     "product_version", "decoder_version", "provenance_schema", "matching_policy",
     "science_contract", "backend", "request", "executed_processing", "scalars",
     "status", "reason_code", "warnings", "flat_saturation_screening",
-    "flat_scalars_origin", "master_domain_transforms",
+    "flat_scalars_origin", "master_domain_transforms", "selection", "ranked_out",
+    "composition",
 })
 
 
@@ -399,6 +401,9 @@ class ProvenanceRecord:
     flat_saturation_screening: Optional[str] = None
     flat_scalars_origin: Optional[str] = None
     master_domain_transforms: tuple = ()
+    selection: tuple = ()
+    ranked_out: tuple = ()
+    composition: Optional[Mapping[str, object]] = None
 
     def __post_init__(self) -> None:
         if self.schema_version != PROVENANCE_SCHEMA:
@@ -409,6 +414,8 @@ class ProvenanceRecord:
         object.__setattr__(self, "scalars", MappingProxyType(dict(self.scalars)))
         object.__setattr__(self, "warnings", tuple(self.warnings))
         object.__setattr__(self, "master_domain_transforms", tuple(self.master_domain_transforms))
+        object.__setattr__(self, "selection", tuple(self.selection))
+        object.__setattr__(self, "ranked_out", tuple(self.ranked_out))
         if self.input_scaling is not None:
             object.__setattr__(self, "input_scaling", MappingProxyType(dict(self.input_scaling)))
 
@@ -439,6 +446,9 @@ class ProvenanceRecord:
             "reason_code": self.reason_code,
             "warnings": list(self.warnings),
             "master_domain_transforms": [dict(t) for t in self.master_domain_transforms],
+            "selection": [s.to_dict() for s in self.selection],
+            "ranked_out": [r.to_dict() for r in self.ranked_out],
+            "composition": dict(self.composition) if self.composition is not None else None,
         }
 
     @classmethod
@@ -490,6 +500,9 @@ class ProvenanceRecord:
             status=d["status"],
             reason_code=d.get("reason_code"),
             warnings=tuple(d.get("warnings", ())),
+            selection=tuple(MasterSelectionRecord.from_dict(s) for s in d.get("selection", ())),
+            ranked_out=tuple(RankedOutRecord.from_dict(r) for r in d.get("ranked_out", ())),
+            composition=dict(d["composition"]) if d.get("composition") is not None else None,
         )
 
 
@@ -542,7 +555,15 @@ class CalibrationResult:
     def reason_code(self) -> Optional[str]:
         return self._engine.reason_code
 
+    @property
+    def composition(self):
+        """The plan's :class:`~zecalibrator.core.plans.CalibrationComposition`
+        (additive public surface), or ``None`` when no plan is attached."""
+        plan = self.provenance.plan
+        return plan.composition if plan is not None else None
+
     def to_dict(self) -> Mapping[str, object]:
+        composition = self.composition
         return {
             "schema_version": PROVENANCE_SCHEMA,
             "payload_serialized": False,  # data/mask/precision are in-memory only
@@ -550,6 +571,7 @@ class CalibrationResult:
             "warnings": list(self.warnings),
             "reason_code": self.reason_code,
             "scalars": dict(self.scalars),
+            "composition": dict(composition.to_dict()) if composition is not None else None,
             "counts": {
                 "total": self.counts.total,
                 "valid_count": self.counts.valid_count,
@@ -704,6 +726,7 @@ class BatchItem:
     reason_code: Optional[str] = None
     reason_details: str = ""
     warnings: tuple = ()
+    composition: Optional[Mapping[str, object]] = None
 
     def __post_init__(self) -> None:
         if isinstance(self.index, bool) or not isinstance(self.index, int) or self.index < 0:
@@ -725,6 +748,7 @@ class BatchItem:
             "reason_code": self.reason_code,
             "reason_details": self.reason_details,
             "warnings": list(self.warnings),
+            "composition": dict(self.composition) if self.composition is not None else None,
             "output": dict(self.output.to_dict()) if self.output is not None else None,
         }
 

@@ -534,7 +534,7 @@ def _siril_light():
     )
 
 
-def test_known_incompatibility_blocks_at_route_level(tmp_path):
+def test_known_incompatibility_passthrough_flat(tmp_path):
     data = np.full(SHAPE, 1.0, dtype=np.float32)
     write_fits_array(
         tmp_path / "dark.fits", data,
@@ -559,7 +559,7 @@ def test_known_incompatibility_blocks_at_route_level(tmp_path):
                     "exposure_s": 10.0,
                     # R3D-E F4: a prepared flat's gain/offset no longer block;
                     # a CFA-phase contradiction is a genuine structural
-                    # incompatibility that STILL blocks at route level.
+                    # incompatibility that makes the flat inapplicable.
                     "cfa_phase": "RGGB",
                 }
             ),
@@ -578,8 +578,13 @@ def test_known_incompatibility_blocks_at_route_level(tmp_path):
     finally:
         handle.close()
 
-    assert resolution.outcome == OUTCOME_NEEDS_ATTENTION
-    assert resolution.plan is None  # never a silent route
+    # G2B R1: the CFA-phase-mismatched flat is inapplicable -> the dark still
+    # applies and the flat is passthrough; the CFA_PHASE_MISMATCH is preserved
+    # (never silent), and the prepared flat's gain mismatch is never the reason.
+    assert resolution.outcome == OUTCOME_READY
+    assert resolution.plan is not None
+    assert "dark" in resolution.plan.masters
+    assert "flat" not in resolution.plan.masters
     codes = {r.code for r in resolution.reasons}
     assert "CFA_PHASE_MISMATCH" in codes
     # F4: the flat's gain mismatch (456 vs 120) must NOT be the blocking reason

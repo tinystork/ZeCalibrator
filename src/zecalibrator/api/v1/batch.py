@@ -212,6 +212,7 @@ def _process_one(idx, frame, request, library, policy, destination, token, plan_
             index=idx, disposition=disposition, input_identity=inspection.identity,
             plan_id=plan.plan_id, result=result, output=None,
             warnings=result.warnings,
+            composition=dict(plan.composition.to_dict()) if plan.composition is not None else None,
         )
 
     try:
@@ -234,6 +235,7 @@ def _process_one(idx, frame, request, library, policy, destination, token, plan_
         index=idx, disposition=disposition, input_identity=inspection.identity,
         plan_id=plan.plan_id, result=None, output=output,
         warnings=result.warnings,
+        composition=dict(plan.composition.to_dict()) if plan.composition is not None else None,
     )
 
 
@@ -249,6 +251,7 @@ def _write_output(result, input_identity, plan_id, destination, token, replace_e
         status=result.status,
         plan_id=plan_id,
         provenance_schema=plan.versions.provenance_schema,
+        composition=plan.composition,
     )
     record = write_standalone_output(
         result.data,

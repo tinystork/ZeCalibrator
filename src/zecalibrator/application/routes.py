@@ -69,10 +69,11 @@ def resolve_route(
 ) -> RouteResolution:
     """Resolve the auto-route for ``light`` against ``snapshot``.
 
-    For exactly one READY route, build the existing ``CalibrationRequest`` and
-    bind the final ``CalibrationPlan`` via the existing ``match_calibration``.
-    A partial route (``control``/``bias_only``) is never a READY outcome and is
-    never materialized as a plan here.
+    For exactly one READY route, build the ``CalibrationRequest`` and bind the
+    final ``CalibrationPlan`` via ``match_calibration``. A READY passthrough
+    (``control``+``none``) or a partial route (``bias_only`` / flat-only) is a
+    legitimate READY outcome whose composition (level + applied/skipped roles)
+    is carried by the returned plan.
     """
     enumeration = enumerate_routes(light, snapshot.candidates, policy)
 

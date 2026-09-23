@@ -42,6 +42,7 @@ from zecalibrator.core.descriptors import (
 from zecalibrator.core.matching import MatchResult, Reason, RejectionRecord, match_calibration
 from zecalibrator.core.metadata import SensorMetadata
 from zecalibrator.core.plans import (
+    CalibrationComposition,
     CalibrationPlan,
     CalibrationRequest,
     Candidate,
@@ -51,6 +52,7 @@ from zecalibrator.core.plans import (
     MatchPolicy,
     Tolerance,
 )
+from zecalibrator.core.selection import MasterSelectionRecord, RankedOutRecord
 
 LIBRARY_SCHEMA = "zecalibrator.library.v1"
 
@@ -197,6 +199,10 @@ class DecisionEnvelope:
     selection_decisions: Tuple[Tuple[str, str], ...] = ()
     verification: Optional[ValidationResult] = None
     unverified: Tuple[Reason, ...] = ()
+    selection: Tuple[MasterSelectionRecord, ...] = ()
+    ranked_out: Tuple[RankedOutRecord, ...] = ()
+    composition: Optional[CalibrationComposition] = None
+    selection_policy_version: str = ""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "rejected_candidates", tuple(self.rejected_candidates))
@@ -205,6 +211,8 @@ class DecisionEnvelope:
         object.__setattr__(self, "coherent_sets", tuple(MappingProxyType(dict(s)) for s in self.coherent_sets))
         object.__setattr__(self, "selection_decisions", tuple((k, v) for k, v in self.selection_decisions))
         object.__setattr__(self, "unverified", tuple(self.unverified))
+        object.__setattr__(self, "selection", tuple(self.selection))
+        object.__setattr__(self, "ranked_out", tuple(self.ranked_out))
 
     def to_dict(self) -> Mapping[str, object]:
         return {
@@ -226,6 +234,10 @@ class DecisionEnvelope:
             "light_constraints": dict(self.light_constraints.to_full_dict()) if self.light_constraints is not None else None,
             "selection_decisions": [list(kv) for kv in self.selection_decisions],
             "verification": {"status": self.verification.status, "reasons": list(self.verification.reasons)} if self.verification is not None else None,
+            "selection": [s.to_dict() for s in self.selection],
+            "ranked_out": [r.to_dict() for r in self.ranked_out],
+            "composition": dict(self.composition.to_dict()) if self.composition is not None else None,
+            "selection_policy_version": self.selection_policy_version,
         }
 
     @classmethod
@@ -252,6 +264,10 @@ class DecisionEnvelope:
             selection_decisions=tuple(tuple(kv) for kv in d.get("selection_decisions", ())),
             verification=ValidationResult(status=d["verification"]["status"], reasons=tuple(d["verification"].get("reasons", ()))) if d.get("verification") is not None else None,
             unverified=tuple(_reason_from_dict(r) for r in d.get("unverified", ())),
+            selection=tuple(MasterSelectionRecord.from_dict(s) for s in d.get("selection", ())),
+            ranked_out=tuple(RankedOutRecord.from_dict(r) for r in d.get("ranked_out", ())),
+            composition=CalibrationComposition.from_dict(d["composition"]) if d.get("composition") is not None else None,
+            selection_policy_version=d.get("selection_policy_version", ""),
         )
 def light_constraints_from_sensor_metadata(md: SensorMetadata) -> LightConstraints:
     """Adapt G3 ``SensorMetadata`` into pure matching constraints (no reverse import).
@@ -327,6 +343,10 @@ def resolve_calibration(
         light_constraints=light,
         selection_decisions=selection,
         unverified=result.unverified,
+        selection=result.selection,
+        ranked_out=result.ranked_out,
+        composition=result.composition,
+        selection_policy_version=result.selection_policy_version,
     )
 
 
@@ -425,6 +445,10 @@ def plan_calibration_file_backed(
         selection_decisions=envelope.selection_decisions,
         verification=verification,
         unverified=envelope.unverified,
+        selection=envelope.selection,
+        ranked_out=envelope.ranked_out,
+        composition=envelope.composition,
+        selection_policy_version=envelope.selection_policy_version,
     )
 
 

@@ -561,6 +561,9 @@ class _OperationWorker(QtCore.QObject):
                 "flat_mode": resolution.route.flat_mode if resolution.route else None,
                 "flat_prep_mode": resolution.route.flat_prep_mode if resolution.route else None,
             },
+            "composition": plan.composition.to_dict() if (plan is not None and plan.composition is not None) else None,
+            "level": plan.composition.level if (plan is not None and plan.composition is not None) else None,
+            "applied_roles": list(plan.composition.applied_roles) if (plan is not None and plan.composition is not None) else [],
             "decision_audit": {
                 "outcome": resolution.outcome,
                 "reasons": [_reason_dict(r) for r in resolution.reasons],
@@ -571,7 +574,6 @@ class _OperationWorker(QtCore.QObject):
                         "additive_mode": r.additive_mode,
                         "flat_mode": r.flat_mode,
                         "flat_prep_mode": r.flat_prep_mode,
-                        "partial": r.partial,
                         "masters": {role: c.candidate_id for role, c in r.masters.items()},
                     }
                     for r in resolution.routes

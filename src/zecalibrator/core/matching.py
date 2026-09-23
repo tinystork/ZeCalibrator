@@ -1234,6 +1234,7 @@ def match_calibration(
         selection=tuple(selection_records),
         selection_policy_version=SELECTION_POLICY_VERSION,
         composition=composition,
+        ranked_out=tuple(ranked_out_records),
     )
     return MatchResult(
         outcome=OUTCOME_MATCHED,
@@ -1350,6 +1351,7 @@ def _build_plan(
     selection: tuple = (),
     selection_policy_version: str = "",
     composition: Optional[CalibrationComposition] = None,
+    ranked_out: tuple = (),
 ) -> CalibrationPlan:
     bindings: dict[str, MasterBinding] = {}
     for role, c in sorted(chosen.items()):
@@ -1377,6 +1379,7 @@ def _build_plan(
         selection=tuple(selection),
         selection_policy_version=selection_policy_version,
         composition=composition,
+        ranked_out=tuple(ranked_out),
     )
 
 

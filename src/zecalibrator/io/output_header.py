@@ -86,13 +86,16 @@ def build_output_header_fields(
     status,
     plan_id,
     provenance_schema,
+    composition=None,
 ) -> dict[str, object]:
     """Build the standalone-output header cards for one calibrated light.
 
     Emits the ZeCalibrator identity/status cards (byte-identical to the
     previous hardcoded batch cards), then the canonical ``light_constraints``
-    acquisition/geometry cards, then the closed evidence whitelist. No header
-    copy of any kind; structural/scaling/checksum cards are left to the writer.
+    acquisition/geometry cards, then the closed evidence whitelist, then the
+    composition cards (``ZECALLEVEL``/``ZECALCOMP``, emitted only when
+    ``composition`` is provided). No header copy of any kind; structural/scaling/
+    checksum cards are left to the writer.
     """
     fields: dict[str, object] = {}
 
@@ -103,6 +106,17 @@ def build_output_header_fields(
     fields["HIERARCH ZECALSCHEMA"] = provenance_schema
     fields["HIERARCH ZECALPLAN"] = plan_id[:16]
     fields["HIERARCH ZECALSTAT"] = status
+
+    # ------------------------------------------------------------------
+    # G2B R1 composition cards: the calibration level and the applied roles.
+    # Emitted ONLY when the composition is actually determined (never invented);
+    # a passthrough is recognisable as ZECALLEVEL=NONE / ZECALCOMP=none, never a
+    # bare ZECALSTAT=COMPLETED* readable as "calibrated".
+    # ------------------------------------------------------------------
+    if composition is not None:
+        fields["HIERARCH ZECALLEVEL"] = composition.level
+        applied = composition.applied_roles
+        fields["HIERARCH ZECALCOMP"] = ",".join(applied) if applied else "none"
 
     geometry = light_constraints.geometry
     detector = light_constraints.detector
