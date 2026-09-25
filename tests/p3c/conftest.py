@@ -19,6 +19,21 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 
+@pytest.fixture(scope="session")
+def frozen_campaign():
+    """Freeze the candidates once and run the full QUALIFICATION campaign once.
+
+    Session-scoped: the campaign is deterministic and ~10s, so it is computed a
+    single time and shared by every P3C-3 test that needs the full result.
+    """
+    from research.p3c.candidate_freeze import freeze_candidates
+    from research.p3c.qualification_runner import run_qualification_campaign
+
+    freeze = freeze_candidates()
+    results = run_qualification_campaign(freeze)
+    return freeze, results
+
+
 @pytest.fixture
 def features_factory():
     """Return a callable ``features_factory(class_name, seed=0) -> SiteFeatures``.
