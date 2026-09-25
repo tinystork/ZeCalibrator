@@ -1,0 +1,783 @@
+{
+  "classes": [
+    "NORMAL",
+    "STABLE_ANOMALY_CORRECTED_BY_DARK",
+    "STABLE_ANOMALY_WITH_MISMATCHED_DARK",
+    "INTERMITTENT_TWO_STATE",
+    "INTERMITTENT_MULTI_STATE",
+    "INTERMITTENT_CONTINUOUS",
+    "RARE_HIGH_STATE",
+    "RARE_LOW_STATE",
+    "SIGN_CHANGING_POST_DARK",
+    "CENSORED_ANOMALY",
+    "SINGLE_TRANSIENT",
+    "OPTICAL_STRUCTURE",
+    "STAR_CROSSING_SITE",
+    "UNDERSAMPLED_STAR_CORE",
+    "COSMIC_RAY",
+    "NOISE_EXTREME",
+    "FLAT_STRUCTURE",
+    "DUST_OR_VIGNETTING",
+    "NEAR_SATURATION",
+    "AMBIGUOUS_INSUFFICIENT_EVIDENCE"
+  ],
+  "dataset_role": "QUALIFICATION-2",
+  "manifest_hash": "b8803590a1d095213fab6fc6bce428dc10cf29f68339433564d66d285e3a9a9b",
+  "manifest_schema": "zecalibrator-p3c4-lot4-qualification2-dataset",
+  "manifest_version": 1,
+  "scenarios": [
+    {
+      "cfa_class": "NORMAL",
+      "name": "qualification2:NORMAL:10",
+      "seed": 10,
+      "signature": "91b5882192a615e28e42287b509c988f7c41451d4ae65e750fe47b5943707987",
+      "temporal_kind": "normal"
+    },
+    {
+      "cfa_class": "NORMAL",
+      "name": "qualification2:NORMAL:11",
+      "seed": 11,
+      "signature": "d785e83edd2d86b1aa2ce23a51bdaf9e8a25afd59bc330c8df5495ee5ae1a3cf",
+      "temporal_kind": "normal"
+    },
+    {
+      "cfa_class": "NORMAL",
+      "name": "qualification2:NORMAL:12",
+      "seed": 12,
+      "signature": "1480002f9e817db9c548054629f0122092a64dd7dfe66ecdd1e9350e3e905443",
+      "temporal_kind": "normal"
+    },
+    {
+      "cfa_class": "NORMAL",
+      "name": "qualification2:NORMAL:13",
+      "seed": 13,
+      "signature": "3faf856476bb9f362a582318c70427268f06deb1e0ce857de35baf7930ac93f8",
+      "temporal_kind": "normal"
+    },
+    {
+      "cfa_class": "NORMAL",
+      "name": "qualification2:NORMAL:14",
+      "seed": 14,
+      "signature": "c62a2d7a7610ddfea54ffd99a88164509b4c4cf9b5c438a49be7194b419c1754",
+      "temporal_kind": "normal"
+    },
+    {
+      "cfa_class": "STABLE_ANOMALY_CORRECTED_BY_DARK",
+      "name": "qualification2:STABLE_ANOMALY_CORRECTED_BY_DARK:10",
+      "seed": 10,
+      "signature": "f16a642b07fcf55da54ac6d74b9a991d414a32983e82c38c5a0269420ecc95eb",
+      "temporal_kind": "stable_anomaly_corrected_by_dark"
+    },
+    {
+      "cfa_class": "STABLE_ANOMALY_CORRECTED_BY_DARK",
+      "name": "qualification2:STABLE_ANOMALY_CORRECTED_BY_DARK:11",
+      "seed": 11,
+      "signature": "c2fb345e2e69c9f7d0ecf74837f88efe1d16e0f80622bb89dd47f0e7c7aea9fe",
+      "temporal_kind": "stable_anomaly_corrected_by_dark"
+    },
+    {
+      "cfa_class": "STABLE_ANOMALY_CORRECTED_BY_DARK",
+      "name": "qualification2:STABLE_ANOMALY_CORRECTED_BY_DARK:12",
+      "seed": 12,
+      "signature": "3a02076fa40065860f2c27b57d8d4b81509721891059766208ae081fc43a8b51",
+      "temporal_kind": "stable_anomaly_corrected_by_dark"
+    },
+    {
+      "cfa_class": "STABLE_ANOMALY_CORRECTED_BY_DARK",
+      "name": "qualification2:STABLE_ANOMALY_CORRECTED_BY_DARK:13",
+      "seed": 13,
+      "signature": "fec4e2b6b177d559be325e974abb60eb30c7493b6d0635d4a5460828456810c6",
+      "temporal_kind": "stable_anomaly_corrected_by_dark"
+    },
+    {
+      "cfa_class": "STABLE_ANOMALY_CORRECTED_BY_DARK",
+      "name": "qualification2:STABLE_ANOMALY_CORRECTED_BY_DARK:14",
+      "seed": 14,
+      "signature": "84c7a6a1a41cd033e0b9a4e3e65242116f1db3ac487a9a48e2b88553e0f625b3",
+      "temporal_kind": "stable_anomaly_corrected_by_dark"
+    },
+    {
+      "cfa_class": "STABLE_ANOMALY_WITH_MISMATCHED_DARK",
+      "name": "qualification2:STABLE_ANOMALY_WITH_MISMATCHED_DARK:10",
+      "seed": 10,
+      "signature": "3cca5de723411c659922d880708008083cf2461bb3e8bf1c0ce41c7ddca2537d",
+      "temporal_kind": "fixed_sensor_defect"
+    },
+    {
+      "cfa_class": "STABLE_ANOMALY_WITH_MISMATCHED_DARK",
+      "name": "qualification2:STABLE_ANOMALY_WITH_MISMATCHED_DARK:11",
+      "seed": 11,
+      "signature": "d0c6b253e705e774763ba7d8911ed33cd39208e7350deb23ac11b9f33af6c573",
+      "temporal_kind": "fixed_sensor_defect"
+    },
+    {
+      "cfa_class": "STABLE_ANOMALY_WITH_MISMATCHED_DARK",
+      "name": "qualification2:STABLE_ANOMALY_WITH_MISMATCHED_DARK:12",
+      "seed": 12,
+      "signature": "d0388bed98ef758d6f247d62e0de631935dbcf082e40f250e537e837546a859d",
+      "temporal_kind": "fixed_sensor_defect"
+    },
+    {
+      "cfa_class": "STABLE_ANOMALY_WITH_MISMATCHED_DARK",
+      "name": "qualification2:STABLE_ANOMALY_WITH_MISMATCHED_DARK:13",
+      "seed": 13,
+      "signature": "22b6af0a82b5fb4812556da8019e733a9f3e7dbaa680a361cbb254ffa63f207a",
+      "temporal_kind": "fixed_sensor_defect"
+    },
+    {
+      "cfa_class": "STABLE_ANOMALY_WITH_MISMATCHED_DARK",
+      "name": "qualification2:STABLE_ANOMALY_WITH_MISMATCHED_DARK:14",
+      "seed": 14,
+      "signature": "27ccb7d9edc1caaa1963a83a0cda4a6f78a145a7b909e72018145161e241689e",
+      "temporal_kind": "fixed_sensor_defect"
+    },
+    {
+      "cfa_class": "INTERMITTENT_TWO_STATE",
+      "name": "qualification2:INTERMITTENT_TWO_STATE:10",
+      "seed": 10,
+      "signature": "dbe692300a3b272589593e382ea282a43ecdfbe744330ff9f5ecce4971820e02",
+      "temporal_kind": "intermittent_two_state"
+    },
+    {
+      "cfa_class": "INTERMITTENT_TWO_STATE",
+      "name": "qualification2:INTERMITTENT_TWO_STATE:11",
+      "seed": 11,
+      "signature": "b90f82ee63a8700fe487130e1fef47a2069cc9977797a05c3df9048cb6c94a67",
+      "temporal_kind": "intermittent_two_state"
+    },
+    {
+      "cfa_class": "INTERMITTENT_TWO_STATE",
+      "name": "qualification2:INTERMITTENT_TWO_STATE:12",
+      "seed": 12,
+      "signature": "4a5889eee9ceabe447cec5c440538d8ecadb843b6a72a551314f05c1f4f7b0ac",
+      "temporal_kind": "intermittent_two_state"
+    },
+    {
+      "cfa_class": "INTERMITTENT_TWO_STATE",
+      "name": "qualification2:INTERMITTENT_TWO_STATE:13",
+      "seed": 13,
+      "signature": "dc34c3566b77ea52c86f362f8e2ffe0be822afdc52f754c53fb6b3ea7115de3c",
+      "temporal_kind": "intermittent_two_state"
+    },
+    {
+      "cfa_class": "INTERMITTENT_TWO_STATE",
+      "name": "qualification2:INTERMITTENT_TWO_STATE:14",
+      "seed": 14,
+      "signature": "8a5a16d209722a189f430dcf35fcf10c5b5e9e80d9d7e43e58b92fc4f20a2655",
+      "temporal_kind": "intermittent_two_state"
+    },
+    {
+      "cfa_class": "INTERMITTENT_MULTI_STATE",
+      "name": "qualification2:INTERMITTENT_MULTI_STATE:10",
+      "seed": 10,
+      "signature": "a0449571cc6f243d285454bb02f1ba338cc97da615008eee89979df0e6e8ba71",
+      "temporal_kind": "intermittent_multi_state"
+    },
+    {
+      "cfa_class": "INTERMITTENT_MULTI_STATE",
+      "name": "qualification2:INTERMITTENT_MULTI_STATE:11",
+      "seed": 11,
+      "signature": "c7b060f12c5c6fe7339786c631bd034623d2afe8460c8a0ef7a8da5e20b051b8",
+      "temporal_kind": "intermittent_multi_state"
+    },
+    {
+      "cfa_class": "INTERMITTENT_MULTI_STATE",
+      "name": "qualification2:INTERMITTENT_MULTI_STATE:12",
+      "seed": 12,
+      "signature": "62e7f4cea1a5988567596b1ebe8e09bd6c0d311bef4e8c27aa868a85a03e88e5",
+      "temporal_kind": "intermittent_multi_state"
+    },
+    {
+      "cfa_class": "INTERMITTENT_MULTI_STATE",
+      "name": "qualification2:INTERMITTENT_MULTI_STATE:13",
+      "seed": 13,
+      "signature": "6b3a638b021b882e24df178710837087db7376b6c03e2d1da953a52f2cb705a3",
+      "temporal_kind": "intermittent_multi_state"
+    },
+    {
+      "cfa_class": "INTERMITTENT_MULTI_STATE",
+      "name": "qualification2:INTERMITTENT_MULTI_STATE:14",
+      "seed": 14,
+      "signature": "24e5b1d136666af086af8be987600649faee75850f37c95bc328912843546799",
+      "temporal_kind": "intermittent_multi_state"
+    },
+    {
+      "cfa_class": "INTERMITTENT_CONTINUOUS",
+      "name": "qualification2:INTERMITTENT_CONTINUOUS:10",
+      "seed": 10,
+      "signature": "86736af73d65aacb2ff7f35ad78c77b32a43e54d19f2327b89b74f29906a01e7",
+      "temporal_kind": "intermittent_continuous"
+    },
+    {
+      "cfa_class": "INTERMITTENT_CONTINUOUS",
+      "name": "qualification2:INTERMITTENT_CONTINUOUS:11",
+      "seed": 11,
+      "signature": "db6681af6f5c4cecc990b72429bd9b723cf5f7bfdce113bf48eab9b180c51d26",
+      "temporal_kind": "intermittent_continuous"
+    },
+    {
+      "cfa_class": "INTERMITTENT_CONTINUOUS",
+      "name": "qualification2:INTERMITTENT_CONTINUOUS:12",
+      "seed": 12,
+      "signature": "96bac3b39f31a59c2a61422915996796a4131c6fbe4cd2494fc2ea9eaac64cc2",
+      "temporal_kind": "intermittent_continuous"
+    },
+    {
+      "cfa_class": "INTERMITTENT_CONTINUOUS",
+      "name": "qualification2:INTERMITTENT_CONTINUOUS:13",
+      "seed": 13,
+      "signature": "5c55d2e24c615d3f17a9c6f95e9dac1aeaced4fe01fb223d35bb0ac071d33e42",
+      "temporal_kind": "intermittent_continuous"
+    },
+    {
+      "cfa_class": "INTERMITTENT_CONTINUOUS",
+      "name": "qualification2:INTERMITTENT_CONTINUOUS:14",
+      "seed": 14,
+      "signature": "e71a8a526742f8e57937164b18e0b4fa8b4feab6c96a9199ffff113311c8d18b",
+      "temporal_kind": "intermittent_continuous"
+    },
+    {
+      "cfa_class": "RARE_HIGH_STATE",
+      "name": "qualification2:RARE_HIGH_STATE:10",
+      "seed": 10,
+      "signature": "78e1b9f3a262b4acea2d012dc33f24c50ef2cae850522d98ebf858fc97e105a6",
+      "temporal_kind": "low_occupancy_intermittent"
+    },
+    {
+      "cfa_class": "RARE_HIGH_STATE",
+      "name": "qualification2:RARE_HIGH_STATE:11",
+      "seed": 11,
+      "signature": "f50f9dc765f61cdaf0789eca209b9d2fc402534ff64fbcb88b6a64f182928d89",
+      "temporal_kind": "low_occupancy_intermittent"
+    },
+    {
+      "cfa_class": "RARE_HIGH_STATE",
+      "name": "qualification2:RARE_HIGH_STATE:12",
+      "seed": 12,
+      "signature": "6606dbc2f0246504307059003cfc11e459dc0ad4f732d8994e08d8e3b06d0fec",
+      "temporal_kind": "low_occupancy_intermittent"
+    },
+    {
+      "cfa_class": "RARE_HIGH_STATE",
+      "name": "qualification2:RARE_HIGH_STATE:13",
+      "seed": 13,
+      "signature": "7df64687ab77793a861fdac06cbbef45f4f3134dc50f2521076d6c619bf0b028",
+      "temporal_kind": "low_occupancy_intermittent"
+    },
+    {
+      "cfa_class": "RARE_HIGH_STATE",
+      "name": "qualification2:RARE_HIGH_STATE:14",
+      "seed": 14,
+      "signature": "f9470d048d1ac9e2b77848f28141d6b31ed8c7879d33b1965901f2a935541644",
+      "temporal_kind": "low_occupancy_intermittent"
+    },
+    {
+      "cfa_class": "RARE_LOW_STATE",
+      "name": "qualification2:RARE_LOW_STATE:10",
+      "seed": 10,
+      "signature": "3650d74b3b011f3b6e4a13d2335cf6d4dbb6bf19f1822398566e6eb61c4953bd",
+      "temporal_kind": "rare_low_state"
+    },
+    {
+      "cfa_class": "RARE_LOW_STATE",
+      "name": "qualification2:RARE_LOW_STATE:11",
+      "seed": 11,
+      "signature": "4a568f5ee480077cd11fed04ecfa833016ccae885dd59c9ceaec0763f5ac7271",
+      "temporal_kind": "rare_low_state"
+    },
+    {
+      "cfa_class": "RARE_LOW_STATE",
+      "name": "qualification2:RARE_LOW_STATE:12",
+      "seed": 12,
+      "signature": "aa7204edc0457d52be52b9881068a23f2711adbe88f514709056a2af820fb440",
+      "temporal_kind": "rare_low_state"
+    },
+    {
+      "cfa_class": "RARE_LOW_STATE",
+      "name": "qualification2:RARE_LOW_STATE:13",
+      "seed": 13,
+      "signature": "5bd6b211dc0cf1360ab29507c6a40932e91781c487e5594a22a97606a9e75783",
+      "temporal_kind": "rare_low_state"
+    },
+    {
+      "cfa_class": "RARE_LOW_STATE",
+      "name": "qualification2:RARE_LOW_STATE:14",
+      "seed": 14,
+      "signature": "17a357237a0893ad39928f96c662d58ae5e43e8a1e9d7143f59726d7bde3b0b1",
+      "temporal_kind": "rare_low_state"
+    },
+    {
+      "cfa_class": "SIGN_CHANGING_POST_DARK",
+      "name": "qualification2:SIGN_CHANGING_POST_DARK:10",
+      "seed": 10,
+      "signature": "0a3c75ad1d3866df36e3eee9aa439fcab3989a8f3779a103c80627206c21e4c0",
+      "temporal_kind": "sign_changing_post_dark"
+    },
+    {
+      "cfa_class": "SIGN_CHANGING_POST_DARK",
+      "name": "qualification2:SIGN_CHANGING_POST_DARK:11",
+      "seed": 11,
+      "signature": "f8d94445d7a243e5eba26318565559eb22b00eed440fb57d66aaaf70fb29531b",
+      "temporal_kind": "sign_changing_post_dark"
+    },
+    {
+      "cfa_class": "SIGN_CHANGING_POST_DARK",
+      "name": "qualification2:SIGN_CHANGING_POST_DARK:12",
+      "seed": 12,
+      "signature": "09e1b2fd05ea35d77ee22f03c7aaa1df28aa65a54d9584fc90c2fb16cab58712",
+      "temporal_kind": "sign_changing_post_dark"
+    },
+    {
+      "cfa_class": "SIGN_CHANGING_POST_DARK",
+      "name": "qualification2:SIGN_CHANGING_POST_DARK:13",
+      "seed": 13,
+      "signature": "d90a56ee848310e5ec95e9d7887c1c330d2653d59ff03845116cd6d5cc28d1be",
+      "temporal_kind": "sign_changing_post_dark"
+    },
+    {
+      "cfa_class": "SIGN_CHANGING_POST_DARK",
+      "name": "qualification2:SIGN_CHANGING_POST_DARK:14",
+      "seed": 14,
+      "signature": "bfe6094a88ba5739a177cb501c91ba4ffe679970033496ffb95fe5029265f6a1",
+      "temporal_kind": "sign_changing_post_dark"
+    },
+    {
+      "cfa_class": "CENSORED_ANOMALY",
+      "name": "qualification2:CENSORED_ANOMALY:10",
+      "seed": 10,
+      "signature": "21906929c218bfd3ec16e25eb254b2907c66fa257462b9bd9aa78e8eb7566f7e",
+      "temporal_kind": "censored_anomaly"
+    },
+    {
+      "cfa_class": "CENSORED_ANOMALY",
+      "name": "qualification2:CENSORED_ANOMALY:11",
+      "seed": 11,
+      "signature": "6846e31de97062e2153f8c69de3e7f71d80230412231ee1e3f2777536411ced0",
+      "temporal_kind": "censored_anomaly"
+    },
+    {
+      "cfa_class": "CENSORED_ANOMALY",
+      "name": "qualification2:CENSORED_ANOMALY:12",
+      "seed": 12,
+      "signature": "414f9b10ba532576509816ebdacd3709623e382e3e56512329d3c3e006c94b38",
+      "temporal_kind": "censored_anomaly"
+    },
+    {
+      "cfa_class": "CENSORED_ANOMALY",
+      "name": "qualification2:CENSORED_ANOMALY:13",
+      "seed": 13,
+      "signature": "32344f4792949ecb30445cee924e78df6cf922c1714f73a97eca666fe1b1d73b",
+      "temporal_kind": "censored_anomaly"
+    },
+    {
+      "cfa_class": "CENSORED_ANOMALY",
+      "name": "qualification2:CENSORED_ANOMALY:14",
+      "seed": 14,
+      "signature": "ff615da6ff2ae30e074d15ec0f6027b2084a7826c1fc7f21a75f032d854b3244",
+      "temporal_kind": "censored_anomaly"
+    },
+    {
+      "cfa_class": "SINGLE_TRANSIENT",
+      "name": "qualification2:SINGLE_TRANSIENT:10",
+      "seed": 10,
+      "signature": "19892191d76d7fe438079cb32a95522ec97c2ef9f16a2ec1e0dc7edacfd1d005",
+      "temporal_kind": "single_excursion"
+    },
+    {
+      "cfa_class": "SINGLE_TRANSIENT",
+      "name": "qualification2:SINGLE_TRANSIENT:11",
+      "seed": 11,
+      "signature": "a96f9a3bd9931e43560fa6da46e1764af891bad0857eb5555675e5ed447d3b2c",
+      "temporal_kind": "single_excursion"
+    },
+    {
+      "cfa_class": "SINGLE_TRANSIENT",
+      "name": "qualification2:SINGLE_TRANSIENT:12",
+      "seed": 12,
+      "signature": "0c9170da93710e88ee82a2a21fa725dc1485d8c8d6311c5f984f23384aafcdb2",
+      "temporal_kind": "single_excursion"
+    },
+    {
+      "cfa_class": "SINGLE_TRANSIENT",
+      "name": "qualification2:SINGLE_TRANSIENT:13",
+      "seed": 13,
+      "signature": "ca3a6cd3e5d7b189369f4a7576773bf2feba1dbbe50b69c6ae4fa8a38a69e8cc",
+      "temporal_kind": "single_excursion"
+    },
+    {
+      "cfa_class": "SINGLE_TRANSIENT",
+      "name": "qualification2:SINGLE_TRANSIENT:14",
+      "seed": 14,
+      "signature": "78a81e229caf1cb555d007b78b7402061e0c7735da5aeecef5d677326d47fbe7",
+      "temporal_kind": "single_excursion"
+    },
+    {
+      "cfa_class": "OPTICAL_STRUCTURE",
+      "name": "qualification2:OPTICAL_STRUCTURE:10",
+      "seed": 10,
+      "signature": "251f80b2741f72494afe49107ed7bb7adeba424fea7096c9a5c008f08ed64228",
+      "temporal_kind": "optical_structure"
+    },
+    {
+      "cfa_class": "OPTICAL_STRUCTURE",
+      "name": "qualification2:OPTICAL_STRUCTURE:11",
+      "seed": 11,
+      "signature": "61e27e3088a99f5ba679fe8e959de9e5427ea07f493b780f1e851bbed4866aa4",
+      "temporal_kind": "optical_structure"
+    },
+    {
+      "cfa_class": "OPTICAL_STRUCTURE",
+      "name": "qualification2:OPTICAL_STRUCTURE:12",
+      "seed": 12,
+      "signature": "eca028d4c42fb77185593336b38b7d9621e478d2f5cad43a3cc44366354b8464",
+      "temporal_kind": "optical_structure"
+    },
+    {
+      "cfa_class": "OPTICAL_STRUCTURE",
+      "name": "qualification2:OPTICAL_STRUCTURE:13",
+      "seed": 13,
+      "signature": "c501bece1def6185663cf8f6f06ad5c1d61935b4698567c03e992c603ef2380a",
+      "temporal_kind": "optical_structure"
+    },
+    {
+      "cfa_class": "OPTICAL_STRUCTURE",
+      "name": "qualification2:OPTICAL_STRUCTURE:14",
+      "seed": 14,
+      "signature": "32d9ec1be74a23aad05029dc019235c277c12cc6c1588bbdfe1af057f93d7373",
+      "temporal_kind": "optical_structure"
+    },
+    {
+      "cfa_class": "STAR_CROSSING_SITE",
+      "name": "qualification2:STAR_CROSSING_SITE:10",
+      "seed": 10,
+      "signature": "ae38f7128c203c7dd8df909cd5fe1ea2ec59d5f1b144b8e401df671bf0786f38",
+      "temporal_kind": "star_crossing_site"
+    },
+    {
+      "cfa_class": "STAR_CROSSING_SITE",
+      "name": "qualification2:STAR_CROSSING_SITE:11",
+      "seed": 11,
+      "signature": "e746bf9132b5936390080297c2b60939438928ca774c2848020182c760634ad9",
+      "temporal_kind": "star_crossing_site"
+    },
+    {
+      "cfa_class": "STAR_CROSSING_SITE",
+      "name": "qualification2:STAR_CROSSING_SITE:12",
+      "seed": 12,
+      "signature": "e5bac3253853a96f7749d8d853e3bb95015f12e3926127326e01573d49b89601",
+      "temporal_kind": "star_crossing_site"
+    },
+    {
+      "cfa_class": "STAR_CROSSING_SITE",
+      "name": "qualification2:STAR_CROSSING_SITE:13",
+      "seed": 13,
+      "signature": "df9666a2bf796b83268710f7226ee1cd1e65603e6e5cfaec4eca4eb2a0080e69",
+      "temporal_kind": "star_crossing_site"
+    },
+    {
+      "cfa_class": "STAR_CROSSING_SITE",
+      "name": "qualification2:STAR_CROSSING_SITE:14",
+      "seed": 14,
+      "signature": "3c4a3971972b71d6a62c74aa7144870528b3d4c55528e74c6c59f1500ee819aa",
+      "temporal_kind": "star_crossing_site"
+    },
+    {
+      "cfa_class": "UNDERSAMPLED_STAR_CORE",
+      "name": "qualification2:UNDERSAMPLED_STAR_CORE:10",
+      "seed": 10,
+      "signature": "21279f2c8022f81899edf05dab4cdee69f21c99ec5f8e03602dc79be87c45672",
+      "temporal_kind": "undersampled_star_core"
+    },
+    {
+      "cfa_class": "UNDERSAMPLED_STAR_CORE",
+      "name": "qualification2:UNDERSAMPLED_STAR_CORE:11",
+      "seed": 11,
+      "signature": "db6eeb50a7f3fd17bea496ce0bf4d4a63cb13bd98da8fb27e5c19cbf6c030770",
+      "temporal_kind": "undersampled_star_core"
+    },
+    {
+      "cfa_class": "UNDERSAMPLED_STAR_CORE",
+      "name": "qualification2:UNDERSAMPLED_STAR_CORE:12",
+      "seed": 12,
+      "signature": "c112d86869bd351bb0f538d6089d1218e41755bb540ee757bf5600859a0b2aac",
+      "temporal_kind": "undersampled_star_core"
+    },
+    {
+      "cfa_class": "UNDERSAMPLED_STAR_CORE",
+      "name": "qualification2:UNDERSAMPLED_STAR_CORE:13",
+      "seed": 13,
+      "signature": "90102886052735d11488753ed25a0f3f55f567c99691875d3810bc55adee5615",
+      "temporal_kind": "undersampled_star_core"
+    },
+    {
+      "cfa_class": "UNDERSAMPLED_STAR_CORE",
+      "name": "qualification2:UNDERSAMPLED_STAR_CORE:14",
+      "seed": 14,
+      "signature": "cfba8fdde9b3ebb3cc24231a5e8a030fce5c513727d5b38868560fccd0ca85a0",
+      "temporal_kind": "undersampled_star_core"
+    },
+    {
+      "cfa_class": "COSMIC_RAY",
+      "name": "qualification2:COSMIC_RAY:10",
+      "seed": 10,
+      "signature": "806303f17605001f8314f856c4e9c93c3c9ef83fa865686e09bed4fdbf5f77d2",
+      "temporal_kind": "cosmic_ray"
+    },
+    {
+      "cfa_class": "COSMIC_RAY",
+      "name": "qualification2:COSMIC_RAY:11",
+      "seed": 11,
+      "signature": "edbee022ffae1b1a183650a57631ce17ef95232bf7115233d1d646bc2aa9ecd9",
+      "temporal_kind": "cosmic_ray"
+    },
+    {
+      "cfa_class": "COSMIC_RAY",
+      "name": "qualification2:COSMIC_RAY:12",
+      "seed": 12,
+      "signature": "3303cc15bd8b5624e01b0219d8504dd8dd76bc62a3a78874bbd769d10170ea0a",
+      "temporal_kind": "cosmic_ray"
+    },
+    {
+      "cfa_class": "COSMIC_RAY",
+      "name": "qualification2:COSMIC_RAY:13",
+      "seed": 13,
+      "signature": "1d1686e05d820511d6294d206b523a46f2510583105a530a99e47f16c90abf13",
+      "temporal_kind": "cosmic_ray"
+    },
+    {
+      "cfa_class": "COSMIC_RAY",
+      "name": "qualification2:COSMIC_RAY:14",
+      "seed": 14,
+      "signature": "7cc00060629e38a9535e40476fd30468863d2d869544aeb93fd44dd12fc2a9d1",
+      "temporal_kind": "cosmic_ray"
+    },
+    {
+      "cfa_class": "NOISE_EXTREME",
+      "name": "qualification2:NOISE_EXTREME:10",
+      "seed": 10,
+      "signature": "bb898e95351a279dff86a44b4648562813d16507ca140d883c2f4a522dac5909",
+      "temporal_kind": "noise_extreme"
+    },
+    {
+      "cfa_class": "NOISE_EXTREME",
+      "name": "qualification2:NOISE_EXTREME:11",
+      "seed": 11,
+      "signature": "ad65155c607429eb23fa386fb58cd9fc35663767505859de306bb2e434ce6a74",
+      "temporal_kind": "noise_extreme"
+    },
+    {
+      "cfa_class": "NOISE_EXTREME",
+      "name": "qualification2:NOISE_EXTREME:12",
+      "seed": 12,
+      "signature": "b84877b44a02c7071d05211a9da83b0e03af6c29aeee6fc761630c47abb54d9a",
+      "temporal_kind": "noise_extreme"
+    },
+    {
+      "cfa_class": "NOISE_EXTREME",
+      "name": "qualification2:NOISE_EXTREME:13",
+      "seed": 13,
+      "signature": "79922babbd69d314a252fc510b5cf7cb95011cc2cc2f2189d93e10c55ba62297",
+      "temporal_kind": "noise_extreme"
+    },
+    {
+      "cfa_class": "NOISE_EXTREME",
+      "name": "qualification2:NOISE_EXTREME:14",
+      "seed": 14,
+      "signature": "ab2ed5338a5d0617091b1eaa985a210accaf190a89961ccb651543052ff2ba86",
+      "temporal_kind": "noise_extreme"
+    },
+    {
+      "cfa_class": "FLAT_STRUCTURE",
+      "name": "qualification2:FLAT_STRUCTURE:10",
+      "seed": 10,
+      "signature": "2c90be81b24598f7f6b122cdc9ec6001c0202e81ad80493ab597ce2abeebed17",
+      "temporal_kind": "flat_structure"
+    },
+    {
+      "cfa_class": "FLAT_STRUCTURE",
+      "name": "qualification2:FLAT_STRUCTURE:11",
+      "seed": 11,
+      "signature": "d21f64f9c8dc894c85f3a1e1b57c29abd0fcd168190c5ee1644d4130ab50c308",
+      "temporal_kind": "flat_structure"
+    },
+    {
+      "cfa_class": "FLAT_STRUCTURE",
+      "name": "qualification2:FLAT_STRUCTURE:12",
+      "seed": 12,
+      "signature": "0fb506fdb5e811ebe6ca4cb8ce1a65bbbad30bf88e13210c40b445d06706e582",
+      "temporal_kind": "flat_structure"
+    },
+    {
+      "cfa_class": "FLAT_STRUCTURE",
+      "name": "qualification2:FLAT_STRUCTURE:13",
+      "seed": 13,
+      "signature": "310da2fe5f629b18eac61f0633e5b4820b1963b3c0b784ee5211ad7a8ad2f76d",
+      "temporal_kind": "flat_structure"
+    },
+    {
+      "cfa_class": "FLAT_STRUCTURE",
+      "name": "qualification2:FLAT_STRUCTURE:14",
+      "seed": 14,
+      "signature": "b9447fc7db8a53ebe21876528b125c58198f98901471a5206e0740c7c0938499",
+      "temporal_kind": "flat_structure"
+    },
+    {
+      "cfa_class": "DUST_OR_VIGNETTING",
+      "name": "qualification2:DUST_OR_VIGNETTING:10",
+      "seed": 10,
+      "signature": "a8c3374adca553e16bb11589789b1196b90a1db99ee9365eb0d51414e430558c",
+      "temporal_kind": "dust_or_vignetting"
+    },
+    {
+      "cfa_class": "DUST_OR_VIGNETTING",
+      "name": "qualification2:DUST_OR_VIGNETTING:11",
+      "seed": 11,
+      "signature": "d60ce1276b1dfbf9016d782ead8886b68091376cef7595f9d0259399cf20b523",
+      "temporal_kind": "dust_or_vignetting"
+    },
+    {
+      "cfa_class": "DUST_OR_VIGNETTING",
+      "name": "qualification2:DUST_OR_VIGNETTING:12",
+      "seed": 12,
+      "signature": "602cb88200f9114781728bba31b87fbd394159793c1482b92ea6579512ec6f40",
+      "temporal_kind": "dust_or_vignetting"
+    },
+    {
+      "cfa_class": "DUST_OR_VIGNETTING",
+      "name": "qualification2:DUST_OR_VIGNETTING:13",
+      "seed": 13,
+      "signature": "b8c581b729b452701f36bc8e1da2e3361a8dacbfde8d60890190c81b19ff42fb",
+      "temporal_kind": "dust_or_vignetting"
+    },
+    {
+      "cfa_class": "DUST_OR_VIGNETTING",
+      "name": "qualification2:DUST_OR_VIGNETTING:14",
+      "seed": 14,
+      "signature": "c6adbf3752ee2b69f32931bd3ff3813e87b101ccc5a0541284759650a62a8a32",
+      "temporal_kind": "dust_or_vignetting"
+    },
+    {
+      "cfa_class": "NEAR_SATURATION",
+      "name": "qualification2:NEAR_SATURATION:10",
+      "seed": 10,
+      "signature": "9fbba3ad8184a15ca4798f1aba2270582bf58d317c227173a190aa7b86c2f2a5",
+      "temporal_kind": "near_saturation"
+    },
+    {
+      "cfa_class": "NEAR_SATURATION",
+      "name": "qualification2:NEAR_SATURATION:11",
+      "seed": 11,
+      "signature": "f182933ccae2ca83311c916e0584e6db153f89fdb2a2b6bec56d3552d5faf2dc",
+      "temporal_kind": "near_saturation"
+    },
+    {
+      "cfa_class": "NEAR_SATURATION",
+      "name": "qualification2:NEAR_SATURATION:12",
+      "seed": 12,
+      "signature": "93b882054e61027597d1de1e4c50c0d468b99df9e650c7e9e73132c371483a23",
+      "temporal_kind": "near_saturation"
+    },
+    {
+      "cfa_class": "NEAR_SATURATION",
+      "name": "qualification2:NEAR_SATURATION:13",
+      "seed": 13,
+      "signature": "c9fac5ad89ccb8828036d8b93fee1201ade504826c9ca1381b558f4485474389",
+      "temporal_kind": "near_saturation"
+    },
+    {
+      "cfa_class": "NEAR_SATURATION",
+      "name": "qualification2:NEAR_SATURATION:14",
+      "seed": 14,
+      "signature": "d72917f4b8eb1963a609a7701cbd292cc63813b86db0c45c32924c76e71f142a",
+      "temporal_kind": "near_saturation"
+    },
+    {
+      "cfa_class": "AMBIGUOUS_INSUFFICIENT_EVIDENCE",
+      "name": "qualification2:AMBIGUOUS_INSUFFICIENT_EVIDENCE:10",
+      "seed": 10,
+      "signature": "ac6a29ce98f434e73dd0038c5fb2c72dab8bed04010947f90ce400a3c7037bc4",
+      "temporal_kind": "ambiguous_insufficient_evidence"
+    },
+    {
+      "cfa_class": "AMBIGUOUS_INSUFFICIENT_EVIDENCE",
+      "name": "qualification2:AMBIGUOUS_INSUFFICIENT_EVIDENCE:11",
+      "seed": 11,
+      "signature": "e9fe51828823c240a660814bb29802241d87ad6543e3a409952d5f3a2e2685dc",
+      "temporal_kind": "ambiguous_insufficient_evidence"
+    },
+    {
+      "cfa_class": "AMBIGUOUS_INSUFFICIENT_EVIDENCE",
+      "name": "qualification2:AMBIGUOUS_INSUFFICIENT_EVIDENCE:12",
+      "seed": 12,
+      "signature": "cf1ee02650544c40fd1196db18d3725c2054a3b7126e333b61f9051249f44606",
+      "temporal_kind": "ambiguous_insufficient_evidence"
+    },
+    {
+      "cfa_class": "AMBIGUOUS_INSUFFICIENT_EVIDENCE",
+      "name": "qualification2:AMBIGUOUS_INSUFFICIENT_EVIDENCE:13",
+      "seed": 13,
+      "signature": "6420a9209a7e0bed7ced0eedf790f422280727b5272429984b62749ce610d115",
+      "temporal_kind": "ambiguous_insufficient_evidence"
+    },
+    {
+      "cfa_class": "AMBIGUOUS_INSUFFICIENT_EVIDENCE",
+      "name": "qualification2:AMBIGUOUS_INSUFFICIENT_EVIDENCE:14",
+      "seed": 14,
+      "signature": "2b6c2e18fc5669cdc9c3d14f13941b9c84f8c79244565536f426bdbb066600ec",
+      "temporal_kind": "ambiguous_insufficient_evidence"
+    }
+  ],
+  "seeds": [
+    10,
+    11,
+    12,
+    13,
+    14
+  ],
+  "structure": {
+    "cfa_pattern": "GRBG",
+    "class_count": 20,
+    "epochs_per_scenario": 2,
+    "frames_per_group": 6,
+    "groups_per_epoch": 2,
+    "light_frames_per_scenario": 24,
+    "scenario_count": 100,
+    "seed_count": 5,
+    "sensor_shape": [
+      96,
+      128
+    ],
+    "site_coord": [
+      8,
+      8
+    ],
+    "temporal_kinds": [
+      "ambiguous_insufficient_evidence",
+      "censored_anomaly",
+      "cosmic_ray",
+      "dust_or_vignetting",
+      "fixed_sensor_defect",
+      "flat_structure",
+      "intermittent_continuous",
+      "intermittent_multi_state",
+      "intermittent_two_state",
+      "low_occupancy_intermittent",
+      "near_saturation",
+      "noise_extreme",
+      "normal",
+      "optical_structure",
+      "rare_low_state",
+      "sign_changing_post_dark",
+      "single_excursion",
+      "stable_anomaly_corrected_by_dark",
+      "star_crossing_site",
+      "undersampled_star_core"
+    ]
+  },
+  "verified_assertions": {
+    "development_overlap": false,
+    "fresh_validation": true,
+    "holdout_used": false,
+    "qualification1_overlap": false
+  }
+}
