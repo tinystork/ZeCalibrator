@@ -21,6 +21,7 @@ from research.p3b.preparation_plan import (
     RUN_WIDE_NO_ACTION,
     RUN_WIDE_REQUALIFY,
     DuplicateSiteError,
+    EmptyFramesError,
     ExecutionResult,
     GeometryBinding,
     PlanFrozenError,
@@ -228,8 +229,6 @@ def test_execute_requires_frozen_plan():
             site_id="A", x=0, y=0,
             qualification_state=EPISTEMIC_CHARACTERISED_INTERMITTENT,
             action_state=ACTION_ELIGIBLE,
-            run_wide_applicability=RUN_WIDE_ELIGIBLE,
-            abstention_reason=None,
             reason_codes=(RC_ELIGIBLE,),
             per_frame_donor_availability=(DONORS_AVAILABLE,) * 4,
         )
@@ -328,10 +327,12 @@ def test_derive_run_wide_maps_non_eligible_lot2_states():
     )
 
 
-def test_plan_module_introduces_no_numeric_threshold():
+def test_plan_module_has_no_module_level_numeric_threshold():
     # LOT3 introduces no detector, no admission threshold, no amplitude budget.
-    # The module may define string constants only; any module-level numeric
-    # constant would be a potential threshold and is forbidden.
+    # A named module-level numeric constant is where a threshold/admission budget
+    # would live, so module-level numeric constants are forbidden. (This test's
+    # scope is module-level constants only; see the companion allowlist below
+    # for numeric literals inside function bodies.)
     source = _PLAN_PATH.read_text(encoding="utf-8")
     tree = ast.parse(source)
     for node in tree.body:
@@ -343,6 +344,29 @@ def test_plan_module_introduces_no_numeric_threshold():
                         raise AssertionError(
                             f"module-level numeric constant {target.id!r} is a potential threshold"
                         )
+
+
+def test_plan_module_numeric_literals_are_structural_only():
+    # Every numeric literal anywhere in the module must be a permitted
+    # structural/geometry constant — never a threshold or admission budget.
+    source = _PLAN_PATH.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    # Permitted literals and their role:
+    #   0, 1 — identity geometry defaults (roi_origin=(0,0), binning=(1,1)) and
+    #          the positivity bound (shape > 0);
+    #   2 — the 2-D shape check (len(shape) == 2).
+    allowed = {0, 1, 2}
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, (int, float))
+            and not isinstance(node.value, bool)
+        ):
+            if node.value not in allowed:
+                raise AssertionError(
+                    f"non-structural numeric literal {node.value!r} at line "
+                    f"{node.lineno} is a potential threshold"
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -364,8 +388,6 @@ def test_frozen_plan_refuses_add_site():
         site_id="B", x=0, y=0,
         qualification_state=EPISTEMIC_CHARACTERISED_INTERMITTENT,
         action_state=ACTION_ELIGIBLE,
-        run_wide_applicability=RUN_WIDE_ELIGIBLE,
-        abstention_reason=None,
         reason_codes=(RC_ELIGIBLE,),
         per_frame_donor_availability=(DONORS_AVAILABLE,) * 4,
     )
@@ -401,3 +423,86 @@ def test_empty_run_raises():
             geometry=GEOMETRY, frame_ids=(),
             site_qualifications=(), donor_availability=lambda sid, fid: DONORS_AVAILABLE,
         )
+
+
+# ---------------------------------------------------------------------------
+# Rework F1 — the P-A invariant is enforced by the model, not just by preflight
+# ---------------------------------------------------------------------------
+
+def test_run_wide_applicability_is_derived_not_provided():
+    # The contradictory state the review reproduced is not representable: with
+    # action_state=ELIGIBLE and no same-CFA donor, the entry is ABSTAIN by
+    # derivation — never ELIGIBLE.
+    entry = SitePlanEntry(
+        site_id="bad", x=10, y=10,
+        qualification_state=EPISTEMIC_CHARACTERISED_INTERMITTENT,
+        action_state=ACTION_ELIGIBLE,
+        reason_codes=(RC_ELIGIBLE,),
+        per_frame_donor_availability=(DONORS_UNAVAILABLE,),
+    )
+    assert entry.run_wide_applicability == RUN_WIDE_ABSTAIN
+    assert entry.abstention_reason == RC_DONORS_UNAVAILABLE_RUN_WIDE
+
+
+def test_run_wide_applicability_cannot_be_contradicted():
+    # The field is init=False: no caller argument can override the derivation.
+    with pytest.raises(TypeError):
+        SitePlanEntry(
+            site_id="bad2", x=0, y=0,
+            qualification_state=EPISTEMIC_CHARACTERISED_INTERMITTENT,
+            action_state=ACTION_ELIGIBLE,
+            reason_codes=(RC_ELIGIBLE,),
+            per_frame_donor_availability=(DONORS_UNAVAILABLE,),
+            run_wide_applicability=RUN_WIDE_ELIGIBLE,
+        )
+
+
+def test_inconsistent_entry_cannot_reach_a_frozen_plan():
+    # The exact review reproduction: ELIGIBLE with no donors would (naively)
+    # reconstruct on a site with no same-CFA donor. Through the model the
+    # derived field is ABSTAIN, so execute() never applies it.
+    def provider(sid, fid):
+        return DONORS_UNAVAILABLE
+
+    plan = preflight(
+        run_id="r", profile_revision="rev", calibration_identity="cal",
+        geometry=GEOMETRY, frame_ids=("f1",),
+        site_qualifications=(make_qual("bad", 10, 10),),
+        donor_availability=provider,
+    )
+    assert plan.site("bad").run_wide_applicability == RUN_WIDE_ABSTAIN
+    result = plan.execute(provider)
+    assert per_site_applied(result, "bad") == [False]
+
+
+# ---------------------------------------------------------------------------
+# Rework S1 — empty donor facts is a typed precondition, never vacuous truth
+# ---------------------------------------------------------------------------
+
+def test_derive_run_wide_rejects_empty_facts():
+    with pytest.raises(EmptyFramesError):
+        derive_run_wide(ACTION_ELIGIBLE, ())
+
+
+def test_site_entry_with_zero_frames_is_rejected():
+    with pytest.raises(EmptyFramesError):
+        SitePlanEntry(
+            site_id="z", x=0, y=0,
+            qualification_state=EPISTEMIC_CHARACTERISED_INTERMITTENT,
+            action_state=ACTION_ELIGIBLE,
+            reason_codes=(RC_ELIGIBLE,),
+            per_frame_donor_availability=(),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Rework S3 — internal site-table mutation raises the typed PlanFrozenError
+# ---------------------------------------------------------------------------
+
+def test_internal_site_table_mutation_raises_typed_error():
+    plan = make_plan(sites=(make_qual("A"),))
+    assert plan.frozen is True
+    with pytest.raises(PlanFrozenError):
+        plan._sites["C"] = plan.site("A")
+    with pytest.raises(PlanFrozenError):
+        del plan._sites["A"]

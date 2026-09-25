@@ -11,6 +11,11 @@ served by the G6 mechanism (``src/zecalibrator/io/output_writer.py`` +
 ``src/zecalibrator/io/batch_manifest.py``); a future materialization stage will
 reuse that substrate, not this module.
 
+**This module MUST NOT be used as an output-transaction mechanism.** It freezes
+the *decision* (what is prepared where) before any output exists; the moment a
+result becomes visible on disk is a separate, file-output atomicity (G6), not a
+``PreparationPlan`` concern.
+
 Two atomicities are kept apart on purpose:
 
 * **SCIENTIFIC ATOMICITY = site × run** (this lot). The run-wide decision is a
@@ -27,6 +32,12 @@ synthesizes geometry / DQ / usable mask / saturation-censoring into a single
 ``AVAILABLE`` / ``UNAVAILABLE`` token), never full calibrated images. It retains
 only a few bytes per (frame, site) and writes no final product.
 
+Model-level invariant (rework F1): ``SitePlanEntry.run_wide_applicability`` and
+``SitePlanEntry.abstention_reason`` are **derived** (``init=False``) from
+``action_state`` + ``per_frame_donor_availability``; they are never caller-
+supplied, so a frozen plan whose run-wide decision contradicts the P-A policy is
+**not representable** — it cannot be constructed, not merely rejected.
+
 Disciplines demonstrated here (each tested in ``tests/p3b/test_preparation_plan.py``):
 
 * a site missing valid same-CFA donors on any one frame is ``ABSTAIN`` for the
@@ -38,14 +49,14 @@ Disciplines demonstrated here (each tested in ``tests/p3b/test_preparation_plan.
 * a frozen plan is applied *exactly*: an observed fact that contradicts what the
   plan assumed raises ``PlanInvalidError`` (abort), never a silent per-frame
   switch;
-* a frozen plan refuses mutation with a typed ``PlanFrozenError``.
+* a frozen plan refuses mutation with a typed ``PlanFrozenError`` (including the
+  internal site table, rework S3).
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from types import MappingProxyType
-from typing import Callable, Mapping, Optional, Tuple
+from dataclasses import dataclass, field
+from typing import Callable, Optional, Tuple
 
 from .qualification_policy import (
     ACTION_ABSTAIN_CENSORED,
@@ -115,6 +126,10 @@ class DuplicateSiteError(PreparationPlanError):
     """The same site id was declared more than once in one run."""
 
 
+class EmptyFramesError(PreparationPlanError):
+    """A run-wide decision was requested over zero frames (no donor facts)."""
+
+
 # ---------------------------------------------------------------------------
 # Frozen value objects
 # ---------------------------------------------------------------------------
@@ -163,10 +178,13 @@ class SiteQualification:
 class SitePlanEntry:
     """One site's frozen, run-wide entry in a :class:`PreparationPlan`.
 
-    ``run_wide_applicability`` is a *single* value (never a per-frame list); the
-    per-frame donor-availability tuple is only the *assumed facts* retained for
-    contradiction re-validation at execution (a few bytes per frame, never the
-    calibrated image).
+    ``run_wide_applicability`` and ``abstention_reason`` are **derived**
+    (``init=False``) from ``action_state`` + ``per_frame_donor_availability``:
+    they cannot be supplied by the caller, so an entry whose run-wide decision
+    contradicts the P-A policy is *not representable*. The per-frame
+    donor-availability tuple is the *assumed facts* retained for contradiction
+    re-validation at execution (a few bytes per frame, never the calibrated
+    image).
     """
 
     site_id: str
@@ -174,19 +192,15 @@ class SitePlanEntry:
     y: int
     qualification_state: str  # LOT2 axis 1 (epistemic), verbatim
     action_state: str  # LOT2 axis 3 (action), verbatim
-    run_wide_applicability: str  # ELIGIBLE | ABSTAIN | NO_ACTION | REQUALIFY
-    abstention_reason: Optional[str]  # set iff run_wide_applicability == ABSTAIN
     reason_codes: Tuple[str, ...]  # LOT2 reason codes, verbatim
     per_frame_donor_availability: Tuple[str, ...]  # assumed facts, per frame
     operator_id: Optional[str] = None
     operator_version: Optional[str] = None
+    # Derived — never caller-supplied (rework F1).
+    run_wide_applicability: str = field(init=False)
+    abstention_reason: Optional[str] = field(init=False)
 
     def __post_init__(self) -> None:
-        if self.run_wide_applicability not in RUN_WIDE_APPLICABILITY:
-            raise ValueError(
-                f"run_wide_applicability must be one of {RUN_WIDE_APPLICABILITY!r}, "
-                f"got {self.run_wide_applicability!r}"
-            )
         for token in self.per_frame_donor_availability:
             if token not in DONOR_AVAILABILITY:
                 raise ValueError(f"invalid donor-availability token {token!r}")
@@ -196,14 +210,11 @@ class SitePlanEntry:
         object.__setattr__(self, "reason_codes", tuple(self.reason_codes))
         object.__setattr__(self, "x", int(self.x))
         object.__setattr__(self, "y", int(self.y))
-        if self.run_wide_applicability == RUN_WIDE_ABSTAIN:
-            if not self.abstention_reason:
-                raise ValueError("an ABSTAIN entry must carry an abstention_reason")
-        elif self.abstention_reason is not None:
-            raise ValueError(
-                "abstention_reason is only valid for an ABSTAIN entry, "
-                f"got run_wide_applicability={self.run_wide_applicability!r}"
-            )
+        run_wide, reason = derive_run_wide(
+            self.action_state, self.per_frame_donor_availability
+        )
+        object.__setattr__(self, "run_wide_applicability", run_wide)
+        object.__setattr__(self, "abstention_reason", reason)
 
 
 @dataclass(frozen=True)
@@ -231,7 +242,7 @@ class ExecutionResult:
 
 
 # ---------------------------------------------------------------------------
-# Run-wide derivation (pure; shared by preflight and execution re-validation)
+# Run-wide derivation (pure; the single source of the P-A decision)
 # ---------------------------------------------------------------------------
 
 _ABSTAIN_ACTIONS: Tuple[str, ...] = (
@@ -250,7 +261,15 @@ def derive_run_wide(
     stays ``ELIGIBLE`` only if every frame has valid same-CFA donors; otherwise
     it becomes ``ABSTAIN`` for the whole run. All other LOT2 action states pass
     through unchanged (they are already frame-independent).
+
+    ``per_frame_donors`` must be non-empty (a run over zero frames has no
+    run-wide decision): the empty tuple is a precondition violation, not the
+    vacuous truth of ``all([])`` (rework S1).
     """
+    if not per_frame_donors:
+        raise EmptyFramesError(
+            "cannot derive a run-wide applicability over zero frames"
+        )
     if action_state == ACTION_ELIGIBLE:
         if all(token == DONORS_AVAILABLE for token in per_frame_donors):
             return RUN_WIDE_ELIGIBLE, None
@@ -262,6 +281,46 @@ def derive_run_wide(
     if action_state in _ABSTAIN_ACTIONS:
         return RUN_WIDE_ABSTAIN, action_state
     raise ValueError(f"unexpected LOT2 action state {action_state!r}")
+
+
+# ---------------------------------------------------------------------------
+# A read-only site table whose mutators raise the typed PlanFrozenError (S3)
+# ---------------------------------------------------------------------------
+
+
+class _FrozenSiteTable(dict):
+    """A dict whose mutators raise :class:`PlanFrozenError` (never bare TypeError).
+
+    ``freeze()`` wraps the mutable pre-freeze site table in this type, so that
+    even direct internal mutation (``plan._sites[...] = ...``) is refused with
+    the same typed error as every other post-freeze mutation.
+    """
+
+    _MESSAGE = "the site table of a frozen PreparationPlan is immutable"
+
+    def __setitem__(self, key, value):
+        raise PlanFrozenError(self._MESSAGE)
+
+    def __delitem__(self, key):
+        raise PlanFrozenError(self._MESSAGE)
+
+    def clear(self):
+        raise PlanFrozenError(self._MESSAGE)
+
+    def pop(self, *args, **kwargs):
+        raise PlanFrozenError(self._MESSAGE)
+
+    def popitem(self):
+        raise PlanFrozenError(self._MESSAGE)
+
+    def setdefault(self, *args, **kwargs):
+        raise PlanFrozenError(self._MESSAGE)
+
+    def update(self, *args, **kwargs):
+        raise PlanFrozenError(self._MESSAGE)
+
+    def __ior__(self, other):
+        raise PlanFrozenError(self._MESSAGE)
 
 
 # ---------------------------------------------------------------------------
@@ -277,16 +336,6 @@ class PreparationPlan:
     (mutation raises :class:`PlanFrozenError`) and is the only object that can
     finalize outputs (:meth:`execute`).
     """
-
-    _ATTRS = (
-        "run_id",
-        "profile_revision",
-        "calibration_identity",
-        "geometry",
-        "frame_ids",
-        "_sites",
-        "frozen",
-    )
 
     def __init__(
         self,
@@ -353,7 +402,7 @@ class PreparationPlan:
         if self.frozen:
             return self
         self._validate()
-        object.__setattr__(self, "_sites", MappingProxyType(dict(self._sites)))
+        object.__setattr__(self, "_sites", _FrozenSiteTable(self._sites))
         object.__setattr__(self, "frozen", True)
         return self
 
@@ -438,15 +487,12 @@ def preflight(
         per_frame = tuple(
             donor_availability(sq.site_id, frame_id) for frame_id in frame_ids
         )
-        run_wide, reason = derive_run_wide(sq.decision.action, per_frame)
         entry = SitePlanEntry(
             site_id=sq.site_id,
             x=sq.x,
             y=sq.y,
             qualification_state=sq.decision.epistemic_state,
             action_state=sq.decision.action,
-            run_wide_applicability=run_wide,
-            abstention_reason=reason,
             reason_codes=sq.decision.reason_codes,
             per_frame_donor_availability=per_frame,
             operator_id=sq.operator_id,
@@ -468,6 +514,7 @@ __all__ = [
     "RUN_WIDE_REQUALIFY",
     "AppliedSiteRecord",
     "DuplicateSiteError",
+    "EmptyFramesError",
     "ExecutionResult",
     "FrameExecution",
     "GeometryBinding",
