@@ -1,0 +1,17 @@
+"""Shared fixtures/helpers for tests/p3c4.
+
+Adds the repository root to ``sys.path`` so ``research.p3c4`` (non-packaged) is
+importable, mirroring tests/p3c/conftest.py.
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+
+__all__ = ["REPO_ROOT"]
