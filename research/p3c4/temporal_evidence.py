@@ -56,13 +56,31 @@ The three states
 at least ``MIN_SUPPORTING_GROUPS`` independent groups **and** at least
 ``MIN_SUPPORTING_EPOCHS`` independent epochs, from valid samples only.
 
-``NO`` — positive temporal non-persistence: a residual was observed but does
-**not** recur across independent groups (a transient / moving sky structure).
+``NO`` — positive temporal non-persistence, **reserved** for a positively
+demonstrated non-recurrence at the fixed sensor coordinate: the signature is
+seen, then **moves / departs** the coordinate, or its signature changes in a way
+incompatible with a fixed site. ``NO`` is **never** produced from a mere
+counting insufficiency (missing groups, missing epochs, missing valid samples) —
+that is always ``UNDETERMINED``. See "Reachability of ``NO``" below.
 
-``UNDETERMINED`` — a first-class, normal outcome. Insufficient evidence
-produces ``UNDETERMINED``, **never** ``YES`` and **never** ``NO``. In
-particular: no valid samples (or too few), all-censored evidence, or a signal
-that neither clearly persists nor clearly fails to persist.
+``UNDETERMINED`` — a first-class, normal outcome. Insufficient evidence — no or
+too-few valid samples, all-censored evidence, not enough supporting groups or
+supporting epochs — produces ``UNDETERMINED``, **never** ``YES`` and **never**
+``NO``.
+
+Reachability of ``NO`` (LOT 1 vs LOT 2)
+---------------------------------------
+
+The movement/departure discriminator that would make ``NO`` reachable ("the
+signature left the fixed coordinate") requires a **temporal evolution of the
+signature across frames at a fixed coordinate** — an input this LOT 1 contract
+does **not** yet consume. In LOT 1 the evaluator therefore **never** returns
+``NO``: every insufficiency falls to ``UNDETERMINED``. ``NO`` is kept in the
+value vocabulary so the contract does not silently drop a first-class outcome;
+its reachability belongs to **LOT 2**, once the corpus gives celestial
+confounders a distinct temporal evolution. This is deliberate, not a bug: a
+conservative ``UNDETERMINED → ABSTAIN`` is strictly safer than a determined-but-
+false ``NO`` that would erase rare intermittents.
 
 -----------------------------------------------------------------------------
 Censoring (§14)
@@ -318,14 +336,16 @@ def assess_temporal_persistence(
     **only** the measured temporal signature (fixed coordinate + per-group
     recurrence) and derives the three-state outcome:
 
-    * ``UNDETERMINED`` when evidence is insufficient — too few valid samples, or
-      a signal that neither clearly persists nor clearly fails to (insufficient
-      is **never** promoted to ``YES`` and never demoted to ``NO``);
+    * ``UNDETERMINED`` when evidence is insufficient — too few valid samples,
+      or fewer than ``min_supporting_groups`` supporting groups, or fewer than
+      ``min_supporting_epochs`` supporting epochs. Insufficiency is **never**
+      promoted to ``YES`` and never demoted to ``NO``;
     * ``YES`` when the signature recurs across at least ``min_supporting_groups``
       independent groups **and** at least ``min_supporting_epochs`` independent
       epochs, from valid samples only;
-    * ``NO`` when a residual was observed but did **not** recur across
-      independent groups (positive transient / non-persistence).
+    * ``NO`` is **never returned in LOT 1**: it is reserved for a positively
+      demonstrated movement/departure of the signature, which needs a temporal
+      discriminator this contract does not yet consume (LOT 2).
 
     It never reads ``epoch_count`` or any independence metadata: the recurrence
     is measured from the per-group signatures themselves, and ``epochs_examined``
@@ -349,11 +369,11 @@ def assess_temporal_persistence(
         and epochs_supporting >= min_supporting_epochs
     ):
         state = YES
-    elif groups_supporting >= 1 and groups_examined >= min_supporting_groups:
-        # Positive non-persistence: a residual was measured but did not recur
-        # across enough independent groups -> transient / moving sky structure.
-        state = NO
     else:
+        # Every remaining case is a counting insufficiency (missing groups,
+        # missing epochs, missing valid samples). It is UNDETERMINED, never NO:
+        # NO requires a positively demonstrated movement/departure, which LOT 1
+        # cannot observe. A determined-but-false NO would erase rare intermittents.
         state = UNDETERMINED
 
     return TemporalPersistenceEvidence(

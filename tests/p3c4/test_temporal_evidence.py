@@ -106,10 +106,33 @@ def test_single_group_is_undetermined_not_yes():
     assert ev.state == UNDETERMINED
 
 
-def test_two_groups_same_epoch_is_not_yes():
-    # Two groups but a single epoch: no temporal persistence across epochs.
+def test_two_groups_same_epoch_is_undetermined():
+    # F1 (élargi): a signal present in 2 independent groups but a SINGLE epoch
+    # is NOT positive non-persistence — the only shortfall is epoch count, which
+    # is independence metadata, not a physical statement. So UNDETERMINED, never
+    # NO (and never YES).
     ev = assess_temporal_persistence(_sig(_group("g0", "e0"), _group("g1", "e0")))
+    assert ev.groups_supporting == 2
+    assert ev.epochs_examined == 1
+    assert ev.state == UNDETERMINED
     assert ev.state != YES
+    assert ev.state != NO
+
+
+def test_single_supporting_group_is_undetermined():
+    # F1: 1 supporting group out of many is counting insufficiency, not a
+    # demonstrated departure. UNDETERMINED, never NO.
+    ev = assess_temporal_persistence(
+        _sig(
+            _group("g0", "e0"),
+            _group("g1", "e1", present=NO),
+            _group("g2", "e0", present=NO),
+            _group("g3", "e1", present=NO),
+        )
+    )
+    assert ev.groups_supporting == 1
+    assert ev.state == UNDETERMINED
+    assert ev.state != NO
 
 
 def test_insufficient_never_demoted_to_no():
@@ -121,13 +144,57 @@ def test_insufficient_never_demoted_to_no():
     assert ev.state != NO
 
 
-def test_positive_non_persistence_is_no():
-    # A residual observed in one group but not recurring across two groups
-    # is positive non-persistence (transient / moving sky structure).
+def test_no_is_not_reachable_from_any_counter_combination():
+    # F1: in LOT 1, NO requires a positively demonstrated movement/departure,
+    # which this contract does not consume. Therefore NO is never produced from
+    # any combination of counting inputs (supporting groups / epochs / valid
+    # samples). It stays in the vocabulary; its reachability is LOT 2's job.
+    cases = [
+        _sig(),                                   # nothing examined
+        _sig(_group("g0", "e0")),                 # 1 group / 1 epoch
+        _sig(_group("g0", "e0"), _group("g1", "e0")),      # 2 groups / 1 epoch
+        _sig(_group("g0", "e0", present=NO), _group("g1", "e1", present=NO)),  # 0 supporting
+        _sig(_group("g0", "e0"), _group("g1", "e1", present=NO)),  # 1 supporting
+        _sig(
+            GroupSignature("g0", "e0", valid_samples=0, censored_samples=6, signature_present=UNDETERMINED)
+        ),  # all censored
+    ]
+    for sig in cases:
+        ev = assess_temporal_persistence(sig)
+        assert ev.state != NO, f"NO leaked from {sig!r}: {ev.state!r}"
+
+
+def test_yes_still_reachable_for_demonstrated_persistence():
+    # Non-regression: a genuinely persistent site (>=2 groups AND >=2 epochs of
+    # supporting signatures) must still yield YES. Making NO unreachable must
+    # not flatten everything to UNDETERMINED.
     ev = assess_temporal_persistence(
-        _sig(_group("g0", "e0", present=YES), _group("g1", "e1", present=NO))
+        _sig(
+            _group("g0", "e0"),
+            _group("g1", "e1"),
+            _group("g2", "e0"),
+            _group("g3", "e1"),
+        )
     )
-    assert ev.state == NO
+    assert ev.groups_supporting == 4
+    assert ev.epochs_examined == 2
+    assert ev.state == YES
+
+
+def test_witness_would_fail_under_old_no_by_counting_rule():
+    # Witness (F1): the old rule produced NO on ">=1 supporting group across
+    # >=min_supporting_groups examined groups". This input (2 supporting groups
+    # in ONE epoch) was NO under the old rule and must be UNDETERMINED now.
+    # The assertion is the observable difference; it fails under the old rule.
+    ev = assess_temporal_persistence(_sig(_group("g0", "e0"), _group("g1", "e0")))
+    assert ev.groups_supporting == 2
+    assert ev.state == UNDETERMINED
+    # 1 supporting group across 2 groups was also NO under the old rule.
+    ev2 = assess_temporal_persistence(
+        _sig(_group("g0", "e0"), _group("g1", "e1", present=NO))
+    )
+    assert ev2.groups_supporting == 1
+    assert ev2.state == UNDETERMINED
 
 
 # ---------------------------------------------------------------------------
