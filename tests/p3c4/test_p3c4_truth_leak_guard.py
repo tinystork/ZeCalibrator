@@ -38,6 +38,7 @@ import pytest
 INFERENCE_MODULES = [
     "research.p3c4",
     "research.p3c4.temporal_evidence",
+    "research.p3c4.temporal_inference",
 ]
 
 # Modules whose import would leak truth into the contract side.

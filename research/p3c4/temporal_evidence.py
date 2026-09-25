@@ -68,19 +68,24 @@ too-few valid samples, all-censored evidence, not enough supporting groups or
 supporting epochs — produces ``UNDETERMINED``, **never** ``YES`` and **never**
 ``NO``.
 
-Reachability of ``NO`` (LOT 1 vs LOT 2)
----------------------------------------
+Reachability of ``NO`` (LOT 1 → LOT 3)
+--------------------------------------
 
-The movement/departure discriminator that would make ``NO`` reachable ("the
-signature left the fixed coordinate") requires a **temporal evolution of the
-signature across frames at a fixed coordinate** — an input this LOT 1 contract
-does **not** yet consume. In LOT 1 the evaluator therefore **never** returns
-``NO``: every insufficiency falls to ``UNDETERMINED``. ``NO`` is kept in the
-value vocabulary so the contract does not silently drop a first-class outcome;
-its reachability belongs to **LOT 2**, once the corpus gives celestial
-confounders a distinct temporal evolution. This is deliberate, not a bug: a
-conservative ``UNDETERMINED → ABSTAIN`` is strictly safer than a determined-but-
-false ``NO`` that would erase rare intermittents.
+``NO`` is reserved for a **positively demonstrated** non-recurrence at the fixed
+coordinate. LOT 1 could not demonstrate it: the movement/departure discriminator
+requires a temporal evolution of the signature across frames, which LOT 1 did not
+yet consume. LOT 3 supplies that discriminator via an optional
+:class:`NonPersistenceEvidence`:
+
+* ``departed`` — the signature was seen at the fixed coordinate and then *moved
+  away* between epochs (a celestial confounder following the sky);
+* ``unique_occurrence`` — the signature appeared in a single (or very few) valid
+  frames and demonstrably never recurred (a single transient).
+
+When neither is supplied (``non_persistence=None``) the evaluator behaves exactly
+as LOT 1: every counting insufficiency falls to ``UNDETERMINED`` and ``NO`` is
+never produced. A positive ``NO`` is never a counting shortfall and never a
+censored-sample inference; ``UNDETERMINED`` is never overwritten.
 
 -----------------------------------------------------------------------------
 Censoring (§14)
@@ -96,7 +101,7 @@ group. No amplitude is ever invented from a censored sample.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Tuple
+from typing import Optional, Tuple
 
 # ---------------------------------------------------------------------------
 # Explicit value vocabulary — never a boolean, never a numeric score.
@@ -121,6 +126,7 @@ ALLOWED_MEASUREMENT_SOURCES: Tuple[str, ...] = (
     "epoch_identity",               # independent-epoch identity
     "valid_sample_count",           # count of valid (non-censored) samples
     "censored_sample_existence",    # existence of censored observations (count only)
+    "non_persistence_demonstrated", # positive movement/departure or unique-occurrence (LOT 3)
 )
 
 # ---------------------------------------------------------------------------
@@ -310,6 +316,50 @@ class TemporalPersistenceEvidence:
 
 
 # ---------------------------------------------------------------------------
+# Positive non-persistence demonstration (LOT 3) — the movement/departure and
+# unique-occurrence discriminators that make ``NO`` reachable.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class NonPersistenceEvidence:
+    """Positive non-persistence demonstration (LOT 3; makes ``NO`` reachable).
+
+    ``NO`` is reserved for a *positively demonstrated* non-recurrence. LOT 3
+    supplies the two discriminators that demonstrate it, measured exclusively
+    over valid (non-censored) samples:
+
+    * ``departed`` — ``YES`` when the signature was measured present at the fixed
+      coordinate in an earlier epoch and then *moved away* between epochs (a
+      celestial confounder following the sky), leaving the coordinate while a
+      signature remains nearby.
+    * ``unique_occurrence`` — ``YES`` when the signature appeared in a single (or
+      very few) valid frames and demonstrably never recurred, with enough valid
+      samples elsewhere to positively establish absence (a single transient). It
+      is **not** reachable from mere rarity: a low-occupancy intermittent that
+      recurs across a run is never ``unique_occurrence``.
+
+    Both are positive findings over valid samples — never a counting
+    insufficiency, never a censored-sample inference, never a promotion to
+    ``YES``.
+    """
+
+    departed: str = UNDETERMINED
+    unique_occurrence: str = UNDETERMINED
+
+    def __post_init__(self) -> None:
+        for name in ("departed", "unique_occurrence"):
+            value = getattr(self, name)
+            if value not in _TERNARY:
+                raise InvalidTemporalStateError(value)
+
+    @property
+    def demonstrates_no(self) -> bool:
+        """True iff a positive non-persistence was demonstrated."""
+        return self.departed == YES or self.unique_occurrence == YES
+
+
+# ---------------------------------------------------------------------------
 # The temporal evaluator (the contract's normative definition, made executable)
 # ---------------------------------------------------------------------------
 
@@ -326,6 +376,7 @@ _DEFAULT_EVIDENCE_REFS: Tuple[str, ...] = (
 def assess_temporal_persistence(
     signature: TemporalSignature,
     *,
+    non_persistence: Optional[NonPersistenceEvidence] = None,
     min_supporting_groups: int = MIN_SUPPORTING_GROUPS,
     min_supporting_epochs: int = MIN_SUPPORTING_EPOCHS,
     min_valid_samples: int = MIN_VALID_SAMPLES,
@@ -343,9 +394,17 @@ def assess_temporal_persistence(
     * ``YES`` when the signature recurs across at least ``min_supporting_groups``
       independent groups **and** at least ``min_supporting_epochs`` independent
       epochs, from valid samples only;
-    * ``NO`` is **never returned in LOT 1**: it is reserved for a positively
-      demonstrated movement/departure of the signature, which needs a temporal
-      discriminator this contract does not yet consume (LOT 2).
+    * ``NO`` is reserved for a **positively demonstrated** non-recurrence: the
+      signature is seen, then moves/departs the coordinate, or appears once and
+      never recurs. This is supplied **only** via ``non_persistence`` (the
+      movement/departure or unique-occurrence discriminator, LOT 3). A mere
+      counting insufficiency never produces ``NO``.
+
+    ``non_persistence`` defaults to ``None`` (pure LOT 1 behaviour: ``NO``
+    unreachable). When supplied, a demonstrated departure or unique occurrence
+    yields ``NO`` **before** any counting branch — but it never overrides the
+    valid-sample floor: if ``valid_samples < min_valid_samples`` the result is
+    still ``UNDETERMINED``, never ``NO`` and never ``YES``.
 
     It never reads ``epoch_count`` or any independence metadata: the recurrence
     is measured from the per-group signatures themselves, and ``epochs_examined``
@@ -362,8 +421,20 @@ def assess_temporal_persistence(
     groups_supporting = len(supporting)
     epochs_supporting = len({g.epoch_id for g in supporting})
 
+    demonstrated_no = (
+        non_persistence is not None and non_persistence.demonstrates_no
+    )
+
+    # Order of decisions (never reordered):
+    #   1. valid-sample floor — a counting insufficiency is UNDETERMINED, never
+    #      YES and never NO (§"UNDETERMINED jamais écrasé").
+    #   2. positively demonstrated departure / unique occurrence — NO (LOT 3).
+    #   3. >= min groups AND >= min epochs of supporting signatures — YES.
+    #   4. any other counting insufficiency — UNDETERMINED.
     if valid_samples < min_valid_samples:
         state = UNDETERMINED
+    elif demonstrated_no:
+        state = NO
     elif (
         groups_supporting >= min_supporting_groups
         and epochs_supporting >= min_supporting_epochs
@@ -372,9 +443,13 @@ def assess_temporal_persistence(
     else:
         # Every remaining case is a counting insufficiency (missing groups,
         # missing epochs, missing valid samples). It is UNDETERMINED, never NO:
-        # NO requires a positively demonstrated movement/departure, which LOT 1
-        # cannot observe. A determined-but-false NO would erase rare intermittents.
+        # NO requires a positively demonstrated movement/departure or unique
+        # occurrence, which the non_persistence discriminator alone supplies.
         state = UNDETERMINED
+
+    evidence_refs = _DEFAULT_EVIDENCE_REFS
+    if state == NO:
+        evidence_refs = _DEFAULT_EVIDENCE_REFS + ("non_persistence_demonstrated",)
 
     return TemporalPersistenceEvidence(
         state=state,
@@ -384,7 +459,7 @@ def assess_temporal_persistence(
         valid_samples=valid_samples,
         censored_samples=censored_samples,
         temporal_signature=signature,
-        evidence_refs=_DEFAULT_EVIDENCE_REFS,
+        evidence_refs=evidence_refs,
     )
 
 
@@ -400,6 +475,7 @@ __all__ = [
     "GroupSignature",
     "TemporalSignature",
     "TemporalPersistenceEvidence",
+    "NonPersistenceEvidence",
     "assess_temporal_persistence",
     "InvalidTemporalStateError",
     "CensoredContributionError",
