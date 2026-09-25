@@ -49,11 +49,13 @@ from research.p3b.metrics import (
     metrics_for_scenario,
 )
 from research.p3b.model import (
+    AggregateSpec,
     EpochSpec,
     FrameSpec,
     GroupSpec,
     ScenarioSpec,
     SiteSpec,
+    compute_bookkeeping,
 )
 from research.p3b.qualification_policy import (
     ACTION_ABSTAIN_INSUFFICIENT,
@@ -252,7 +254,7 @@ def test_hand_computed_metrics():
                  decision=evaluate(make_packet(site_residual_behaviour="NONE"))),
     )
 
-    report = compute_metrics(outcomes, frame_count=6, megapixels_per_frame=1.0)
+    report = compute_metrics(outcomes, light_frame_count=6, megapixels_per_frame=1.0)
 
     # negatives = n0, n1, n2 (3). targets = t0, t1 (2).
     assert report.negative_count == 3
@@ -289,7 +291,7 @@ def test_hand_computed_unsafe_action_rate():
         decision=_abstain_decision(), applied=False,
     )
     outcomes = (applied_negative, untouched_negative)
-    report = compute_metrics(outcomes, frame_count=6, megapixels_per_frame=1.0)
+    report = compute_metrics(outcomes, light_frame_count=6, megapixels_per_frame=1.0)
 
     # unsafe_action_rate = 1 / 2.
     assert report.metrics[METRIC_UNSAFE_ACTION_RATE].value == pytest.approx(0.5)
@@ -307,7 +309,7 @@ def test_false_candidate_rate_hand_computed():
                                       site_residual_behaviour="INDETERMINATE")),
     )
     outcomes = (detected_healthy,)
-    report = compute_metrics(outcomes, frame_count=4, megapixels_per_frame=1.0)
+    report = compute_metrics(outcomes, light_frame_count=4, megapixels_per_frame=1.0)
     assert report.metrics[METRIC_FALSE_CANDIDATE_RATE].value == pytest.approx(1 / 4)
 
 
@@ -326,7 +328,7 @@ def test_detected_but_correctly_abstained_is_not_a_detection_error():
     )
     # Make the site detected by using a packet whose epistemic is observed.
     outcomes = (detected_abstained,)
-    report = compute_metrics(outcomes, frame_count=4, megapixels_per_frame=1.0)
+    report = compute_metrics(outcomes, light_frame_count=4, megapixels_per_frame=1.0)
 
     # correct_abstention_rate = correct abstentions / abstentions = 1 / 1.
     assert report.metrics[METRIC_CORRECT_ABSTENTION_RATE].value == pytest.approx(1.0)
@@ -341,7 +343,7 @@ def test_abstention_rate_and_decomposition():
         _outcome("b", expected_action=ACTION_NO_ACTION,
                  decision=evaluate(make_packet(net_benefit_established="NOT_ESTABLISHED"))),
     )
-    report = compute_metrics(outcomes, frame_count=4, megapixels_per_frame=1.0)
+    report = compute_metrics(outcomes, light_frame_count=4, megapixels_per_frame=1.0)
     assert report.metrics[METRIC_ABSTENTION_RATE].value == pytest.approx(1.0)
     # Both abstain via NET_BENEFIT_NOT_ESTABLISHED.
     assert report.abstention_decomposition["NET_BENEFIT_NOT_ESTABLISHED"] == 2
@@ -365,7 +367,7 @@ def test_censored_mis_inference_count_is_zero():
             net_benefit_established="NOT_ESTABLISHED",
         )),
     )
-    report = compute_metrics((censored,), frame_count=4, megapixels_per_frame=1.0)
+    report = compute_metrics((censored,), light_frame_count=4, megapixels_per_frame=1.0)
     assert report.censored_evaluation_count == 1
     assert report.censored_mis_inference_count == 0
 
@@ -376,7 +378,7 @@ def test_representativeness_rates_hand_computed():
         decision=evaluate(make_packet(calibration_representativeness=NOT_REPRESENTATIVE)),
     )
     ok = _outcome("n1", expected_action=ACTION_NO_ACTION, decision=_abstain_decision())
-    report = compute_metrics((not_rep, ok), frame_count=4, megapixels_per_frame=1.0)
+    report = compute_metrics((not_rep, ok), light_frame_count=4, megapixels_per_frame=1.0)
     assert report.metrics[METRIC_CALIBRATION_REPRESENTATIVENESS_FAILURE_RATE].value == pytest.approx(0.5)
     assert report.metrics[METRIC_REPRESENTATIVENESS_UNDETERMINED_RATE].value == pytest.approx(0.0)
 
@@ -493,6 +495,77 @@ def test_same_inputs_same_metrics():
     r2 = metrics_for_scenario(scenario, net_benefit_established=NET_BENEFIT_ESTABLISHED)
     assert r1 == r2
     assert r1.metrics == r2.metrics
+
+
+# ---------------------------------------------------------------------------
+# Rework-1 (F1): the light-frame denominator must never be the LOT1 frame_count
+# ---------------------------------------------------------------------------
+
+
+def test_compute_metrics_has_no_frame_count_parameter():
+    # The trap is a *naming* trap: a parameter named ``frame_count`` collides
+    # with LOT1 ``compute_bookkeeping().frame_count`` (raw frames + aggregates,
+    # including darks/bias/masters), which is NOT the data-universe denominator.
+    # The renamed API makes the wrong counter impossible to pass.
+    params = list(inspect.signature(compute_metrics).parameters)
+    assert "light_frame_count" in params
+    assert "frame_count" not in params
+
+
+def test_metrics_for_scenario_derives_light_frame_denominator():
+    # A scenario with 4 light frames + 5 darks + 1 master: LOT1 frame_count
+    # (10) differs from observation_count (4). metrics_for_scenario must derive
+    # the denominator from observation_count, so false_candidate_rate uses 4.
+    sensor = make_sensor(shape=(16, 16))
+    darks = tuple(
+        FrameSpec(frame_id=f"d{i}", frame_type="dark", epoch_id="e0", group_id="gd", ordinal=i)
+        for i in range(5)
+    )
+    lights = tuple(
+        FrameSpec(frame_id=f"l{i}", frame_type="light", epoch_id=f"e{i // 2}",
+                  group_id=f"g{i}", ordinal=0)
+        for i in range(4)
+    )
+    scenario = ScenarioSpec(
+        name="trap", seed=0, sensor=sensor,
+        epochs=(
+            EpochSpec("e0", (GroupSpec("gd", darks), GroupSpec("g0", (lights[0],)), GroupSpec("g1", (lights[1],)))),
+            EpochSpec("e1", (GroupSpec("g2", (lights[2],)), GroupSpec("g3", (lights[3],)))),
+        ),
+        aggregates=(AggregateSpec(
+            aggregate_id="master", method="median",
+            constituent_frame_ids=tuple(f.frame_id for f in darks),
+        ),),
+        sites=(SiteSpec(site_id="s0", x=8, y=8, cfa_class="NOISE_EXTREME"),),
+    )
+    bk = compute_bookkeeping(scenario)
+    assert bk.observation_count == 4
+    assert bk.frame_count == 10  # 4 lights + 5 darks + 1 master
+    assert bk.frame_count != bk.observation_count
+
+    # NOISE_EXTREME is UNQUALIFIED (healthy) but detected -> exactly one false
+    # candidate. The correct denominator is observation_count (4), never
+    # frame_count (10).
+    report = metrics_for_scenario(scenario)
+    rate = report.metrics[METRIC_FALSE_CANDIDATE_RATE].value
+    assert rate == pytest.approx(1 / 4)
+    # The trap, rendered visible: had the denominator been frame_count, the
+    # value would have been 1 / 10, a different (wrong) universe.
+    assert rate != pytest.approx(1 / 10)
+
+
+def test_compute_metrics_denominator_changes_the_rate():
+    # The same numerator with two different light-frame denominators yields two
+    # different rates — the caller-supplied denominator *is* the data universe.
+    detected_healthy = _outcome(
+        "n0", expected_action=ACTION_NO_ACTION, expected_qualification="UNQUALIFIED",
+        decision=evaluate(make_packet(net_benefit_established="NOT_ESTABLISHED",
+                                      site_residual_behaviour="INDETERMINATE")),
+    )
+    small = compute_metrics((detected_healthy,), light_frame_count=2, megapixels_per_frame=1.0)
+    large = compute_metrics((detected_healthy,), light_frame_count=4, megapixels_per_frame=1.0)
+    assert small.metrics[METRIC_FALSE_CANDIDATE_RATE].value == pytest.approx(1 / 2)
+    assert large.metrics[METRIC_FALSE_CANDIDATE_RATE].value == pytest.approx(1 / 4)
 
 
 # ---------------------------------------------------------------------------

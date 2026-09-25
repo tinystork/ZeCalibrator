@@ -19,8 +19,10 @@ with an explicit universe and unit, computed over *synthetic* results
 
 Threshold selection is forbidden here and enforced by tests: no ``argmax`` /
 ``argmin`` / ``max`` / ``min`` / ``sorted``, no "best"/"optimal" selection, no
-numeric budget. Every numeric constant is registered through
-:func:`research.p3b.parameters.param` (``EXPLORATORY``).
+numeric budget. The only *scientific* numeric constants are the unit-conversion
+scalings registered through :func:`research.p3b.parameters.param`
+(``EXPLORATORY``); the remaining ``0``/``1``/``2`` literals are structural
+counters / indices / bounds, never thresholds.
 
 Censoring: a censored measurement can never support a quantitative inference
 (SCIENCE §13.4). The ``censored_mis_inference_count`` invariant must stay 0 and
@@ -81,8 +83,14 @@ from .qualification_policy import (
 # Tagged numeric constants — EXPLORATORY (metric scaling, never a threshold)
 # ---------------------------------------------------------------------------
 
-# Scaling for "per million" rates. A unit conversion, not a product threshold.
+# Scaling for "per million" rates only. A unit conversion, not a threshold.
 RATE_PER_MILLION = param("RATE_PER_MILLION", 1_000_000, EXPLORATORY)
+
+# Pixels per megapixel — the *distinct* unit conversion used to form the
+# megapixel-frame denominator of ``false_candidate_rate``. Kept separate from
+# ``RATE_PER_MILLION`` (two different unit conversions must not share a
+# symbol, even when their numeric value coincides).
+PIXELS_PER_MEGAPIXEL = param("PIXELS_PER_MEGAPIXEL", 1_000_000, EXPLORATORY)
 
 
 # ---------------------------------------------------------------------------
@@ -489,15 +497,23 @@ def epoch_stability(outcomes: Tuple[SiteOutcome, ...]) -> Optional[float]:
 def compute_metrics(
     outcomes: Tuple[SiteOutcome, ...],
     *,
-    frame_count: int,
+    light_frame_count: int,
     megapixels_per_frame: float,
 ) -> MetricsReport:
     """Compute all named metrics over ``outcomes`` (pure, deterministic).
 
-    ``frame_count`` is the number of *light* frames treated (the data-universe
-    denominator of ``false_candidate_rate``). ``megapixels_per_frame`` is the
-    sensor megapixel count (used for the per-megapixel-frame variant). Neither
-    is a threshold; both are descriptive denominators supplied by the caller.
+    ``light_frame_count`` is the number of *light (science)* frames treated —
+    the data-universe denominator of ``false_candidate_rate``. It corresponds
+    to LOT1 ``observation_count``, **never** to LOT1 ``frame_count``: the
+    bookkeeping ``frame_count`` counts raw FITS frames *plus* derived
+    aggregates (darks / bias / masters), which a candidate generator does not
+    evaluate. Passing ``bk.frame_count`` here would silently change the
+    universe of ``false_candidate_rate`` (and of its per-megapixel-frame
+    variant), which is exactly the ambiguity this contract forbids.
+
+    ``megapixels_per_frame`` is the sensor megapixel count (used for the
+    per-megapixel-frame variant). Neither is a threshold; both are descriptive
+    denominators supplied by the caller.
     """
     sites = list(outcomes)
     n = len(sites)
@@ -581,7 +597,7 @@ def compute_metrics(
 
     # Per-frame and per-megapixel-frame variants of the false candidate rate.
     false_candidate_per_megapixel_frame = _rate(
-        false_candidates, int(round(frame_count * megapixels_per_frame))
+        false_candidates, int(round(light_frame_count * megapixels_per_frame))
     ) if megapixels_per_frame > 0 else None
 
     metrics: dict = {
@@ -595,9 +611,13 @@ def compute_metrics(
             None if _rate(false_promotions, n_neg) is None
             else _rate(false_promotions, n_neg) * RATE_PER_MILLION,
         ),
+        # false_candidate_rate: numerator in the DECISION universe (healthy
+        # sites flagged), denominator in the DATA universe (light frames). The
+        # ratio is deliberate — it measures operational review *load* per
+        # frame, never a per-site safety rate.
         METRIC_FALSE_CANDIDATE_RATE: MetricValue(
             METRIC_FALSE_CANDIDATE_RATE, UNIVERSE_DATA,
-            "per light frame", _rate(false_candidates, frame_count),
+            "per light frame", _rate(false_candidates, light_frame_count),
         ),
         METRIC_FALSE_CANDIDATE_RATE_PER_MEGAPIXEL_FRAME: MetricValue(
             METRIC_FALSE_CANDIDATE_RATE_PER_MEGAPIXEL_FRAME, UNIVERSE_DATA,
@@ -628,6 +648,10 @@ def compute_metrics(
             METRIC_ABSTENTION_RATE, UNIVERSE_DECISION,
             "per evaluation", _rate(len(abstained), n),
         ),
+        # correct_abstention_rate is a *description* over non-target
+        # abstentions: abstaining everywhere would drive it to 1.0. It must
+        # never be read as an objective in isolation — the P3A contract forbids
+        # the "minimise abstention" form — only alongside the *_recall family.
         METRIC_CORRECT_ABSTENTION_RATE: MetricValue(
             METRIC_CORRECT_ABSTENTION_RATE, UNIVERSE_DECISION,
             "per abstention", _rate(correct_abstentions, len(abstained)),
@@ -739,11 +763,15 @@ def metrics_for_scenario(
     """Build outcomes and compute the full named-metric report for a scenario."""
     bk = compute_bookkeeping(scenario)
     ny, nx = scenario.sensor.shape
-    megapixels_per_frame = (ny * nx) / RATE_PER_MILLION
+    megapixels_per_frame = (ny * nx) / PIXELS_PER_MEGAPIXEL
     outcomes = build_outcomes(scenario, net_benefit_established=net_benefit_established)
+    # The light-frame denominator is *derived* here from the bookkeeping
+    # (``observation_count`` = light frames only), never caller-supplied, so no
+    # caller can accidentally pass LOT1 ``frame_count`` (which includes darks /
+    # bias / masters) and silently change the data universe.
     return compute_metrics(
         outcomes,
-        frame_count=bk.observation_count,
+        light_frame_count=bk.observation_count,
         megapixels_per_frame=megapixels_per_frame,
     )
 
@@ -773,6 +801,7 @@ __all__ = [
     "MetricValue",
     "NetBenefitPair",
     "OperatingPoint",
+    "PIXELS_PER_MEGAPIXEL",
     "RATE_PER_MILLION",
     "SiteOutcome",
     "TRUTH_UNQUALIFIED",
