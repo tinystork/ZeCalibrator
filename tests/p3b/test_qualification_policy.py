@@ -18,8 +18,11 @@ from research.p3b.qualification_policy import (
     ACTION_LADDER,
     ACTION_NO_ACTION,
     ACTION_REQUALIFY,
+    EPISTEMIC_CHARACTERISED_INTERMITTENT,
     EPISTEMIC_CHARACTERISED_STABLE,
     EPISTEMIC_CENSORED,
+    EPISTEMIC_OBSERVED_CANDIDATE,
+    EPISTEMIC_TRANSIENT_OR_UNRESOLVED,
     EPISTEMIC_UNKNOWN,
     MISSION_NAMES,
     MISSION_NAME_PROJECTIONS,
@@ -33,6 +36,8 @@ from research.p3b.qualification_policy import (
     RC_INSUFFICIENT_INDEPENDENT_GROUPS,
     RC_NET_BENEFIT_NOT_ESTABLISHED,
     RC_NO_ACTION_NEEDED_AFTER_CALIBRATION,
+    RC_NOT_PERSISTENT_IN_SENSOR_COORDINATES,
+    RC_PERSISTENCE_UNDETERMINED,
     RC_TRANSIENT_ONLY,
     REPRESENTATIVE,
     RESIDUAL_INDETERMINATE,
@@ -460,3 +465,111 @@ def test_projection_function_documented_mapping():
                                                      site_residual_behaviour=RESIDUAL_INDETERMINATE,
                                                      net_benefit_established=NET_BENEFIT_NOT_ESTABLISHED))) == "CENSORED"
     assert project_mission_name(evaluate(make_packet(transient_only=YES))) == "TRANSIENT_OR_UNRESOLVED"
+
+
+# ---------------------------------------------------------------------------
+# Rework-1 (M1): persistence at the sensor coordinate gates eligibility
+# ---------------------------------------------------------------------------
+
+def _complete_variable_dossier(**overrides) -> EvidencePacket:
+    """The exact reproduction dossier from the review: residual VARIABLE, fully
+    independent, benefit established, local disagreement, no censure/conflict/
+    transient — differing only in ``persisted_at_same_sensor_coord``."""
+    return make_packet(
+        site_residual_behaviour=RESIDUAL_VARIABLE,
+        **overrides,
+    )
+
+
+def test_persisted_no_abstains_inconsistent_with_distinct_code():
+    d = evaluate(_complete_variable_dossier(persisted_at_same_sensor_coord=NO))
+    assert d.action == ACTION_ABSTAIN_INCONSISTENT
+    assert d.reason_codes == (RC_NOT_PERSISTENT_IN_SENSOR_COORDINATES,)
+    assert d.action != ACTION_ELIGIBLE
+
+
+def test_persisted_undetermined_abstains_insufficient_with_distinct_code():
+    d = evaluate(_complete_variable_dossier(persisted_at_same_sensor_coord=UNDETERMINED))
+    assert d.action == ACTION_ABSTAIN_INSUFFICIENT
+    assert d.reason_codes == (RC_PERSISTENCE_UNDETERMINED,)
+    assert d.action != ACTION_ELIGIBLE
+
+
+def test_persisted_yes_still_eligible():
+    # Regression guard: the barrier must not over-block a genuine sensor site.
+    d = evaluate(_complete_variable_dossier(persisted_at_same_sensor_coord=YES))
+    assert d.action == ACTION_ELIGIBLE
+
+
+def test_persistence_codes_are_distinct_tokens():
+    assert RC_NOT_PERSISTENT_IN_SENSOR_COORDINATES != RC_PERSISTENCE_UNDETERMINED
+
+
+def test_star_crossing_signature_never_promoted():
+    # A star whose PSF crosses the sensor coordinate is a sky structure, not a
+    # sensor defect: persisted == NO. It must never be eligible.
+    d = evaluate(
+        _complete_variable_dossier(
+            persisted_at_same_sensor_coord=NO,
+            persisted_basis="moving star PSF crosses the site; no persistent sensor defect",
+        )
+    )
+    assert d.action == ACTION_ABSTAIN_INCONSISTENT
+    assert d.reason_codes == (RC_NOT_PERSISTENT_IN_SENSOR_COORDINATES,)
+    assert d.action != ACTION_ELIGIBLE
+
+
+@pytest.mark.parametrize("persisted", [YES, NO, UNDETERMINED])
+def test_eligible_implies_persisted_yes(persisted):
+    # Invariant: ELIGIBLE => persisted == YES. For NO and UNDETERMINED the
+    # decision is an abstention, never eligible.
+    d = evaluate(_complete_variable_dossier(persisted_at_same_sensor_coord=persisted))
+    if persisted == YES:
+        assert d.action == ACTION_ELIGIBLE
+    else:
+        assert d.action != ACTION_ELIGIBLE
+        assert d.action.startswith("ABSTAIN")
+
+
+def test_axis1_persisted_no_is_not_a_sensor_candidate():
+    d = evaluate(_complete_variable_dossier(persisted_at_same_sensor_coord=NO))
+    assert d.epistemic_state == EPISTEMIC_TRANSIENT_OR_UNRESOLVED
+    assert d.epistemic_state not in (EPISTEMIC_CHARACTERISED_STABLE, EPISTEMIC_CHARACTERISED_INTERMITTENT)
+
+
+def test_axis1_persisted_undetermined_never_characterised():
+    d = evaluate(_complete_variable_dossier(persisted_at_same_sensor_coord=UNDETERMINED))
+    assert d.epistemic_state not in (EPISTEMIC_CHARACTERISED_STABLE, EPISTEMIC_CHARACTERISED_INTERMITTENT)
+    assert d.epistemic_state == EPISTEMIC_OBSERVED_CANDIDATE
+
+
+def test_axis1_characterised_requires_persisted_yes():
+    # With persisted == YES and full independence, VARIABLE => CHARACTERISED_INTERMITTENT.
+    d = evaluate(_complete_variable_dossier(persisted_at_same_sensor_coord=YES))
+    assert d.epistemic_state == EPISTEMIC_CHARACTERISED_INTERMITTENT
+
+
+def test_representativeness_dominates_over_persisted_no():
+    # P1 (representativeness) stays dominant even with persisted == NO present.
+    d = evaluate(
+        _complete_variable_dossier(
+            persisted_at_same_sensor_coord=NO,
+            calibration_representativeness=NOT_REPRESENTATIVE,
+        )
+    )
+    assert d.action == ACTION_REQUALIFY
+    assert d.reason_codes == (RC_CALIBRATION_NOT_REPRESENTATIVE,)
+
+
+def test_censure_dominates_over_persisted_no():
+    # P2 (censoring) stays dominant even with persisted == NO present.
+    d = evaluate(
+        make_packet(
+            persisted_at_same_sensor_coord=NO,
+            censored_measurement_present=YES,
+            site_residual_behaviour=RESIDUAL_INDETERMINATE,
+            net_benefit_established=NET_BENEFIT_NOT_ESTABLISHED,
+        )
+    )
+    assert d.action == ACTION_ABSTAIN_CENSORED
+    assert d.reason_codes == (RC_EVIDENCE_CENSORED,)

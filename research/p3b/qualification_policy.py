@@ -22,9 +22,17 @@ Boundary (enforced here, verified by ``tests/p3b/test_qualification_policy.py``)
 
 No ``detected -> corrected`` path exists: there is no detection field in this
 vocabulary, and eligibility requires a *complete* evidence dossier (identity,
-geometry, calibration, representativeness, independence, a local disagreement,
-and a demonstrated net benefit). The four stages of SCIENCE §13.2 are never
-collapsed into a single ``detected -> corrected`` hop.
+geometry, calibration, representativeness, **persistence at the sensor
+coordinate**, independence, a local disagreement, and a demonstrated net
+benefit). The four stages of SCIENCE §13.2 are never collapsed into a single
+``detected -> corrected`` hop.
+
+Persistence is the fact that separates a *sensor defect* from a *sky structure*
+(a star crossing the coordinate, an optical structure): a genuine sensor site
+persists at the same sensor coordinate. ``persisted_at_same_sensor_coord == NO``
+means the signal is positively **not** a sensor site — never a reconstruction
+candidate; ``UNDETERMINED`` means the sensor-site status cannot be established
+— never ``CHARACTERISED_*`` and never eligible.
 """
 
 from __future__ import annotations
@@ -135,6 +143,12 @@ RC_ELIGIBLE = "ELIGIBLE"
 RC_SITE_RESIDUAL_INDETERMINATE = "SITE_RESIDUAL_INDETERMINATE"
 RC_NEIGHBOURHOOD_RESIDUAL_UNSTABLE = "NEIGHBOURHOOD_RESIDUAL_UNSTABLE"
 RC_NEIGHBOURHOOD_RESIDUAL_UNDETERMINED = "NEIGHBOURHOOD_RESIDUAL_UNDETERMINED"
+# Rework-1 (M1): persistence at the sensor coordinate discriminates a *sensor
+# defect* (persisted) from a *sky structure* (star crossing / optical structure,
+# not persisted at the same sensor coordinate). Distinct codes, never merged
+# (same discipline as INSUFFICIENT_EPOCHS / INSUFFICIENT_INDEPENDENT_GROUPS).
+RC_NOT_PERSISTENT_IN_SENSOR_COORDINATES = "NOT_PERSISTENT_IN_SENSOR_COORDINATES"
+RC_PERSISTENCE_UNDETERMINED = "PERSISTENCE_UNDETERMINED"
 
 REASON_CODES: Tuple[str, ...] = (
     RC_SENSOR_IDENTITY_UNRESOLVED,
@@ -152,6 +166,8 @@ REASON_CODES: Tuple[str, ...] = (
     RC_SITE_RESIDUAL_INDETERMINATE,
     RC_NEIGHBOURHOOD_RESIDUAL_UNSTABLE,
     RC_NEIGHBOURHOOD_RESIDUAL_UNDETERMINED,
+    RC_NOT_PERSISTENT_IN_SENSOR_COORDINATES,
+    RC_PERSISTENCE_UNDETERMINED,
 )
 
 # Short, stable meaning for each code (versioned vocabulary documentation).
@@ -171,6 +187,8 @@ REASON_CODE_MEANINGS: Mapping[str, str] = {
     RC_SITE_RESIDUAL_INDETERMINATE: "site residual behaviour cannot be characterised",
     RC_NEIGHBOURHOOD_RESIDUAL_UNSTABLE: "disagreement is global (neighbourhood), not local to the site",
     RC_NEIGHBOURHOOD_RESIDUAL_UNDETERMINED: "local vs global disagreement cannot be decided",
+    RC_NOT_PERSISTENT_IN_SENSOR_COORDINATES: "signal does not persist at the same sensor coordinate (sky structure, not a sensor defect)",
+    RC_PERSISTENCE_UNDETERMINED: "sensor-site persistence cannot be decided",
 }
 
 # ---------------------------------------------------------------------------
@@ -363,8 +381,23 @@ def _derive_epistemic(packet: EvidencePacket) -> Tuple[str, Tuple[EvidenceFact, 
 
     # residual present (SYSTEMATIC_STABLE or VARIABLE)
     facts = [EvidenceFact("site_residual_behaviour", residual, "axis1:residual_present")]
+
+    # Persistence at the sensor coordinate is the fact that separates a *sensor
+    # defect* from a *sky structure* (star crossing / optical structure).
+    #   * NO          -> not a sensor-site candidate at all (transient/unresolved);
+    #   * UNDETERMINED -> cannot be CHARACTERISED_* (candidate at most);
+    #   * YES         -> a genuine sensor-site candidate (CHARACTERISED_* only here).
+    if packet.persisted_at_same_sensor_coord == NO:
+        facts.append(EvidenceFact("persisted_at_same_sensor_coord", NO, "axis1:not_sensor_site"))
+        return EPISTEMIC_TRANSIENT_OR_UNRESOLVED, tuple(facts)
+    if packet.persisted_at_same_sensor_coord == UNDETERMINED:
+        facts.append(EvidenceFact("persisted_at_same_sensor_coord", UNDETERMINED, "axis1:persistence_undetermined"))
+        return EPISTEMIC_OBSERVED_CANDIDATE, tuple(facts)
+
+    # persisted == YES: a genuine sensor-site candidate.
     independent = packet.epoch_count >= 2 and packet.independent_group_count >= 2
     if independent:
+        facts.append(EvidenceFact("persisted_at_same_sensor_coord", YES, "axis1:persistent_site"))
         facts.append(EvidenceFact("epoch_count", packet.epoch_count, "axis1:independence"))
         facts.append(
             EvidenceFact("independent_group_count", packet.independent_group_count, "axis1:independence")
@@ -372,7 +405,7 @@ def _derive_epistemic(packet: EvidencePacket) -> Tuple[str, Tuple[EvidenceFact, 
         if residual == RESIDUAL_VARIABLE:
             return EPISTEMIC_CHARACTERISED_INTERMITTENT, tuple(facts)
         return EPISTEMIC_CHARACTERISED_STABLE, tuple(facts)
-    # not independently characterised -> candidate only
+    # persisted but not independently characterised -> candidate only
     return EPISTEMIC_OBSERVED_CANDIDATE, tuple(facts)
 
 
@@ -467,39 +500,55 @@ def _derive_action(
     # residual present (SYSTEMATIC_STABLE / VARIABLE): a reconstruction candidate
     facts = [EvidenceFact("site_residual_behaviour", residual, "action:residual_present")]
 
-    # P11 / P12 — independence (distinct codes, never merged; property 4)
+    # P11 — persistence at the sensor coordinate (qualification dossier item,
+    # before independence/benefit: "is this a sensor site at all?" precedes
+    # "do we have enough evidence?"). A sensor defect persists at the same
+    # sensor coordinate; a signal that does NOT is a sky structure (star
+    # crossing / optical structure) and is never a reconstruction candidate.
+    # Distinct codes, never merged (same discipline as independence).
+    if packet.persisted_at_same_sensor_coord == NO:
+        facts.append(EvidenceFact("persisted_at_same_sensor_coord", NO, "action:p11"))
+        return ACTION_ABSTAIN_INCONSISTENT, (RC_NOT_PERSISTENT_IN_SENSOR_COORDINATES,), tuple(facts)
+    if packet.persisted_at_same_sensor_coord == UNDETERMINED:
+        facts.append(EvidenceFact("persisted_at_same_sensor_coord", UNDETERMINED, "action:p11"))
+        return ACTION_ABSTAIN_INSUFFICIENT, (RC_PERSISTENCE_UNDETERMINED,), tuple(facts)
+
+    # persisted == YES continues: a genuine sensor-site candidate.
+    facts.append(EvidenceFact("persisted_at_same_sensor_coord", YES, "action:p11"))
+
+    # P12 / P13 — independence (distinct codes, never merged; property 4)
     insufficient: list = []
     if packet.epoch_count < 2:
         insufficient.append(RC_INSUFFICIENT_EPOCHS)
-        facts.append(EvidenceFact("epoch_count", packet.epoch_count, "action:p11"))
+        facts.append(EvidenceFact("epoch_count", packet.epoch_count, "action:p12"))
     if packet.independent_group_count < 2:
         insufficient.append(RC_INSUFFICIENT_INDEPENDENT_GROUPS)
-        facts.append(EvidenceFact("independent_group_count", packet.independent_group_count, "action:p12"))
+        facts.append(EvidenceFact("independent_group_count", packet.independent_group_count, "action:p13"))
     if insufficient:
         return ACTION_ABSTAIN_INSUFFICIENT, tuple(insufficient), tuple(facts)
 
-    # P13 — net benefit (consumed, never computed; property 6)
+    # P14 — net benefit (consumed, never computed; property 6)
     if packet.net_benefit_established != NET_BENEFIT_ESTABLISHED:
         facts.append(
-            EvidenceFact("net_benefit_established", packet.net_benefit_established, "action:p13")
+            EvidenceFact("net_benefit_established", packet.net_benefit_established, "action:p14")
         )
         return ACTION_ABSTAIN_INSUFFICIENT, (RC_NET_BENEFIT_NOT_ESTABLISHED,), tuple(facts)
 
-    # P14 / P15 — disagreement must be local to the site (not global)
+    # P15 / P16 — disagreement must be local to the site (not global)
     if packet.neighbourhood_residual_stable == NO:
         facts.append(
-            EvidenceFact("neighbourhood_residual_stable", NO, "action:p14")
+            EvidenceFact("neighbourhood_residual_stable", NO, "action:p15")
         )
         return ACTION_ABSTAIN_INCONSISTENT, (RC_NEIGHBOURHOOD_RESIDUAL_UNSTABLE,), tuple(facts)
     if packet.neighbourhood_residual_stable == UNDETERMINED:
         facts.append(
-            EvidenceFact("neighbourhood_residual_stable", UNDETERMINED, "action:p15")
+            EvidenceFact("neighbourhood_residual_stable", UNDETERMINED, "action:p16")
         )
         return ACTION_ABSTAIN_INSUFFICIENT, (RC_NEIGHBOURHOOD_RESIDUAL_UNDETERMINED,), tuple(facts)
 
-    # P16 — eligible (not obligatory)
-    facts.append(EvidenceFact("neighbourhood_residual_stable", YES, "action:p16"))
-    facts.append(EvidenceFact("net_benefit_established", NET_BENEFIT_ESTABLISHED, "action:p16"))
+    # P17 — eligible (not obligatory)
+    facts.append(EvidenceFact("neighbourhood_residual_stable", YES, "action:p17"))
+    facts.append(EvidenceFact("net_benefit_established", NET_BENEFIT_ESTABLISHED, "action:p17"))
     return ACTION_ELIGIBLE, (RC_ELIGIBLE,), tuple(facts)
 
 
