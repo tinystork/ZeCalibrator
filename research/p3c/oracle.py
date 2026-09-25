@@ -47,6 +47,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping, Tuple
 
+# The single source of declared-fact truth (the class->fact translation). The
+# oracle is the truth side, so it reuses this table rather than inventing a
+# second one. The inference side must never import it (locked by the F1 guard).
+from research.p3b.declared_facts import _CLASS_FACTS
+
 # ---------------------------------------------------------------------------
 # Truth-side vocabulary (mirrors research.p3b.model / qualification_policy)
 # ---------------------------------------------------------------------------
@@ -65,6 +70,14 @@ EPI_PERSISTENT = "QUALIFIED_PERSISTENT"
 EPI_INTERMITTENT = "QUALIFIED_INTERMITTENT"
 EPI_TRANSIENT = "QUALIFIED_TRANSIENT"
 EPI_CENSORED = "CENSORED"
+
+# Dedicated abstention motive for NEAR_SATURATION (S3). Its action is
+# ABSTAIN_INSUFFICIENT_EVIDENCE, but the "insufficient" is *not* insufficient
+# evidence of presence — the site IS observed. It is insufficient evidence for a
+# *quantitative* decision: the amplitude sits in the sensor's non-linear
+# response region, so it is not trustworthy. Forbidden here: ABSTAIN_CENSORED
+# (the value is below the hard limit, hence not censored).
+MOTIVE_NON_LINEAR_AMPLITUDE_UNTRUSTWORTHY = "NON_LINEAR_AMPLITUDE_UNTRUSTWORTHY"
 
 # ---------------------------------------------------------------------------
 # The confounders that must never be reconstruction targets (§6.3)
@@ -97,6 +110,8 @@ class OracleEntry:
     expected_action: str
     justification: str
     catalog_default_action: str
+    # A dedicated abstention motive when the action label alone is imprecise.
+    motive: str = ""
 
     @property
     def corrected(self) -> bool:
@@ -214,10 +229,13 @@ _ORACLE_TABLE: Tuple[OracleEntry, ...] = (
     OracleEntry(
         "NEAR_SATURATION", EPI_PERSISTENT, ACTION_ABSTAIN_INSUFFICIENT,
         "A high-value anomaly persistently near (but below) the saturation limit: its amplitude "
-        "lies in the non-linear response region and is not trustworthy for quantitative "
-        "reconstruction (§19, censored != high-value anomaly). Never a reconstruction target. "
+        "lies in the non-linear response region and is not trustworthy for a *quantitative* "
+        "decision. 'ABSTAIN_INSUFFICIENT_EVIDENCE' here means insufficient for a quantitative "
+        "decision (the site IS observed; its amplitude is not), not insufficient evidence of "
+        "presence. Below the hard limit, hence NOT censored. Never a reconstruction target. "
         "[catalogue said ELIGIBLE_FOR_TARGETED_RECONSTRUCTION]",
         ACTION_ELIGIBLE,
+        MOTIVE_NON_LINEAR_AMPLITUDE_UNTRUSTWORTHY,
     ),
     OracleEntry(
         "AMBIGUOUS_INSUFFICIENT_EVIDENCE", EPI_UNQUALIFIED, ACTION_ABSTAIN_INSUFFICIENT,
@@ -252,6 +270,61 @@ def reconstruction_targets() -> Tuple[str, ...]:
     return tuple(e.class_name for e in _ORACLE_TABLE if e.is_reconstruction_target)
 
 
+# ---------------------------------------------------------------------------
+# Per-fact SENSOR-EVIDENCE truth (§30) — reused from declared_facts, no second table
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class FactTruth:
+    """Expected truth for one SENSOR-EVIDENCE fact, with its justification."""
+
+    fact: str
+    value: str
+    justification: str
+
+
+# The 6 SENSOR-EVIDENCE facts, in the order declared by the inference contract.
+SENSOR_EVIDENCE_FACT_NAMES: Tuple[str, ...] = (
+    "persisted_at_same_sensor_coord",
+    "site_residual_behaviour",
+    "neighbourhood_residual_stable",
+    "transient_only",
+    "conflicting_evidence",
+    "censored_measurement_present",
+)
+
+# _CLASS_FACTS columns: (residual, persisted, neighbourhood, transient, conflicting).
+_CLASS_FACT_COLUMNS: Tuple[str, ...] = (
+    "site_residual_behaviour",
+    "persisted_at_same_sensor_coord",
+    "neighbourhood_residual_stable",
+    "transient_only",
+    "conflicting_evidence",
+)
+
+
+def sensor_evidence_truth(class_name: str) -> Tuple[FactTruth, ...]:
+    """The expected truth for the 6 SENSOR-EVIDENCE facts of a class.
+
+    Reuses :data:`research.p3b.declared_facts._CLASS_FACTS` (the declared
+    class->fact translation) so there is a **single** source of per-fact truth —
+    no second table is invented here. Five facts come directly from that table;
+    the sixth, ``censored_measurement_present``, is ``YES`` exactly for
+    ``CENSORED_ANOMALY`` (the only censored class), matching the declared
+    ``site.censored`` flag. Each fact carries the class-level justification for
+    traceability.
+    """
+    entry = oracle_entry(class_name)
+    row = _CLASS_FACTS[class_name]
+    values = dict(zip(_CLASS_FACT_COLUMNS, row))
+    values["censored_measurement_present"] = "YES" if class_name == "CENSORED_ANOMALY" else "NO"
+    return tuple(
+        FactTruth(fact, values[fact], entry.justification)
+        for fact in SENSOR_EVIDENCE_FACT_NAMES
+    )
+
+
 __all__ = [
     "ACTION_ELIGIBLE",
     "ACTION_NO_ACTION",
@@ -271,4 +344,8 @@ __all__ = [
     "expected_action",
     "epistemic_state",
     "reconstruction_targets",
+    "MOTIVE_NON_LINEAR_AMPLITUDE_UNTRUSTWORTHY",
+    "FactTruth",
+    "SENSOR_EVIDENCE_FACT_NAMES",
+    "sensor_evidence_truth",
 ]
