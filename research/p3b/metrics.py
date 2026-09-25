@@ -282,6 +282,12 @@ class MetricsReport:
     evaluation_count: int
     negative_count: int
     target_count: int
+    # Reconstruction targets (ground truth) whose policy result is an ABSTAIN_*
+    # action. A detected-but-abstained target is counted here; a healthy negative
+    # that abstains is NOT (it is not a reconstruction target). This is a raw
+    # counter alongside ``target_count`` — not a metric, not a score, and it
+    # replaces no existing recall.
+    abstained_target_count: int
 
 
 @dataclass(frozen=True)
@@ -522,6 +528,12 @@ def compute_metrics(
     n_neg = len(negatives)
     n_tar = len(targets)
 
+    # Abstained reconstruction targets: ground-truth targets whose policy result
+    # is an ABSTAIN_* action. A target that abstains is counted here regardless
+    # of whether it was detected; a healthy negative that abstains is not a target
+    # and is therefore not counted. Raw counter, not a metric and not a score.
+    abstained_targets = sum(1 for o in targets if is_abstained(o))
+
     # False-positive family (each a *different* universe / denominator).
     false_promotions = 0
     false_candidates = 0
@@ -687,6 +699,7 @@ def compute_metrics(
         evaluation_count=n,
         negative_count=n_neg,
         target_count=n_tar,
+        abstained_target_count=abstained_targets,
     )
 
 

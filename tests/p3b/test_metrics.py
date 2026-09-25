@@ -590,3 +590,97 @@ def test_censored_site_is_never_established_in_sweep():
     scenario = _two_group_scenario(sites=(site,))
     for p in candidate_operating_points(scenario):
         assert p.confusion.false_positive == 0
+
+
+# ---------------------------------------------------------------------------
+# abstained_target_count (ZC-SENSOR-P3B1-CLOSURE, part B)
+# ---------------------------------------------------------------------------
+#
+# A raw counter (not a metric, not a score) beside ``target_count``: the number
+# of reconstruction targets (ground truth) whose policy result is an ABSTAIN_*
+# action. A target that was *detected* but abstains is counted here; a healthy
+# negative that abstains is NOT (it is not a reconstruction target).
+
+
+def test_abstained_target_count_zero_with_no_targets():
+    outcomes = (
+        _outcome("n0", expected_action=ACTION_NO_ACTION, expected_qualification="UNQUALIFIED",
+                 decision=_abstain_decision()),
+    )
+    report = compute_metrics(outcomes, light_frame_count=4, megapixels_per_frame=1.0)
+    assert report.target_count == 0
+    assert report.abstained_target_count == 0
+
+
+def test_abstained_target_count_zero_with_no_abstained_targets():
+    # One target, promoted (not abstained) -> abstained_target_count == 0.
+    outcomes = (
+        _outcome("t0", expected_action=ACTION_ELIGIBLE, expected_qualification="QUALIFIED_INTERMITTENT",
+                 decision=_target_decision()),
+    )
+    report = compute_metrics(outcomes, light_frame_count=4, megapixels_per_frame=1.0)
+    assert report.target_count == 1
+    assert report.abstained_target_count == 0
+
+
+def test_abstained_target_count_hand_computed_four_targets():
+    # 4 targets: 1 eligible, 3 abstained -> abstained_target_count == 3.
+    outcomes = (
+        _outcome("t0", expected_action=ACTION_ELIGIBLE, expected_qualification="QUALIFIED_INTERMITTENT",
+                 decision=_target_decision()),
+        _outcome("t1", expected_action=ACTION_ELIGIBLE, expected_qualification="QUALIFIED_INTERMITTENT",
+                 decision=_abstain_decision()),
+        _outcome("t2", expected_action=ACTION_ELIGIBLE, expected_qualification="QUALIFIED_INTERMITTENT",
+                 decision=_abstain_decision()),
+        _outcome("t3", expected_action=ACTION_ELIGIBLE, expected_qualification="QUALIFIED_INTERMITTENT",
+                 decision=_abstain_decision()),
+    )
+    report = compute_metrics(outcomes, light_frame_count=8, megapixels_per_frame=1.0)
+    assert report.target_count == 4
+    assert report.abstained_target_count == 3
+
+
+def test_detected_but_abstained_target_is_counted():
+    # A target that IS detected (epistemic != UNKNOWN) but abstains is still a
+    # reconstruction target whose policy result is ABSTAIN_* -> counted here.
+    detected_abstained_target = _outcome(
+        "t0", expected_action=ACTION_ELIGIBLE, expected_qualification="QUALIFIED_INTERMITTENT",
+        decision=evaluate(make_packet(net_benefit_established="NOT_ESTABLISHED")),
+    )
+    # Sanity: the decision is detected (CHARACTERISED_INTERMITTENT) but abstained.
+    assert detected_abstained_target.decision.epistemic_state == EPISTEMIC_CHARACTERISED_INTERMITTENT
+    assert detected_abstained_target.decision.action == ACTION_ABSTAIN_INSUFFICIENT
+
+    report = compute_metrics((detected_abstained_target,), light_frame_count=4, megapixels_per_frame=1.0)
+    assert report.target_count == 1
+    assert report.abstained_target_count == 1
+
+
+def test_healthy_negative_abstained_is_not_counted():
+    # A healthy (non-target) site that abstains must NOT be counted: it is not a
+    # reconstruction target, so abstained_target_count stays 0.
+    healthy_abstained = _outcome(
+        "n0", expected_action=ACTION_NO_ACTION, expected_qualification="UNQUALIFIED",
+        decision=_abstain_decision(),
+    )
+    report = compute_metrics((healthy_abstained,), light_frame_count=4, megapixels_per_frame=1.0)
+    assert report.target_count == 0
+    assert report.abstained_target_count == 0
+
+
+def test_abstained_target_count_does_not_replace_existing_recalls():
+    # The new counter is additive: the existing recall metrics and target_count
+    # are unchanged by its presence.
+    outcomes = (
+        _outcome("t0", expected_action=ACTION_ELIGIBLE, expected_qualification="QUALIFIED_INTERMITTENT",
+                 decision=_target_decision()),
+        _outcome("t1", expected_action=ACTION_ELIGIBLE, expected_qualification="QUALIFIED_INTERMITTENT",
+                 decision=_abstain_decision()),
+    )
+    report = compute_metrics(outcomes, light_frame_count=6, megapixels_per_frame=1.0)
+    assert report.target_count == 2
+    assert report.abstained_target_count == 1
+    # Existing recalls unchanged: eligibility recall = 1/2 (only t0 promoted).
+    assert report.metrics[METRIC_ACTION_ELIGIBILITY_RECALL].value == pytest.approx(1 / 2)
+    # The counter is not present as a named metric (it is a raw field, no score).
+    assert "abstained_target_count" not in report.metrics
