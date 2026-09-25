@@ -113,6 +113,14 @@ UNDETERMINED = "UNDETERMINED"
 
 _TERNARY = (YES, NO, UNDETERMINED)
 
+# Version of the temporal-persistence evidence *contract* (the normative
+# definition this module makes executable). It is bumped only when the
+# contract's normative meaning changes (the state vocabulary, the reachability
+# of ``NO``, the censoring rule, or the allowed measurement sources). It is not
+# a metric version, not a reason-code version and not an adapter version — each
+# provenance is versioned independently (SCIENCE §44 / the P3C-4 freeze).
+TEMPORAL_CONTRACT_VERSION = "p3c4-temporal-evidence-contract-1"
+
 # ---------------------------------------------------------------------------
 # Allowed measurement sources (§2). The ONLY inputs a temporal evaluator may
 # consume. Anything else is out of contract.
@@ -467,6 +475,7 @@ __all__ = [
     "YES",
     "NO",
     "UNDETERMINED",
+    "TEMPORAL_CONTRACT_VERSION",
     "ALLOWED_MEASUREMENT_SOURCES",
     "MIN_SUPPORTING_GROUPS",
     "MIN_SUPPORTING_EPOCHS",
