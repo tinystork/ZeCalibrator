@@ -1,0 +1,2342 @@
+{
+  "candidate_parameters": {
+    "p3c-baseline": {
+      "candidate_id": "p3c-baseline",
+      "description": "Anchor hypothesis: median site-vs-neighbour residual above 50 ADU marks an anomaly; residual std above 25 ADU marks VARIABLE vs STABLE; neighbourhood stable when the residual exceeds 10x the local scale; persistence requires signal in >= 2 independent groups.",
+      "parameters": {
+        "conflict_sign_changes": {
+          "kind": "RESEARCH_CANDIDATE_PARAMETER",
+          "rationale": ">=2 strict sign crossings => genuine contradictory evidence",
+          "unit": "count",
+          "value": 2.0
+        },
+        "local_anomaly_adu": {
+          "kind": "RESEARCH_CANDIDATE_PARAMETER",
+          "rationale": "above read-noise |residual| (~4-5 ADU), below the weak-anomaly band (~60 ADU)",
+          "unit": "ADU",
+          "value": 50.0
+        },
+        "min_frames": {
+          "kind": "RESEARCH_CANDIDATE_PARAMETER",
+          "rationale": "minimum non-censored frames before a residual may be characterised",
+          "unit": "count",
+          "value": 3.0
+        },
+        "neighbourhood_snr": {
+          "kind": "RESEARCH_CANDIDATE_PARAMETER",
+          "rationale": "between sensor-site snr (>=~18) and confounder snr (~3.3-4.2)",
+          "unit": "dimensionless",
+          "value": 10.0
+        },
+        "persistence_min_groups": {
+          "kind": "RESEARCH_CANDIDATE_PARAMETER",
+          "rationale": "mirrors the policy's independent_group_count >= 2 requirement",
+          "unit": "count",
+          "value": 2.0
+        },
+        "stable_disp_adu": {
+          "kind": "RESEARCH_CANDIDATE_PARAMETER",
+          "rationale": "between stable classes' std (~4-5 ADU) and variable classes' std (>=~150 ADU)",
+          "unit": "ADU",
+          "value": 25.0
+        },
+        "transient_fraction": {
+          "kind": "RESEARCH_CANDIDATE_PARAMETER",
+          "rationale": "between single-frame-transient duty (~0.17) and intermittent duty (~0.5)",
+          "unit": "fraction",
+          "value": 0.25
+        }
+      },
+      "version": "1"
+    },
+    "p3c-conservative": {
+      "candidate_id": "p3c-conservative",
+      "description": "Higher presence bar: only residuals above 150 ADU count as anomalies, so the weak-anomaly band (~60 ADU) is treated as no-anomaly (NONE). Otherwise identical to baseline.",
+      "parameters": {
+        "conflict_sign_changes": {
+          "kind": "RESEARCH_CANDIDATE_PARAMETER",
+          "rationale": ">=2 strict sign crossings => genuine contradictory evidence",
+          "unit": "count",
+          "value": 2.0
+        },
+        "local_anomaly_adu": {
+          "kind": "RESEARCH_CANDIDATE_PARAMETER",
+          "rationale": "above the weak-anomaly band (~60 ADU), below hot-pixel scale (~1500 ADU)",
+          "unit": "ADU",
+          "value": 150.0
+        },
+        "min_frames": {
+          "kind": "RESEARCH_CANDIDATE_PARAMETER",
+          "rationale": "minimum non-censored frames before a residual may be characterised",
+          "unit": "count",
+          "value": 3.0
+        },
+        "neighbourhood_snr": {
+          "kind": "RESEARCH_CANDIDATE_PARAMETER",
+          "rationale": "between sensor-site snr (>=~18) and confounder snr (~3.3-4.2)",
+          "unit": "dimensionless",
+          "value": 10.0
+        },
+        "persistence_min_groups": {
+          "kind": "RESEARCH_CANDIDATE_PARAMETER",
+          "rationale": "mirrors the policy's independent_group_count >= 2 requirement",
+          "unit": "count",
+          "value": 2.0
+        },
+        "stable_disp_adu": {
+          "kind": "RESEARCH_CANDIDATE_PARAMETER",
+          "rationale": "between stable classes' std (~4-5 ADU) and variable classes' std (>=~150 ADU)",
+          "unit": "ADU",
+          "value": 25.0
+        },
+        "transient_fraction": {
+          "kind": "RESEARCH_CANDIDATE_PARAMETER",
+          "rationale": "between single-frame-transient duty (~0.17) and intermittent duty (~0.5)",
+          "unit": "fraction",
+          "value": 0.25
+        }
+      },
+      "version": "1"
+    },
+    "p3c-sensitive": {
+      "candidate_id": "p3c-sensitive",
+      "description": "Lower presence bar and looser local-vs-global and conflict thresholds: anomalies above 25 ADU count, neighbourhood stable above 6x local scale, a single sign crossing is already conflicting. Catches more, abstains less.",
+      "parameters": {
+        "conflict_sign_changes": {
+          "kind": "RESEARCH_CANDIDATE_PARAMETER",
+          "rationale": "a single strict sign crossing is already treated as conflicting",
+          "unit": "count",
+          "value": 1.0
+        },
+        "local_anomaly_adu": {
+          "kind": "RESEARCH_CANDIDATE_PARAMETER",
+          "rationale": "well above read-noise |residual| (~4-5 ADU); detects the weak-anomaly band (~60 ADU)",
+          "unit": "ADU",
+          "value": 25.0
+        },
+        "min_frames": {
+          "kind": "RESEARCH_CANDIDATE_PARAMETER",
+          "rationale": "minimum non-censored frames before a residual may be characterised",
+          "unit": "count",
+          "value": 3.0
+        },
+        "neighbourhood_snr": {
+          "kind": "RESEARCH_CANDIDATE_PARAMETER",
+          "rationale": "still above confounder snr (~3.3-4.2), below sensor-site snr (>=~18)",
+          "unit": "dimensionless",
+          "value": 6.0
+        },
+        "persistence_min_groups": {
+          "kind": "RESEARCH_CANDIDATE_PARAMETER",
+          "rationale": "mirrors the policy's independent_group_count >= 2 requirement",
+          "unit": "count",
+          "value": 2.0
+        },
+        "stable_disp_adu": {
+          "kind": "RESEARCH_CANDIDATE_PARAMETER",
+          "rationale": "between stable classes' std (~4-5 ADU) and variable classes' std (>=~150 ADU)",
+          "unit": "ADU",
+          "value": 25.0
+        },
+        "transient_fraction": {
+          "kind": "RESEARCH_CANDIDATE_PARAMETER",
+          "rationale": "splits intermittent duty (~0.5) from single-frame-transient duty (~0.17)",
+          "unit": "fraction",
+          "value": 0.5
+        }
+      },
+      "version": "1"
+    }
+  },
+  "corpus": {
+    "cfa_pattern": "GRBG",
+    "class_count": 20,
+    "dark_frames_per_scenario": 4,
+    "epochs_per_scenario": 2,
+    "frames_per_group": 6,
+    "groups_per_epoch": 2,
+    "light_frames_per_scenario": 24,
+    "scenario_count": 100,
+    "seed_count": 5,
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "sensor_shape": [
+      96,
+      128
+    ],
+    "site_coord": [
+      8,
+      8
+    ],
+    "size_justification": "20 classes x 5 seeds; 2 epochs x 2 independent groups x 6 light frames manifest rare-state (ordinal 5), transient (ordinal 3), star-crossing and sign-changing behaviours while staying fast."
+  },
+  "dataset_manifest_hash": "f35bcdb51a6df7b6668d669936bc95ac211d7ac79e20a79ba7939ad5f21a497c",
+  "dataset_role": "DEVELOPMENT",
+  "features": {
+    "censored_count": {
+      "description": "number of frames whose value hit the declared hard limit",
+      "per_class": {
+        "AMBIGUOUS_INSUFFICIENT_EVIDENCE": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "CENSORED_ANOMALY": {
+          "count": 5,
+          "max": 24.0,
+          "mean": 24.0,
+          "median": 24.0,
+          "min": 24.0,
+          "std": 0.0
+        },
+        "COSMIC_RAY": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "DUST_OR_VIGNETTING": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "FLAT_STRUCTURE": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "INTERMITTENT_CONTINUOUS": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "INTERMITTENT_MULTI_STATE": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "INTERMITTENT_TWO_STATE": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "NEAR_SATURATION": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "NOISE_EXTREME": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "NORMAL": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "OPTICAL_STRUCTURE": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "RARE_HIGH_STATE": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "RARE_LOW_STATE": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "SIGN_CHANGING_POST_DARK": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "SINGLE_TRANSIENT": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "STABLE_ANOMALY_CORRECTED_BY_DARK": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "STABLE_ANOMALY_WITH_MISMATCHED_DARK": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "STAR_CROSSING_SITE": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "UNDERSAMPLED_STAR_CORE": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        }
+      },
+      "unit": "count"
+    },
+    "censored_fraction": {
+      "description": "fraction of frames censored",
+      "per_class": {
+        "AMBIGUOUS_INSUFFICIENT_EVIDENCE": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "CENSORED_ANOMALY": {
+          "count": 5,
+          "max": 1.0,
+          "mean": 1.0,
+          "median": 1.0,
+          "min": 1.0,
+          "std": 0.0
+        },
+        "COSMIC_RAY": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "DUST_OR_VIGNETTING": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "FLAT_STRUCTURE": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "INTERMITTENT_CONTINUOUS": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "INTERMITTENT_MULTI_STATE": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "INTERMITTENT_TWO_STATE": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "NEAR_SATURATION": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "NOISE_EXTREME": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "NORMAL": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "OPTICAL_STRUCTURE": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "RARE_HIGH_STATE": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "RARE_LOW_STATE": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "SIGN_CHANGING_POST_DARK": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "SINGLE_TRANSIENT": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "STABLE_ANOMALY_CORRECTED_BY_DARK": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "STABLE_ANOMALY_WITH_MISMATCHED_DARK": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "STAR_CROSSING_SITE": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "UNDERSAMPLED_STAR_CORE": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        }
+      },
+      "unit": "fraction"
+    },
+    "cross_epoch_recurrence": {
+      "description": "recurrence of epoch median signatures across epochs",
+      "per_class": {
+        "AMBIGUOUS_INSUFFICIENT_EVIDENCE": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "CENSORED_ANOMALY": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "COSMIC_RAY": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "DUST_OR_VIGNETTING": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "FLAT_STRUCTURE": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "INTERMITTENT_CONTINUOUS": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "INTERMITTENT_MULTI_STATE": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "INTERMITTENT_TWO_STATE": {
+          "count": 5,
+          "max": 2.0,
+          "mean": 0.8,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.9797958971132712
+        },
+        "NEAR_SATURATION": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "NOISE_EXTREME": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "NORMAL": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "OPTICAL_STRUCTURE": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "RARE_HIGH_STATE": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "RARE_LOW_STATE": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "SIGN_CHANGING_POST_DARK": {
+          "count": 5,
+          "max": 2.0,
+          "mean": 0.4,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.8
+        },
+        "SINGLE_TRANSIENT": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "STABLE_ANOMALY_CORRECTED_BY_DARK": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "STABLE_ANOMALY_WITH_MISMATCHED_DARK": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "STAR_CROSSING_SITE": {
+          "count": 5,
+          "max": 2.0,
+          "mean": 0.4,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.8
+        },
+        "UNDERSAMPLED_STAR_CORE": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        }
+      },
+      "unit": "count"
+    },
+    "cross_group_recurrence": {
+      "description": "recurrence of group median signatures across independent groups",
+      "per_class": {
+        "AMBIGUOUS_INSUFFICIENT_EVIDENCE": {
+          "count": 5,
+          "max": 2.0,
+          "mean": 0.4,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.8
+        },
+        "CENSORED_ANOMALY": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "COSMIC_RAY": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "DUST_OR_VIGNETTING": {
+          "count": 5,
+          "max": 2.0,
+          "mean": 0.4,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.8
+        },
+        "FLAT_STRUCTURE": {
+          "count": 5,
+          "max": 2.0,
+          "mean": 0.4,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.8
+        },
+        "INTERMITTENT_CONTINUOUS": {
+          "count": 5,
+          "max": 2.0,
+          "mean": 0.4,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.8
+        },
+        "INTERMITTENT_MULTI_STATE": {
+          "count": 5,
+          "max": 2.0,
+          "mean": 1.2,
+          "median": 2.0,
+          "min": 0.0,
+          "std": 0.9797958971132712
+        },
+        "INTERMITTENT_TWO_STATE": {
+          "count": 5,
+          "max": 3.0,
+          "mean": 0.6,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 1.2
+        },
+        "NEAR_SATURATION": {
+          "count": 5,
+          "max": 2.0,
+          "mean": 0.4,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.8
+        },
+        "NOISE_EXTREME": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "NORMAL": {
+          "count": 5,
+          "max": 2.0,
+          "mean": 0.4,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.8
+        },
+        "OPTICAL_STRUCTURE": {
+          "count": 5,
+          "max": 2.0,
+          "mean": 0.4,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.8
+        },
+        "RARE_HIGH_STATE": {
+          "count": 5,
+          "max": 2.0,
+          "mean": 0.8,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.9797958971132712
+        },
+        "RARE_LOW_STATE": {
+          "count": 5,
+          "max": 2.0,
+          "mean": 1.2,
+          "median": 2.0,
+          "min": 0.0,
+          "std": 0.9797958971132712
+        },
+        "SIGN_CHANGING_POST_DARK": {
+          "count": 5,
+          "max": 4.0,
+          "mean": 1.2,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 1.6
+        },
+        "SINGLE_TRANSIENT": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "STABLE_ANOMALY_CORRECTED_BY_DARK": {
+          "count": 5,
+          "max": 2.0,
+          "mean": 0.4,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.8
+        },
+        "STABLE_ANOMALY_WITH_MISMATCHED_DARK": {
+          "count": 5,
+          "max": 2.0,
+          "mean": 0.4,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.8
+        },
+        "STAR_CROSSING_SITE": {
+          "count": 5,
+          "max": 3.0,
+          "mean": 1.2,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 1.469693845669907
+        },
+        "UNDERSAMPLED_STAR_CORE": {
+          "count": 5,
+          "max": 2.0,
+          "mean": 0.4,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.8
+        }
+      },
+      "unit": "count"
+    },
+    "local_residual_median": {
+      "description": "median |site - median(same-CFA neighbours)| over light frames",
+      "per_class": {
+        "AMBIGUOUS_INSUFFICIENT_EVIDENCE": {
+          "count": 5,
+          "max": 62.25,
+          "mean": 60.05,
+          "median": 59.5,
+          "min": 59.0,
+          "std": 1.176860229593982
+        },
+        "CENSORED_ANOMALY": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "COSMIC_RAY": {
+          "count": 5,
+          "max": 5.5,
+          "mean": 4.65,
+          "median": 4.25,
+          "min": 4.25,
+          "std": 0.51478150704935
+        },
+        "DUST_OR_VIGNETTING": {
+          "count": 5,
+          "max": 224.5,
+          "mean": 223.05,
+          "median": 223.0,
+          "min": 221.75,
+          "std": 0.9924716620639604
+        },
+        "FLAT_STRUCTURE": {
+          "count": 5,
+          "max": 943.5,
+          "mean": 941.7,
+          "median": 941.5,
+          "min": 940.5,
+          "std": 1.0295630140987
+        },
+        "INTERMITTENT_CONTINUOUS": {
+          "count": 5,
+          "max": 752.0,
+          "mean": 750.45,
+          "median": 750.5,
+          "min": 748.25,
+          "std": 1.372953021774598
+        },
+        "INTERMITTENT_MULTI_STATE": {
+          "count": 5,
+          "max": 1205.0,
+          "mean": 1201.0,
+          "median": 1202.0,
+          "min": 1197.5,
+          "std": 3.0166206257996713
+        },
+        "INTERMITTENT_TWO_STATE": {
+          "count": 5,
+          "max": 1254.5,
+          "mean": 1250.95,
+          "median": 1251.75,
+          "min": 1246.0,
+          "std": 2.8653097563788807
+        },
+        "NEAR_SATURATION": {
+          "count": 5,
+          "max": 55002.25,
+          "mean": 55000.05,
+          "median": 54999.5,
+          "min": 54999.0,
+          "std": 1.176860229593982
+        },
+        "NOISE_EXTREME": {
+          "count": 5,
+          "max": 201.0,
+          "mean": 142.6,
+          "median": 125.75,
+          "min": 102.25,
+          "std": 36.12153097530613
+        },
+        "NORMAL": {
+          "count": 5,
+          "max": 5.25,
+          "mean": 3.85,
+          "median": 3.75,
+          "min": 3.0,
+          "std": 0.7842193570679061
+        },
+        "OPTICAL_STRUCTURE": {
+          "count": 5,
+          "max": 943.5,
+          "mean": 941.7,
+          "median": 941.5,
+          "min": 940.5,
+          "std": 1.0295630140987
+        },
+        "RARE_HIGH_STATE": {
+          "count": 5,
+          "max": 5.5,
+          "mean": 4.7,
+          "median": 5.0,
+          "min": 3.25,
+          "std": 0.8573214099741123
+        },
+        "RARE_LOW_STATE": {
+          "count": 5,
+          "max": 2500.25,
+          "mean": 2499.0,
+          "median": 2498.5,
+          "min": 2497.75,
+          "std": 1.0488088481701516
+        },
+        "SIGN_CHANGING_POST_DARK": {
+          "count": 5,
+          "max": 1450.5,
+          "mean": 1447.5,
+          "median": 1447.75,
+          "min": 1442.75,
+          "std": 2.602883016964074
+        },
+        "SINGLE_TRANSIENT": {
+          "count": 5,
+          "max": 5.5,
+          "mean": 4.65,
+          "median": 4.25,
+          "min": 4.25,
+          "std": 0.51478150704935
+        },
+        "STABLE_ANOMALY_CORRECTED_BY_DARK": {
+          "count": 5,
+          "max": 1502.25,
+          "mean": 1500.05,
+          "median": 1499.5,
+          "min": 1499.0,
+          "std": 1.176860229593982
+        },
+        "STABLE_ANOMALY_WITH_MISMATCHED_DARK": {
+          "count": 5,
+          "max": 1502.25,
+          "mean": 1500.05,
+          "median": 1499.5,
+          "min": 1499.0,
+          "std": 1.176860229593982
+        },
+        "STAR_CROSSING_SITE": {
+          "count": 5,
+          "max": 1433.25,
+          "mean": 1430.35,
+          "median": 1430.25,
+          "min": 1427.0,
+          "std": 2.316246964380094
+        },
+        "UNDERSAMPLED_STAR_CORE": {
+          "count": 5,
+          "max": 4002.25,
+          "mean": 4000.05,
+          "median": 3999.5,
+          "min": 3999.0,
+          "std": 1.176860229593982
+        }
+      },
+      "unit": "ADU"
+    },
+    "local_residual_peak": {
+      "description": "max |site - median(same-CFA neighbours)| over light frames",
+      "per_class": {
+        "AMBIGUOUS_INSUFFICIENT_EVIDENCE": {
+          "count": 5,
+          "max": 73.5,
+          "mean": 70.7,
+          "median": 70.5,
+          "min": 69.0,
+          "std": 1.5684387141358123
+        },
+        "CENSORED_ANOMALY": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "COSMIC_RAY": {
+          "count": 5,
+          "max": 30010.5,
+          "mean": 30007.1,
+          "median": 30006.0,
+          "min": 30005.5,
+          "std": 1.9339079605813716
+        },
+        "DUST_OR_VIGNETTING": {
+          "count": 5,
+          "max": 239.5,
+          "mean": 233.3,
+          "median": 231.0,
+          "min": 229.5,
+          "std": 3.9824615503479754
+        },
+        "FLAT_STRUCTURE": {
+          "count": 5,
+          "max": 957.5,
+          "mean": 952.0,
+          "median": 950.0,
+          "min": 948.5,
+          "std": 3.7682887362833544
+        },
+        "INTERMITTENT_CONTINUOUS": {
+          "count": 5,
+          "max": 1509.5,
+          "mean": 1504.7,
+          "median": 1506.5,
+          "min": 1499.5,
+          "std": 4.154515615568197
+        },
+        "INTERMITTENT_MULTI_STATE": {
+          "count": 5,
+          "max": 2511.0,
+          "mean": 2507.7,
+          "median": 2508.0,
+          "min": 2503.0,
+          "std": 2.7129319932501073
+        },
+        "INTERMITTENT_TWO_STATE": {
+          "count": 5,
+          "max": 2511.0,
+          "mean": 2508.2,
+          "median": 2508.0,
+          "min": 2507.0,
+          "std": 1.469693845669907
+        },
+        "NEAR_SATURATION": {
+          "count": 5,
+          "max": 55013.5,
+          "mean": 55010.7,
+          "median": 55010.5,
+          "min": 55009.0,
+          "std": 1.5684387141358123
+        },
+        "NOISE_EXTREME": {
+          "count": 5,
+          "max": 468.0,
+          "mean": 424.4,
+          "median": 429.5,
+          "min": 354.5,
+          "std": 42.18577959455058
+        },
+        "NORMAL": {
+          "count": 5,
+          "max": 17.5,
+          "mean": 12.3,
+          "median": 11.0,
+          "min": 9.0,
+          "std": 2.9765752132274432
+        },
+        "OPTICAL_STRUCTURE": {
+          "count": 5,
+          "max": 957.5,
+          "mean": 952.0,
+          "median": 950.0,
+          "min": 948.5,
+          "std": 3.7682887362833544
+        },
+        "RARE_HIGH_STATE": {
+          "count": 5,
+          "max": 2509.5,
+          "mean": 2504.7,
+          "median": 2506.5,
+          "min": 2499.5,
+          "std": 4.154515615568197
+        },
+        "RARE_LOW_STATE": {
+          "count": 5,
+          "max": 2513.5,
+          "mean": 2510.6,
+          "median": 2510.5,
+          "min": 2509.0,
+          "std": 1.6552945357246849
+        },
+        "SIGN_CHANGING_POST_DARK": {
+          "count": 5,
+          "max": 1511.0,
+          "mean": 1508.2,
+          "median": 1508.0,
+          "min": 1507.0,
+          "std": 1.469693845669907
+        },
+        "SINGLE_TRANSIENT": {
+          "count": 5,
+          "max": 5010.5,
+          "mean": 5007.1,
+          "median": 5006.0,
+          "min": 5005.5,
+          "std": 1.9339079605813716
+        },
+        "STABLE_ANOMALY_CORRECTED_BY_DARK": {
+          "count": 5,
+          "max": 1513.5,
+          "mean": 1510.7,
+          "median": 1510.5,
+          "min": 1509.0,
+          "std": 1.5684387141358123
+        },
+        "STABLE_ANOMALY_WITH_MISMATCHED_DARK": {
+          "count": 5,
+          "max": 1513.5,
+          "mean": 1510.7,
+          "median": 1510.5,
+          "min": 1509.0,
+          "std": 1.5684387141358123
+        },
+        "STAR_CROSSING_SITE": {
+          "count": 5,
+          "max": 2847.0,
+          "mean": 2844.8,
+          "median": 2845.5,
+          "min": 2842.0,
+          "std": 1.8055470085267789
+        },
+        "UNDERSAMPLED_STAR_CORE": {
+          "count": 5,
+          "max": 4013.5,
+          "mean": 4010.7,
+          "median": 4010.5,
+          "min": 4009.0,
+          "std": 1.5684387141358123
+        }
+      },
+      "unit": "ADU"
+    },
+    "post_cal_median": {
+      "description": "median |value - representative dark| (NaN when no dark reference)",
+      "per_class": {
+        "AMBIGUOUS_INSUFFICIENT_EVIDENCE": {
+          "count": 5,
+          "max": 656.5,
+          "mean": 655.3,
+          "median": 655.5,
+          "min": 654.0,
+          "std": 0.812403840463596
+        },
+        "CENSORED_ANOMALY": {
+          "count": 0,
+          "max": null,
+          "mean": null,
+          "median": null,
+          "min": null,
+          "std": null
+        },
+        "COSMIC_RAY": {
+          "count": 5,
+          "max": 597.0,
+          "mean": 596.4,
+          "median": 596.5,
+          "min": 595.0,
+          "std": 0.7348469228349535
+        },
+        "DUST_OR_VIGNETTING": {
+          "count": 5,
+          "max": 206.0,
+          "mean": 204.7,
+          "median": 204.5,
+          "min": 203.5,
+          "std": 0.812403840463596
+        },
+        "FLAT_STRUCTURE": {
+          "count": 5,
+          "max": 609.5,
+          "mean": 608.4,
+          "median": 608.5,
+          "min": 607.0,
+          "std": 0.8602325267042626
+        },
+        "INTERMITTENT_CONTINUOUS": {
+          "count": 5,
+          "max": 1348.0,
+          "mean": 1344.8,
+          "median": 1345.5,
+          "min": 1341.0,
+          "std": 2.5019992006393608
+        },
+        "INTERMITTENT_MULTI_STATE": {
+          "count": 5,
+          "max": 1798.5,
+          "mean": 1796.7,
+          "median": 1797.0,
+          "min": 1793.5,
+          "std": 1.7492855684535902
+        },
+        "INTERMITTENT_TWO_STATE": {
+          "count": 5,
+          "max": 1847.5,
+          "mean": 1845.1,
+          "median": 1847.0,
+          "min": 1839.5,
+          "std": 2.9899832775452104
+        },
+        "NEAR_SATURATION": {
+          "count": 5,
+          "max": 55596.5,
+          "mean": 55595.3,
+          "median": 55595.5,
+          "min": 55594.0,
+          "std": 0.812403840463596
+        },
+        "NOISE_EXTREME": {
+          "count": 5,
+          "max": 670.5,
+          "mean": 621.1,
+          "median": 624.0,
+          "min": 568.0,
+          "std": 32.76186807860626
+        },
+        "NORMAL": {
+          "count": 5,
+          "max": 596.5,
+          "mean": 595.3,
+          "median": 595.5,
+          "min": 594.0,
+          "std": 0.812403840463596
+        },
+        "OPTICAL_STRUCTURE": {
+          "count": 5,
+          "max": 609.5,
+          "mean": 608.4,
+          "median": 608.5,
+          "min": 607.0,
+          "std": 0.8602325267042626
+        },
+        "RARE_HIGH_STATE": {
+          "count": 5,
+          "max": 597.5,
+          "mean": 596.3,
+          "median": 596.5,
+          "min": 594.5,
+          "std": 1.1661903789690602
+        },
+        "RARE_LOW_STATE": {
+          "count": 5,
+          "max": 3096.5,
+          "mean": 3094.3,
+          "median": 3094.5,
+          "min": 3092.5,
+          "std": 1.6
+        },
+        "SIGN_CHANGING_POST_DARK": {
+          "count": 5,
+          "max": 1456.0,
+          "mean": 1453.7,
+          "median": 1453.0,
+          "min": 1452.5,
+          "std": 1.2489995996796797
+        },
+        "SINGLE_TRANSIENT": {
+          "count": 5,
+          "max": 597.0,
+          "mean": 596.4,
+          "median": 596.5,
+          "min": 595.0,
+          "std": 0.7348469228349535
+        },
+        "STABLE_ANOMALY_CORRECTED_BY_DARK": {
+          "count": 5,
+          "max": 596.5,
+          "mean": 595.3,
+          "median": 595.5,
+          "min": 594.0,
+          "std": 0.812403840463596
+        },
+        "STABLE_ANOMALY_WITH_MISMATCHED_DARK": {
+          "count": 5,
+          "max": 2096.5,
+          "mean": 2095.3,
+          "median": 2095.5,
+          "min": 2094.0,
+          "std": 0.812403840463596
+        },
+        "STAR_CROSSING_SITE": {
+          "count": 5,
+          "max": 3022.5,
+          "mean": 3018.9,
+          "median": 3020.0,
+          "min": 3013.0,
+          "std": 3.215587038162705
+        },
+        "UNDERSAMPLED_STAR_CORE": {
+          "count": 5,
+          "max": 4596.5,
+          "mean": 4595.3,
+          "median": 4595.5,
+          "min": 4594.0,
+          "std": 0.812403840463596
+        }
+      },
+      "unit": "ADU"
+    },
+    "residual_iqr": {
+      "description": "interquartile range of the canonical residual series",
+      "per_class": {
+        "AMBIGUOUS_INSUFFICIENT_EVIDENCE": {
+          "count": 5,
+          "max": 9.0,
+          "mean": 6.0,
+          "median": 5.25,
+          "min": 5.0,
+          "std": 1.5083103128998356
+        },
+        "CENSORED_ANOMALY": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "COSMIC_RAY": {
+          "count": 5,
+          "max": 9.5,
+          "mean": 7.5,
+          "median": 7.75,
+          "min": 5.75,
+          "std": 1.3601470508735443
+        },
+        "DUST_OR_VIGNETTING": {
+          "count": 5,
+          "max": 9.0,
+          "mean": 6.0,
+          "median": 5.25,
+          "min": 5.0,
+          "std": 1.5083103128998356
+        },
+        "FLAT_STRUCTURE": {
+          "count": 5,
+          "max": 9.0,
+          "mean": 5.9,
+          "median": 5.0,
+          "min": 4.5,
+          "std": 1.6628289148315891
+        },
+        "INTERMITTENT_CONTINUOUS": {
+          "count": 5,
+          "max": 901.0,
+          "mean": 896.4,
+          "median": 896.25,
+          "min": 891.0,
+          "std": 3.6694686263817546
+        },
+        "INTERMITTENT_MULTI_STATE": {
+          "count": 5,
+          "max": 2499.5,
+          "mean": 2493.5,
+          "median": 2493.0,
+          "min": 2489.75,
+          "std": 3.3354160160315836
+        },
+        "INTERMITTENT_TWO_STATE": {
+          "count": 5,
+          "max": 2504.25,
+          "mean": 2499.8,
+          "median": 2499.25,
+          "min": 2495.5,
+          "std": 2.891366458960192
+        },
+        "NEAR_SATURATION": {
+          "count": 5,
+          "max": 9.0,
+          "mean": 6.0,
+          "median": 5.25,
+          "min": 5.0,
+          "std": 1.5083103128998356
+        },
+        "NOISE_EXTREME": {
+          "count": 5,
+          "max": 387.5,
+          "mean": 259.2,
+          "median": 223.5,
+          "min": 168.25,
+          "std": 81.24059945618323
+        },
+        "NORMAL": {
+          "count": 5,
+          "max": 9.0,
+          "mean": 6.0,
+          "median": 5.25,
+          "min": 5.0,
+          "std": 1.5083103128998356
+        },
+        "OPTICAL_STRUCTURE": {
+          "count": 5,
+          "max": 9.0,
+          "mean": 5.9,
+          "median": 5.0,
+          "min": 4.5,
+          "std": 1.6628289148315891
+        },
+        "RARE_HIGH_STATE": {
+          "count": 5,
+          "max": 9.25,
+          "mean": 7.95,
+          "median": 7.75,
+          "min": 6.25,
+          "std": 1.1661903789690602
+        },
+        "RARE_LOW_STATE": {
+          "count": 5,
+          "max": 11.5,
+          "mean": 7.5,
+          "median": 7.25,
+          "min": 4.5,
+          "std": 2.5446021299998947
+        },
+        "SIGN_CHANGING_POST_DARK": {
+          "count": 5,
+          "max": 2903.25,
+          "mean": 2900.05,
+          "median": 2900.25,
+          "min": 2897.25,
+          "std": 1.9710403344427023
+        },
+        "SINGLE_TRANSIENT": {
+          "count": 5,
+          "max": 9.5,
+          "mean": 7.5,
+          "median": 7.75,
+          "min": 5.75,
+          "std": 1.3601470508735443
+        },
+        "STABLE_ANOMALY_CORRECTED_BY_DARK": {
+          "count": 5,
+          "max": 9.0,
+          "mean": 6.0,
+          "median": 5.25,
+          "min": 5.0,
+          "std": 1.5083103128998356
+        },
+        "STABLE_ANOMALY_WITH_MISMATCHED_DARK": {
+          "count": 5,
+          "max": 9.0,
+          "mean": 6.0,
+          "median": 5.25,
+          "min": 5.0,
+          "std": 1.5083103128998356
+        },
+        "STAR_CROSSING_SITE": {
+          "count": 5,
+          "max": 1567.5,
+          "mean": 1563.1,
+          "median": 1563.25,
+          "min": 1558.75,
+          "std": 2.7865749586185546
+        },
+        "UNDERSAMPLED_STAR_CORE": {
+          "count": 5,
+          "max": 9.0,
+          "mean": 6.0,
+          "median": 5.25,
+          "min": 5.0,
+          "std": 1.5083103128998356
+        }
+      },
+      "unit": "ADU"
+    },
+    "residual_span": {
+      "description": "max - min of the canonical residual series",
+      "per_class": {
+        "AMBIGUOUS_INSUFFICIENT_EVIDENCE": {
+          "count": 5,
+          "max": 24.0,
+          "mean": 18.0,
+          "median": 17.0,
+          "min": 14.0,
+          "std": 3.4058772731852804
+        },
+        "CENSORED_ANOMALY": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "COSMIC_RAY": {
+          "count": 5,
+          "max": 30018.0,
+          "mean": 30013.0,
+          "median": 30012.0,
+          "min": 30009.0,
+          "std": 3.1622776601683795
+        },
+        "DUST_OR_VIGNETTING": {
+          "count": 5,
+          "max": 24.0,
+          "mean": 18.0,
+          "median": 17.0,
+          "min": 14.0,
+          "std": 3.4058772731852804
+        },
+        "FLAT_STRUCTURE": {
+          "count": 5,
+          "max": 23.0,
+          "mean": 18.0,
+          "median": 17.0,
+          "min": 14.0,
+          "std": 2.9664793948382653
+        },
+        "INTERMITTENT_CONTINUOUS": {
+          "count": 5,
+          "max": 1515.0,
+          "mean": 1506.0,
+          "median": 1507.0,
+          "min": 1497.0,
+          "std": 6.131883886702357
+        },
+        "INTERMITTENT_MULTI_STATE": {
+          "count": 5,
+          "max": 2519.0,
+          "mean": 2512.0,
+          "median": 2511.0,
+          "min": 2504.0,
+          "std": 5.176871642217914
+        },
+        "INTERMITTENT_TWO_STATE": {
+          "count": 5,
+          "max": 2519.0,
+          "mean": 2513.6,
+          "median": 2514.0,
+          "min": 2509.0,
+          "std": 3.2619012860600183
+        },
+        "NEAR_SATURATION": {
+          "count": 5,
+          "max": 24.0,
+          "mean": 18.0,
+          "median": 17.0,
+          "min": 14.0,
+          "std": 3.4058772731852804
+        },
+        "NOISE_EXTREME": {
+          "count": 5,
+          "max": 896.0,
+          "mean": 779.0,
+          "median": 780.0,
+          "min": 658.0,
+          "std": 82.796135175502
+        },
+        "NORMAL": {
+          "count": 5,
+          "max": 24.0,
+          "mean": 18.0,
+          "median": 17.0,
+          "min": 14.0,
+          "std": 3.4058772731852804
+        },
+        "OPTICAL_STRUCTURE": {
+          "count": 5,
+          "max": 23.0,
+          "mean": 18.0,
+          "median": 17.0,
+          "min": 14.0,
+          "std": 2.9664793948382653
+        },
+        "RARE_HIGH_STATE": {
+          "count": 5,
+          "max": 2520.0,
+          "mean": 2512.2,
+          "median": 2513.0,
+          "min": 2504.0,
+          "std": 5.67097875150313
+        },
+        "RARE_LOW_STATE": {
+          "count": 5,
+          "max": 2517.0,
+          "mean": 2512.4,
+          "median": 2511.0,
+          "min": 2509.0,
+          "std": 2.8
+        },
+        "SIGN_CHANGING_POST_DARK": {
+          "count": 5,
+          "max": 2912.0,
+          "mean": 2907.4,
+          "median": 2906.0,
+          "min": 2905.0,
+          "std": 2.4979991993593593
+        },
+        "SINGLE_TRANSIENT": {
+          "count": 5,
+          "max": 5018.0,
+          "mean": 5013.0,
+          "median": 5012.0,
+          "min": 5009.0,
+          "std": 3.1622776601683795
+        },
+        "STABLE_ANOMALY_CORRECTED_BY_DARK": {
+          "count": 5,
+          "max": 24.0,
+          "mean": 18.0,
+          "median": 17.0,
+          "min": 14.0,
+          "std": 3.4058772731852804
+        },
+        "STABLE_ANOMALY_WITH_MISMATCHED_DARK": {
+          "count": 5,
+          "max": 24.0,
+          "mean": 18.0,
+          "median": 17.0,
+          "min": 14.0,
+          "std": 3.4058772731852804
+        },
+        "STAR_CROSSING_SITE": {
+          "count": 5,
+          "max": 3470.0,
+          "mean": 3466.0,
+          "median": 3464.0,
+          "min": 3463.0,
+          "std": 3.286335345030997
+        },
+        "UNDERSAMPLED_STAR_CORE": {
+          "count": 5,
+          "max": 24.0,
+          "mean": 18.0,
+          "median": 17.0,
+          "min": 14.0,
+          "std": 3.4058772731852804
+        }
+      },
+      "unit": "ADU"
+    },
+    "residual_std": {
+      "description": "population std of the canonical residual series",
+      "per_class": {
+        "AMBIGUOUS_INSUFFICIENT_EVIDENCE": {
+          "count": 5,
+          "max": 4.988876515698588,
+          "mean": 4.433209849210276,
+          "median": 4.6067583203617515,
+          "min": 3.599527360949243,
+          "std": 0.5392102141903732
+        },
+        "CENSORED_ANOMALY": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "COSMIC_RAY": {
+          "count": 5,
+          "max": 11180.582704996368,
+          "mean": 11179.807815972661,
+          "median": 11179.707408651424,
+          "min": 11178.738206474329,
+          "std": 0.6894542332502983
+        },
+        "DUST_OR_VIGNETTING": {
+          "count": 5,
+          "max": 4.988876515698588,
+          "mean": 4.433209849210276,
+          "median": 4.6067583203617515,
+          "min": 3.599527360949243,
+          "std": 0.5392102141903732
+        },
+        "FLAT_STRUCTURE": {
+          "count": 5,
+          "max": 5.239904314223899,
+          "mean": 4.463049961489468,
+          "median": 4.683748498798798,
+          "min": 3.6016971308290517,
+          "std": 0.6054764305202333
+        },
+        "INTERMITTENT_CONTINUOUS": {
+          "count": 5,
+          "max": 513.2732310594643,
+          "mean": 511.74808578936506,
+          "median": 512.1522126173907,
+          "min": 510.0984773523856,
+          "std": 1.1579240661083072
+        },
+        "INTERMITTENT_MULTI_STATE": {
+          "count": 5,
+          "max": 1021.7930318807229,
+          "mean": 1020.7701430261625,
+          "median": 1020.8842028141858,
+          "min": 1019.0091379687863,
+          "std": 1.0183228111656253
+        },
+        "INTERMITTENT_TWO_STATE": {
+          "count": 5,
+          "max": 1252.505976920758,
+          "mean": 1249.848669643075,
+          "median": 1248.9259691386392,
+          "min": 1248.4256307668293,
+          "std": 1.553626507303139
+        },
+        "NEAR_SATURATION": {
+          "count": 5,
+          "max": 4.988876515698588,
+          "mean": 4.433209849210276,
+          "median": 4.6067583203617515,
+          "min": 3.599527360949243,
+          "std": 0.5392102141903732
+        },
+        "NOISE_EXTREME": {
+          "count": 5,
+          "max": 262.1567299187009,
+          "mean": 202.20844701036384,
+          "median": 199.92716989916326,
+          "min": 162.40894350544724,
+          "std": 34.142479233535944
+        },
+        "NORMAL": {
+          "count": 5,
+          "max": 4.988876515698588,
+          "mean": 4.433209849210276,
+          "median": 4.6067583203617515,
+          "min": 3.599527360949243,
+          "std": 0.5392102141903732
+        },
+        "OPTICAL_STRUCTURE": {
+          "count": 5,
+          "max": 5.239904314223899,
+          "mean": 4.463049961489468,
+          "median": 4.683748498798798,
+          "min": 3.6016971308290517,
+          "std": 0.6054764305202333
+        },
+        "RARE_HIGH_STATE": {
+          "count": 5,
+          "max": 932.4487586457499,
+          "mean": 931.3731811582298,
+          "median": 932.304175893731,
+          "min": 929.8784866852228,
+          "std": 1.2006316760386218
+        },
+        "RARE_LOW_STATE": {
+          "count": 5,
+          "max": 933.5306934191053,
+          "mean": 932.0365458283262,
+          "median": 931.1118801375769,
+          "min": 930.9580601306496,
+          "std": 1.196849504158425
+        },
+        "SIGN_CHANGING_POST_DARK": {
+          "count": 5,
+          "max": 1452.1690290351496,
+          "mean": 1450.1698567418366,
+          "median": 1449.9221794251196,
+          "min": 1449.045532962033,
+          "std": 1.0934464498366856
+        },
+        "SINGLE_TRANSIENT": {
+          "count": 5,
+          "max": 1863.6356823685317,
+          "mean": 1862.8622011910818,
+          "median": 1862.7628729479588,
+          "min": 1861.7924756057594,
+          "std": 0.6888990132458531
+        },
+        "STABLE_ANOMALY_CORRECTED_BY_DARK": {
+          "count": 5,
+          "max": 4.988876515698588,
+          "mean": 4.433209849210276,
+          "median": 4.6067583203617515,
+          "min": 3.599527360949243,
+          "std": 0.5392102141903732
+        },
+        "STABLE_ANOMALY_WITH_MISMATCHED_DARK": {
+          "count": 5,
+          "max": 4.988876515698588,
+          "mean": 4.433209849210276,
+          "median": 4.6067583203617515,
+          "min": 3.599527360949243,
+          "std": 0.5392102141903732
+        },
+        "STAR_CROSSING_SITE": {
+          "count": 5,
+          "max": 1186.2674626978335,
+          "mean": 1185.5980365721857,
+          "median": 1185.4632350255415,
+          "min": 1185.2587087202617,
+          "std": 0.35821092487562955
+        },
+        "UNDERSAMPLED_STAR_CORE": {
+          "count": 5,
+          "max": 4.988876515698588,
+          "mean": 4.433209849210276,
+          "median": 4.6067583203617515,
+          "min": 3.599527360949243,
+          "std": 0.5392102141903732
+        }
+      },
+      "unit": "ADU"
+    },
+    "robust_local_scale_median": {
+      "description": "median raw MAD of the same-CFA local window",
+      "per_class": {
+        "AMBIGUOUS_INSUFFICIENT_EVIDENCE": {
+          "count": 5,
+          "max": 3.25,
+          "mean": 2.9,
+          "median": 3.0,
+          "min": 2.5,
+          "std": 0.25495097567963926
+        },
+        "CENSORED_ANOMALY": {
+          "count": 5,
+          "max": 3.25,
+          "mean": 2.9,
+          "median": 3.0,
+          "min": 2.5,
+          "std": 0.25495097567963926
+        },
+        "COSMIC_RAY": {
+          "count": 5,
+          "max": 3.25,
+          "mean": 2.9,
+          "median": 3.0,
+          "min": 2.5,
+          "std": 0.25495097567963926
+        },
+        "DUST_OR_VIGNETTING": {
+          "count": 5,
+          "max": 64.0,
+          "mean": 62.9,
+          "median": 63.0,
+          "min": 62.0,
+          "std": 0.6633249580710799
+        },
+        "FLAT_STRUCTURE": {
+          "count": 5,
+          "max": 227.0,
+          "mean": 226.35,
+          "median": 226.5,
+          "min": 225.0,
+          "std": 0.7
+        },
+        "INTERMITTENT_CONTINUOUS": {
+          "count": 5,
+          "max": 3.25,
+          "mean": 2.9,
+          "median": 3.0,
+          "min": 2.5,
+          "std": 0.25495097567963926
+        },
+        "INTERMITTENT_MULTI_STATE": {
+          "count": 5,
+          "max": 3.25,
+          "mean": 2.9,
+          "median": 3.0,
+          "min": 2.5,
+          "std": 0.25495097567963926
+        },
+        "INTERMITTENT_TWO_STATE": {
+          "count": 5,
+          "max": 3.25,
+          "mean": 2.9,
+          "median": 3.0,
+          "min": 2.5,
+          "std": 0.25495097567963926
+        },
+        "NEAR_SATURATION": {
+          "count": 5,
+          "max": 3.25,
+          "mean": 2.9,
+          "median": 3.0,
+          "min": 2.5,
+          "std": 0.25495097567963926
+        },
+        "NOISE_EXTREME": {
+          "count": 5,
+          "max": 3.0,
+          "mean": 2.85,
+          "median": 2.75,
+          "min": 2.75,
+          "std": 0.1224744871391589
+        },
+        "NORMAL": {
+          "count": 5,
+          "max": 3.25,
+          "mean": 2.9,
+          "median": 3.0,
+          "min": 2.5,
+          "std": 0.25495097567963926
+        },
+        "OPTICAL_STRUCTURE": {
+          "count": 5,
+          "max": 227.0,
+          "mean": 226.35,
+          "median": 226.5,
+          "min": 225.0,
+          "std": 0.7
+        },
+        "RARE_HIGH_STATE": {
+          "count": 5,
+          "max": 3.25,
+          "mean": 2.9,
+          "median": 3.0,
+          "min": 2.5,
+          "std": 0.25495097567963926
+        },
+        "RARE_LOW_STATE": {
+          "count": 5,
+          "max": 3.25,
+          "mean": 2.9,
+          "median": 3.0,
+          "min": 2.5,
+          "std": 0.25495097567963926
+        },
+        "SIGN_CHANGING_POST_DARK": {
+          "count": 5,
+          "max": 3.25,
+          "mean": 2.9,
+          "median": 3.0,
+          "min": 2.5,
+          "std": 0.25495097567963926
+        },
+        "SINGLE_TRANSIENT": {
+          "count": 5,
+          "max": 3.25,
+          "mean": 2.9,
+          "median": 3.0,
+          "min": 2.5,
+          "std": 0.25495097567963926
+        },
+        "STABLE_ANOMALY_CORRECTED_BY_DARK": {
+          "count": 5,
+          "max": 3.25,
+          "mean": 2.9,
+          "median": 3.0,
+          "min": 2.5,
+          "std": 0.25495097567963926
+        },
+        "STABLE_ANOMALY_WITH_MISMATCHED_DARK": {
+          "count": 5,
+          "max": 3.25,
+          "mean": 2.9,
+          "median": 3.0,
+          "min": 2.5,
+          "std": 0.25495097567963926
+        },
+        "STAR_CROSSING_SITE": {
+          "count": 5,
+          "max": 439.0,
+          "mean": 437.95,
+          "median": 438.25,
+          "min": 436.0,
+          "std": 1.0295630140987
+        },
+        "UNDERSAMPLED_STAR_CORE": {
+          "count": 5,
+          "max": 3.25,
+          "mean": 2.9,
+          "median": 3.0,
+          "min": 2.5,
+          "std": 0.25495097567963926
+        }
+      },
+      "unit": "ADU"
+    },
+    "sign_changes": {
+      "description": "strict sign crossings of the canonical residual",
+      "per_class": {
+        "AMBIGUOUS_INSUFFICIENT_EVIDENCE": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "CENSORED_ANOMALY": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "COSMIC_RAY": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "DUST_OR_VIGNETTING": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "FLAT_STRUCTURE": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "INTERMITTENT_CONTINUOUS": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "INTERMITTENT_MULTI_STATE": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "INTERMITTENT_TWO_STATE": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "NEAR_SATURATION": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "NOISE_EXTREME": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "NORMAL": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "OPTICAL_STRUCTURE": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "RARE_HIGH_STATE": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "RARE_LOW_STATE": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "SIGN_CHANGING_POST_DARK": {
+          "count": 5,
+          "max": 23.0,
+          "mean": 23.0,
+          "median": 23.0,
+          "min": 23.0,
+          "std": 0.0
+        },
+        "SINGLE_TRANSIENT": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "STABLE_ANOMALY_CORRECTED_BY_DARK": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "STABLE_ANOMALY_WITH_MISMATCHED_DARK": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "STAR_CROSSING_SITE": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "UNDERSAMPLED_STAR_CORE": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        }
+      },
+      "unit": "count"
+    },
+    "snr": {
+      "description": "local_residual_median / robust_local_scale_median",
+      "per_class": {
+        "AMBIGUOUS_INSUFFICIENT_EVIDENCE": {
+          "count": 5,
+          "max": 24.9,
+          "mean": 20.898298368298367,
+          "median": 19.75,
+          "min": 18.53846153846154,
+          "std": 2.2343988875598275
+        },
+        "CENSORED_ANOMALY": {
+          "count": 5,
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "min": 0.0,
+          "std": 0.0
+        },
+        "COSMIC_RAY": {
+          "count": 5,
+          "max": 2.0,
+          "mean": 1.6206293706293706,
+          "median": 1.5454545454545454,
+          "min": 1.3076923076923077,
+          "std": 0.25859106499898815
+        },
+        "DUST_OR_VIGNETTING": {
+          "count": 5,
+          "max": 3.5766129032258065,
+          "mean": 3.5463952988991294,
+          "median": 3.5634920634920637,
+          "min": 3.49609375,
+          "std": 0.03016297065875068
+        },
+        "FLAT_STRUCTURE": {
+          "count": 5,
+          "max": 4.18,
+          "mean": 4.160403596155356,
+          "median": 4.154525386313466,
+          "min": 4.149779735682819,
+          "std": 0.011190890269145208
+        },
+        "INTERMITTENT_CONTINUOUS": {
+          "count": 5,
+          "max": 299.3,
+          "mean": 260.82631701631703,
+          "median": 250.16666666666666,
+          "min": 231.3846153846154,
+          "std": 23.39602987707178
+        },
+        "INTERMITTENT_MULTI_STATE": {
+          "count": 5,
+          "max": 482.0,
+          "mean": 417.4883449883449,
+          "median": 400.6666666666667,
+          "min": 370.15384615384613,
+          "std": 38.32426262703236
+        },
+        "INTERMITTENT_TWO_STATE": {
+          "count": 5,
+          "max": 498.4,
+          "mean": 434.77662004662005,
+          "median": 417.25,
+          "min": 385.38461538461536,
+          "std": 38.93800182370276
+        },
+        "NEAR_SATURATION": {
+          "count": 5,
+          "max": 22000.9,
+          "mean": 19117.991072261073,
+          "median": 18333.083333333332,
+          "min": 16923.153846153848,
+          "std": 1740.0220991729368
+        },
+        "NOISE_EXTREME": {
+          "count": 5,
+          "max": 67.0,
+          "mean": 49.874242424242425,
+          "median": 42.72727272727273,
+          "min": 37.18181818181818,
+          "std": 11.68474357113721
+        },
+        "NORMAL": {
+          "count": 5,
+          "max": 1.75,
+          "mean": 1.337132867132867,
+          "median": 1.1818181818181819,
+          "min": 1.0,
+          "std": 0.2866822770199744
+        },
+        "OPTICAL_STRUCTURE": {
+          "count": 5,
+          "max": 4.18,
+          "mean": 4.160403596155356,
+          "median": 4.154525386313466,
+          "min": 4.149779735682819,
+          "std": 0.011190890269145208
+        },
+        "RARE_HIGH_STATE": {
+          "count": 5,
+          "max": 2.0,
+          "mean": 1.6308857808857808,
+          "median": 1.6923076923076923,
+          "min": 1.0833333333333333,
+          "std": 0.31244684292052255
+        },
+        "RARE_LOW_STATE": {
+          "count": 5,
+          "max": 1000.1,
+          "mean": 868.6557808857809,
+          "median": 832.8333333333334,
+          "min": 769.3076923076923,
+          "std": 79.140427500663
+        },
+        "SIGN_CHANGING_POST_DARK": {
+          "count": 5,
+          "max": 577.1,
+          "mean": 503.08002331002336,
+          "median": 482.5833333333333,
+          "min": 446.3076923076923,
+          "std": 44.9745053084645
+        },
+        "SINGLE_TRANSIENT": {
+          "count": 5,
+          "max": 2.0,
+          "mean": 1.6206293706293706,
+          "median": 1.5454545454545454,
+          "min": 1.3076923076923077,
+          "std": 0.25859106499898815
+        },
+        "STABLE_ANOMALY_CORRECTED_BY_DARK": {
+          "count": 5,
+          "max": 600.9,
+          "mean": 521.4409557109557,
+          "median": 499.75,
+          "min": 461.61538461538464,
+          "std": 47.76067259796679
+        },
+        "STABLE_ANOMALY_WITH_MISMATCHED_DARK": {
+          "count": 5,
+          "max": 600.9,
+          "mean": 521.4409557109557,
+          "median": 499.75,
+          "min": 461.61538461538464,
+          "std": 47.76067259796679
+        },
+        "STAR_CROSSING_SITE": {
+          "count": 5,
+          "max": 3.2855504587155964,
+          "mean": 3.2660374836771586,
+          "median": 3.261986301369863,
+          "min": 3.2505694760820045,
+          "std": 0.011613140098433637
+        },
+        "UNDERSAMPLED_STAR_CORE": {
+          "count": 5,
+          "max": 1600.9,
+          "mean": 1390.4386247086247,
+          "median": 1333.0833333333333,
+          "min": 1230.8461538461538,
+          "std": 126.83767533172622
+        }
+      },
+      "unit": "dimensionless"
+    }
+  },
+  "summary_schema": "zecalibrator-p3c-lot2-development-feature-summary",
+  "summary_version": 1
+}

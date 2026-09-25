@@ -40,6 +40,7 @@ import pytest
 
 INFERENCE_MODULES = [
     "research.p3c.inference_contract",
+    "research.p3c.inference_candidates",
 ]
 
 # Modules whose import would leak truth into the inference side.
