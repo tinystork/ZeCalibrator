@@ -20,15 +20,16 @@ Mapping rules (explicit and versioned, never silent):
   residual states).
 * **``net_benefit_established``** is the always-``UNDETERMINED`` separate proof
   carried by ``InferredEvidence``; it is passed through, never forced.
-* **Three binary facts** (``transient_only``, ``conflicting_evidence``,
-  ``censored_measurement_present``) are *binary* in the LOT2 packet (``YES`` /
-  ``NO``) but *ternary* in the inference contract (``UNDETERMINED`` allowed).
-  An ``UNDETERMINED`` inference for one of these is mapped to ``NO`` ("the
-  positive claim is not established"). This is a documented, tested adapter
-  convention — and it can never change a qualification outcome in practice,
-  because whenever the inference leaves such a fact ``UNDETERMINED`` (the
-  insufficient-frames case), the *persistence* and/or *residual* facts are also
-  ``UNDETERMINED`` and the policy already abstains via those.
+* **Three safety facts** (``censored_measurement_present``,
+  ``conflicting_evidence``, ``transient_only``) are *binary* in the LOT2 packet
+  (``YES`` / ``NO``) but *ternary* in the inference contract (``UNDETERMINED``
+  allowed). For these three, ``YES`` is the **abstain** side (the safety guard
+  that blocks action: P2 ``ABSTAIN_CENSORED``, P3/P4 ``ABSTAIN_INCONSISTENT``)
+  and ``NO`` is the **permissive** side. The bridge is **fail-closed**: an
+  ``UNDETERMINED`` inference for a safety fact maps to ``YES`` (abstain), never
+  to the permissive ``NO``. This is a deliberate safety choice, not a claim
+  that the fact is actually ``YES`` — the inference did not resolve it, so the
+  bridge refuses to let the existing policy proceed past the guard.
 """
 
 from __future__ import annotations
@@ -48,21 +49,22 @@ from .inference_contract import (
     undetermined_value_for,
 )
 
-# Version of the adapter convention (the UNDETERMINED -> NO mapping above).
-ADAPTER_VERSION = "p3c-evidence-bridge-1"
+# Version of the adapter convention (the fail-closed mapping above).
+ADAPTER_VERSION = "p3c-evidence-bridge-2"
 
 
-def _binary_fact(field: str, value: str) -> str:
-    """Map a (possibly ternary) inferred value to the packet's binary fact.
+def _safety_fact(field: str, value: str) -> str:
+    """Project a (possibly ternary) safety fact to the packet's binary fact, fail-closed.
 
-    ``YES`` / ``NO`` pass through. ``UNDETERMINED`` maps to ``NO`` — the
-    "positive claim not established" side — which is documented and safe
-    (see module docstring).
+    ``YES`` / ``NO`` pass through. ``UNDETERMINED`` maps to ``YES`` — the
+    abstain side — so the existing policy abstains (``ABSTAIN_CENSORED`` /
+    ``ABSTAIN_INCONSISTENT``) rather than proceeding past a safety guard on an
+    unresolved fact. Never the permissive ``NO`` default.
     """
     if value in (YES, NO):
         return value
     if value == INFER_UNDETERMINED:
-        return NO
+        return YES
     raise ValueError(
         f"{field} must be YES/NO/UNDETERMINED in the inference output, got {value!r}"
     )
@@ -101,13 +103,13 @@ def to_evidence_packet(evidence: InferredEvidence) -> EvidencePacket:
         persisted_at_same_sensor_coord=by_field["persisted_at_same_sensor_coord"],
         independent_group_count=admission.independent_group_count,
         epoch_count=admission.epoch_count,
-        censored_measurement_present=_binary_fact(
+        censored_measurement_present=_safety_fact(
             "censored_measurement_present", by_field["censored_measurement_present"]
         ),
         site_residual_behaviour=by_field["site_residual_behaviour"],
         neighbourhood_residual_stable=by_field["neighbourhood_residual_stable"],
-        transient_only=_binary_fact("transient_only", by_field["transient_only"]),
-        conflicting_evidence=_binary_fact("conflicting_evidence", by_field["conflicting_evidence"]),
+        transient_only=_safety_fact("transient_only", by_field["transient_only"]),
+        conflicting_evidence=_safety_fact("conflicting_evidence", by_field["conflicting_evidence"]),
         net_benefit_established=evidence.net_benefit_established,
         persisted_basis=f"candidate={evidence.candidate_id}",
     )

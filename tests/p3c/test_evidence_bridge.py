@@ -1,8 +1,14 @@
-"""P3C-2 — evidence bridge (inference → existing LOT2 policy) tests."""
+"""P3C-2 — evidence bridge (inference → existing LOT2 policy) tests.
+
+Includes the fail-closed safety-fact convention (rework-1 M1): an UNDETERMINED
+safety fact must lead the existing policy to ABSTAIN, never to proceed.
+"""
 
 from __future__ import annotations
 
-from research.p3c.evidence_bridge import ADAPTER_VERSION, to_evidence_packet
+import pytest
+
+from research.p3c.evidence_bridge import ADAPTER_VERSION, _safety_fact, to_evidence_packet
 from research.p3c.inference_candidates import CANDIDATE_BASELINE, infer_site
 from research.p3c.inference_contract import (
     NO,
@@ -12,7 +18,15 @@ from research.p3c.inference_contract import (
     InferredEvidence,
     InferredField,
 )
-from research.p3b.qualification_policy import EvidencePacket
+from research.p3b.qualification_policy import (
+    ACTION_ABSTAIN_CENSORED,
+    ACTION_ABSTAIN_INCONSISTENT,
+    RC_EVIDENCE_CENSORED,
+    RC_INCONSISTENT_EVIDENCE,
+    RC_TRANSIENT_ONLY,
+    EvidencePacket,
+    evaluate,
+)
 
 
 def _admission(**overrides):
@@ -28,8 +42,29 @@ def _admission(**overrides):
     return AdmissionFacts(**base)
 
 
-def test_adapter_version_is_declared():
-    assert ADAPTER_VERSION
+def _full_evidence(**overrides) -> InferredEvidence:
+    """A benign, otherwise-eligible evidence set, with one fact overridable."""
+    facts = {
+        "persisted_at_same_sensor_coord": YES,
+        "site_residual_behaviour": "NONE",
+        "neighbourhood_residual_stable": YES,
+        "transient_only": NO,
+        "conflicting_evidence": NO,
+        "censored_measurement_present": NO,
+    }
+    facts.update(overrides)
+    fields = []
+    for name, value in facts.items():
+        uncertainty = "UNDETERMINED" if value in (UNDETERMINED, "INDETERMINATE") else "DETERMINED"
+        fields.append(InferredField(name, value, "test", uncertainty))
+    return InferredEvidence(
+        candidate_id="c1", admission=_admission(), sensor_evidence=tuple(fields)
+    )
+
+
+def test_adapter_version_is_bumped():
+    # rework-1 M1: the convention changed (fail-closed), so the version must too.
+    assert ADAPTER_VERSION == "p3c-evidence-bridge-2"
 
 
 def test_exogenous_facts_traverse_verbatim():
@@ -73,18 +108,6 @@ def test_net_benefit_is_never_forced():
     assert packet.net_benefit_established == UNDETERMINED
 
 
-def test_binary_fact_undetermined_maps_to_no():
-    # The inference contract allows UNDETERMINED on transient_only; the LOT2
-    # packet is binary. The documented adapter convention maps UNDETERMINED→NO.
-    ev = InferredEvidence(
-        candidate_id="c1",
-        admission=_admission(),
-        sensor_evidence=(InferredField("transient_only", UNDETERMINED, "s", "UNDETERMINED"),),
-    )
-    packet = to_evidence_packet(ev)
-    assert packet.transient_only == NO
-
-
 def test_persisted_basis_names_the_candidate():
     ev = InferredEvidence(candidate_id="cand-7", admission=_admission())
     packet = to_evidence_packet(ev)
@@ -106,3 +129,61 @@ def test_inferred_then_bridged_reaches_policy(features_factory):
         "censored_measurement_present",
     ):
         assert isinstance(getattr(packet, field), str)
+
+
+# ---------------------------------------------------------------------------
+# rework-1 M1 — fail-closed safety facts
+# ---------------------------------------------------------------------------
+
+_SAFETY_FACTS = (
+    "censored_measurement_present",
+    "conflicting_evidence",
+    "transient_only",
+)
+
+
+@pytest.mark.parametrize("field", _SAFETY_FACTS)
+def test_safety_fact_undetermined_maps_to_yes_not_no(field):
+    # Direct witness: under the OLD convention this returned NO (permissive).
+    # The fail-closed convention must return YES (abstain).
+    assert _safety_fact(field, UNDETERMINED) == YES
+    assert _safety_fact(field, NO) == NO
+    assert _safety_fact(field, YES) == YES
+
+
+def test_witness_old_no_mapping_would_not_abstain_on_safety_guard():
+    # A test that FAILS under the old UNDETERMINED→NO convention: with
+    # transient_only UNDETERMINED, the old bridge passed transient_only=NO and
+    # the policy proceeded past the P4 guard (here to NO_ACTION via residual
+    # NONE); the fail-closed bridge must instead trigger the transient guard.
+    ev = _full_evidence(transient_only=UNDETERMINED)
+    decision = evaluate(to_evidence_packet(ev))
+    assert decision.action == ACTION_ABSTAIN_INCONSISTENT
+    assert RC_TRANSIENT_ONLY in decision.reason_codes
+
+
+@pytest.mark.parametrize(
+    "override, expected_action, expected_code",
+    [
+        ("censored_measurement_present", ACTION_ABSTAIN_CENSORED, RC_EVIDENCE_CENSORED),
+        ("conflicting_evidence", ACTION_ABSTAIN_INCONSISTENT, RC_INCONSISTENT_EVIDENCE),
+        ("transient_only", ACTION_ABSTAIN_INCONSISTENT, RC_TRANSIENT_ONLY),
+    ],
+)
+def test_undetermined_safety_fact_forces_policy_abstention(
+    override, expected_action, expected_code
+):
+    # Each safety fact, left UNDETERMINED, must make the EXISTING policy abstain
+    # at that fact's guard — never pass it.
+    ev = _full_evidence(**{override: UNDETERMINED})
+    decision = evaluate(to_evidence_packet(ev))
+    assert decision.action == expected_action
+    assert expected_code in decision.reason_codes
+
+
+def test_the_three_safety_facts_remain_binary_in_the_packet():
+    # The fix does not touch qualification_policy: the packet facts stay binary.
+    ev = _full_evidence(transient_only=UNDETERMINED)
+    packet = to_evidence_packet(ev)
+    for field in _SAFETY_FACTS:
+        assert getattr(packet, field) in (YES, NO)
