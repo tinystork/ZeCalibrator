@@ -1063,3 +1063,93 @@ schema-version unchanged); pre-G2B revisions load with `acquired_at=None`.
 without a schema bump); (b) ZSSS readiness — public strict matching vs private
 Standard derivation; (c) the frozen `research/phase1/cases.json` declaration that
 now disagrees with the matcher (local override documented, file untouched).
+
+---
+
+## 18. Sensor-site preparation seam (design, P3B — **not** a capability)
+
+Design-only section recording the ratified boundary so a future implementation
+cannot re-open it. **No public API, no capability string, no `provides` entry,
+no `api/v1` change is created here.** See `docs/SCIENCE_CONTRACT.md` §13 for the
+normative science rules.
+
+### 18.1 Responsibility split — HYBRID ASYMMETRIC (owner decision, 2026-09-25)
+
+| | ZeCalibrator | ZSSS |
+|---|---|---|
+| owns | ordinary calibration · profile applicability · qualified sensor knowledge · action/abstention decision · optional targeted CFA preparation · prepared calibrated result | registration · stacking · generic statistical rejection · cosmic/transient/outlier rejection |
+| persistent sensor knowledge | **exclusively** | never |
+
+**Non-duplication rule (normative):** the same correction must not live in both
+products. The upstream mechanism removes a *known, qualified* cause; the
+downstream mechanism absorbs *what is not modelled*. Neither may be optimised to
+replace the other. ZSSS is unchanged for now; `batch=36` must not be
+industrialised.
+
+### 18.2 Pipeline position (INVARIANT)
+
+```text
+ordinary calibration -> POST-CALIBRATION CFA -> optional qualified preparation
+                     -> (consumer-owned) debayer -> registration -> stacking
+```
+
+Preparation is a ZeCalibrator-side operation in the **sensor grid**, after
+calibration and before the consumer's debayer. Raw-domain repair before dark
+subtraction is forbidden (`SCIENCE_CONTRACT.md` §13.1). The existing invariant
+"never calibrate already-normalized or debayered data" is unchanged.
+
+### 18.3 Per site is not per frame — run-wide atomicity (P-A, ADOPTED v1)
+
+```text
+if a site cannot be prepared honestly and uniformly over the run,
+it is reconstructed on NO frame of that run.
+```
+
+- The **route** decision and **eligibility** are run-level and uniform over all
+  frames; this preserves the P0 invariant **no inter-frame switching**.
+- Atomicity is **site × run**, never global: one blocked site must not disable
+  other independently qualified sites in the same run.
+- Donor availability is evaluated **run-wide**. Any per-frame applicability
+  outcome must be **declared in provenance**, never silent.
+- The run plan must be **frozen before final output**, which requires preflight
+  of all frames or transactional staging: discovering a failure *after* writing
+  earlier frames and then silently continuing without the preparation is
+  forbidden.
+- P-B (partial, declared per-frame preparation) is **NOT ADOPTED**.
+
+### 18.4 Internal only
+
+Interfaces created for this seam (synthetic evidence, qualification state,
+action decision, run preparation plan, metrics) remain **internal**:
+non-public, non-capability, and **not importable from `api/v1`**. Any future
+public exposure (`prepare_calibrated_cfa(...)` or equivalent) is a separate
+owner gate.
+
+The **prepared result is distinct from `CalibrationResult` v1**: any future
+`measurement_dq`, `reconstructed_mask` and `usable_mask` are new fields of a
+*different* type that references the calibration result. DQ v1 semantics are
+**not** redefined.
+
+### 18.5 ZSSS integration seam (still deferred — unchanged)
+
+The seam at §10 remains deferred: ZSSS must consume the **public** ZeCalibrator
+interfaces only, never a private import. The known debt is preserved and not
+fixed here:
+
+```text
+strict public resolution route -> NO_MATCH on this corpus
+existing Standard application route -> works
+```
+
+P0 fallback semantics remain binding: ZeCalibrator unavailable/incompatible →
+legacy whole-run ZSSS semantics; ZeCalibrator healthy but no usable profile →
+calibration-only whole-run semantics. **No inter-frame switching.** The seam
+stays compatible because preparation is internal to the ZeCalibrator run and is
+applied uniformly across its frames.
+
+### 18.6 Performance expectations (not a promise)
+
+For a small number of sites, the local operation per frame is expected to be
+negligible next to calibrating a whole frame; the expected dominant costs are
+**provenance generation** and **profile/revision resolution** — to be confirmed
+by measurement. CPU is canonical; GPU is not required to open this capability.

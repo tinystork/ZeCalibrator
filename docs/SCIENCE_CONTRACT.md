@@ -590,3 +590,131 @@ Full operational details and evidence: ARCHITECTURE §14.
 - The matching policy version is separate from the science version so a profile
   threshold change (e.g. a flat quality gate) does not silently change the
   equations.
+
+---
+
+## 13. Sensor-site qualification and targeted preparation
+(specified, **EXPERIMENTAL** — no capability, no public API)
+
+This section records a **normative intent** for a future capability. It does NOT
+publish one: no function, capability string, `provides` entry or `api/v1`
+signature is created by it, and `SensorProfile` is neither public nor
+product-ready. Its purpose is to prevent a future implementation from quietly
+re-deciding questions that were settled experimentally.
+
+### 13.1 Stage (INVARIANT)
+
+```text
+ordinary calibration -> POST-CALIBRATION CFA -> optional qualified preparation
+                     -> debayer -> registration
+```
+
+Targeted preparation happens **after** ordinary calibration and **before**
+debayer/registration, in the sensor grid. Repairing the **raw** before dark
+subtraction is **forbidden**: a dark master carries the same site, so removing it
+from the light alone leaves an artefact of the order of the master's site value.
+
+### 13.2 Four stages, never collapsed
+
+```text
+DETECTION            "something looks anomalous"   -> candidates only
+QUALIFICATION        "evidence proves enough"      -> epistemic state only
+ACTION ELIGIBILITY   "science permits it"          -> re-evaluated per observation
+ACTION               "it is actually applied"      -> prepared result + provenance
+```
+
+No `detected -> corrected` path may exist. `ACTION ELIGIBILITY` is never a
+permanent right: representativeness and censoring are properties of an
+observation, so eligibility is re-evaluated at every application.
+
+### 13.3 Knowledge is not action (INVARIANT)
+
+```text
+KNOWN SENSOR ANOMALY   does NOT imply   RECONSTRUCT THIS PIXEL
+```
+
+A site may be known, persistent and historically abnormal while being currently
+corrected sufficiently by a representative calibration. That case is
+`NO_ACTION_REQUIRED` — a first-class outcome. A site is never removed from
+persistent knowledge merely because a current dark corrects it.
+
+### 13.4 Censoring (INVARIANT)
+
+```text
+observed acquisition-path hard limit -> measurement censored
+                                     -> quantitative residual not trustworthy
+```
+
+A censored site may remain historically known, but the censored value itself
+cannot qualify amplitude, state, benefit or reconstruction. Deriving any
+quantitative inference from a censored measurement is a **contract violation**,
+not an inaccuracy.
+
+### 13.5 Independence bookkeeping (INVARIANT)
+
+```text
+frame_count | observation_count | independent_group_count | epoch_count
+```
+
+An aggregate derived from frames never creates a new independent observation:
+
+```text
+20 frames from one sequence  !=  20 independent groups
+```
+
+`epoch_count >= 2` is adopted as a conservative v1 requirement for **persistent
+qualification**. It is a promotion policy, not a physical law, not a detection
+threshold and not an RTS criterion. A phenomenon may be strongly supported on a
+single campaign and still yield `ABSTAIN_INSUFFICIENT_INDEPENDENCE`.
+
+### 13.6 Calibration representativeness precedes everything (INVARIANT)
+
+A reconstruction need is never judged against a demonstrably
+non-representative additive calibration. Representativeness is **measured** —
+no age rule (`dark < N months` or equivalent) is admissible. An inadequate
+calibration yields *requalify the calibration*, never *interpolate the site*.
+
+### 13.7 Action states, ordered ladder
+
+`REQUALIFY_ADDITIVE_CALIBRATION` > `ABSTAIN_CENSORED` >
+`ABSTAIN_INCONSISTENT` > `ABSTAIN_INSUFFICIENT_EVIDENCE` >
+`ELIGIBLE_FOR_TARGETED_RECONSTRUCTION` > `NO_ACTION_REQUIRED`
+
+The first satisfied condition decides. Abstention is a valid, first-class
+outcome and is counted as such, not as a failure.
+
+### 13.8 Run-wide atomicity — policy P-A (ADOPTED v1)
+
+```text
+if a site cannot be prepared honestly and uniformly over the run,
+it is reconstructed on NO frame of that run.
+```
+
+Atomicity is **site × run**: a blocked site does not disable other qualified
+sites. This forbids `apply / apply / skip / apply` for one site inside a run —
+that pattern would recreate an intermittent residual, which registration then
+displaces into a trail. Donor availability is therefore evaluated **run-wide**;
+any per-frame applicability outcome must be declared, never silent. The run plan
+is **frozen before final output**, which requires preflight or transactional
+staging so that a later-discovered failure cannot leave earlier frames already
+written. P-B (partial, declared preparation) is **NOT ADOPTED**.
+
+### 13.9 Net benefit (ratified principle)
+
+```text
+NO reconstruction without demonstrated net benefit.
+```
+
+Net benefit is always measured as a **paired couple** — reduction at the site
+AND bounded collateral damage elsewhere — never as a single score. The numeric
+acceptance rule is **not** fixed here.
+
+### 13.10 No thresholds, no operator, no promotion
+
+No numeric budget (FPR, recall, minimum amplitude, state separation, duty cycle,
+net-benefit percentage, collateral degradation) is adopted by this section; all
+remain DEFERRED to an owner gate. The parameters used by the M74 research
+witness operator (same-CFA 6x6 grid, ±4/±6/±8 offsets, 36 donors, median
+estimator) are a **validated research witness operator**, NOT a product
+algorithm; a future operator must be chosen, not inherited by default. Nothing
+is promoted: no RTS qualification, no BPM, no public capability.

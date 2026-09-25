@@ -2,6 +2,25 @@
 
 ## Current gate / mission
 
+- **In progress: P3B synthetic qualification harness** — mission
+  `ZC-SENSOR-P3B-SYNTHETIC-QUALIFICATION-HARNESS`, branch
+  `feat/zc-p3b-synthetic-qualification`, base `642ecc88661cfe7fa47311a687f7a0fe4b5a5b32`
+  (verified: `main`, clean tree). P3A ACCEPTED/CLOSED (architecture + qualification
+  contract, `reports/ZC-SENSOR-P3A-PRODUCT-ARCHITECTURE-QUALIFICATION/`). Owner-ratified
+  direction recorded in `AGENTS.md` (ratified direction), `docs/SCIENCE_CONTRACT.md` §13
+  and `docs/ARCHITECTURE.md` §18: HYBRID_ASYMMETRIC, preparation **post-calibration /
+  pre-debayer**, **policy P-A v1 ACCEPTED** (site × run atomicity; P-B NOT ADOPTED),
+  `epoch_count >= 2` as a conservative persistent-qualification policy,
+  detection ≠ qualification ≠ eligibility ≠ action, no partial per-frame preparation,
+  ZSSS unchanged for now. **SensorProfile is NOT public and NOT product-ready.**
+  Still DEFERRED at this gate: all numeric budgets (FPR, recall, minimum amplitude,
+  state separation, duty cycle, net-benefit %, collateral degradation); the product
+  reconstruction operator (the P2I 6x6/±4-6-8/36-donor/median construction is a
+  **research witness operator** only); and **independent real validation** (a second
+  dataset, preferably another sensor/camera family) before any public capability.
+  Known debt preserved, not fixed here: the strict public resolution route still
+  yields `NO_MATCH` on the M74 corpus while the Standard application route works.
+
 - **In progress: G2B master selection (R0 → R1)** — mission
   `ZC-G2B-MASTER-SELECTION-20260923`, branch `feat/zc-g2b-master-selection`.
   R0 + rework-1 + rework-2 ACCEPTED (Junior verification + Nono review `ACCEPT`).

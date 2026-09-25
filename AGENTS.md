@@ -43,3 +43,34 @@ Every coding/review agent must, before edits:
   preferable to a dubious match. Preserve original files by default.
 - One bounded mission and one accepted gate at a time. A roadmap entry is not
   authorization to implement it early.
+
+## Ratified P3A/P3B direction (owner decisions, 2026-09-25)
+
+Recorded here as working constraints; the normative detail lives in
+`docs/SCIENCE_CONTRACT.md` §13 and `docs/ARCHITECTURE.md` §18. This is not a
+second architecture ledger.
+
+- **Architecture direction: HYBRID ASYMMETRIC.** ZeCalibrator owns persistent
+  sensor knowledge, qualification, action/abstention and targeted CFA
+  preparation. ZSSS owns registration, stacking and generic statistical
+  rejection. The same correction must NOT live in both products.
+  **ZSSS is unchanged for now**, and `batch=36` must not be industrialised.
+- **Preparation stage (INVARIANT):** ordinary calibration → **post-calibration
+  CFA** → optional qualified preparation → debayer → registration. Repairing the
+  raw before dark subtraction is **forbidden**.
+- **P-A v1 ACCEPTED; P-B NOT ADOPTED.** If a site cannot be prepared honestly and
+  uniformly over the run, it is reconstructed on **no frame** of that run.
+  Atomicity is **site × run**, not global: one blocked site does not disable
+  other qualified sites.
+- **`epoch_count >= 2`** is a conservative v1 **persistent-qualification policy** —
+  not a law of nature, not a detection threshold, not an RTS criterion.
+- **Detection ≠ qualification ≠ action eligibility ≠ action.** No
+  `detected → corrected` path may exist. `NO_ACTION` is a valid, first-class
+  outcome: a known site that a representative dark already corrects is
+  `NO_ACTION_REQUIRED`, not a correction candidate.
+- **No partial per-frame preparation** and **no silent per-frame action
+  switching**; a run-wide plan is frozen before final output.
+- **No product thresholds are fixed.** Numeric FPR/recall/net-benefit budgets
+  remain DEFERRED to a later owner gate.
+- **SensorProfile is NOT public and NOT product-ready.** Synthetic qualification
+  (P3B) precedes any detector, capability or ZSSS integration.
