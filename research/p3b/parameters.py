@@ -12,7 +12,7 @@ Marking discipline (LOT1 requirement 10):
 
 Constants are registered through :func:`param`, which records their value and
 kind in a module-level registry so tests can audit the marking discipline
-programmatically (see ``tests/p3b/test_parameters.py``).
+programmatically (see ``tests/p3b/test_determinism_catalog.py``).
 """
 
 from __future__ import annotations
@@ -83,8 +83,9 @@ FLAT_PEDESTAL_ADU = param("FLAT_PEDESTAL_ADU", 20000.0)
 READ_NOISE_ADU = param("READ_NOISE_ADU", 5.0)
 
 # FITS storage convention (observed on the real corpus, applied exactly once).
-FITS_BSCALE = param("FITS_BSCALE", 1.0)
-FITS_BZERO = param("FITS_BZERO", 32768.0)
+# Integers, matching the real corpus (BITPIX=16, BSCALE=1, BZERO=32768).
+FITS_BSCALE = param("FITS_BSCALE", 1)
+FITS_BZERO = param("FITS_BZERO", 32768)
 
 # Site physical behaviours (per-class defaults; per-site overrides via SiteSpec).
 HOT_PIXEL_AMPLITUDE_ADU = param("HOT_PIXEL_AMPLITUDE_ADU", 1500.0)

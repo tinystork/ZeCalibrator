@@ -57,6 +57,32 @@ ACTION_STATES: Tuple[str, ...] = (
 FRAME_TYPES: Tuple[str, ...] = ("light", "dark", "bias", "flat", "master")
 
 
+class DuplicateFrameIdError(ValueError):
+    """Typed error: a frame/aggregate id is declared more than once globally.
+
+    Frame ids — including derived aggregate ids, which are materialised as
+    frames too — must be unique across the whole scenario. A duplicate id is the
+    path by which double counting enters metrics as false evidence, so the LOT1
+    model rejects it at construction instead of letting it pass silently.
+    """
+
+    def __init__(self, frame_id: str) -> None:
+        self.frame_id = frame_id
+        super().__init__(f"duplicate frame id: {frame_id!r}")
+
+
+class UnknownConstituentError(ValueError):
+    """Typed error: an aggregate references a constituent frame id that is not
+    declared anywhere in the scenario."""
+
+    def __init__(self, aggregate_id: str, missing: Tuple[str, ...]) -> None:
+        self.aggregate_id = aggregate_id
+        self.missing = tuple(missing)
+        super().__init__(
+            f"aggregate {aggregate_id!r} references undeclared frame(s): {self.missing!r}"
+        )
+
+
 @dataclass(frozen=True)
 class SensorSpec:
     """Declared sensor identity and geometry (SCIENCE §4, §5).
@@ -205,6 +231,31 @@ class ScenarioSpec:
         object.__setattr__(self, "epochs", tuple(self.epochs))
         object.__setattr__(self, "sites", tuple(self.sites))
         object.__setattr__(self, "aggregates", tuple(self.aggregates))
+        self._validate_identifiers()
+
+    def _validate_identifiers(self) -> None:
+        """Reject duplicate frame ids and orphan aggregate constituents.
+
+        Structural validation (LOT1): a duplicate ``frame_id`` (globally, across
+        all frame types, including aggregate ids that are materialised as frames)
+        or an aggregate referencing an undeclared constituent frame would be the
+        path by which double counting enters later metrics. Both are rejected at
+        construction, so the pipeline can never silently see them.
+        """
+        frame_ids = [f.frame_id for f in self.all_frames()]
+        aggregate_ids = [a.aggregate_id for a in self.aggregates]
+
+        seen: dict[str, None] = {}
+        for fid in frame_ids + aggregate_ids:
+            if fid in seen:
+                raise DuplicateFrameIdError(fid)
+            seen[fid] = None
+
+        declared = set(frame_ids)
+        for agg in self.aggregates:
+            missing = tuple(c for c in agg.constituent_frame_ids if c not in declared)
+            if missing:
+                raise UnknownConstituentError(agg.aggregate_id, missing)
 
     def all_frames(self) -> Tuple[FrameSpec, ...]:
         out: list[FrameSpec] = []
@@ -240,11 +291,14 @@ def compute_bookkeeping(scenario: ScenarioSpec) -> Bookkeeping:
     all_frames = scenario.all_frames()
     light_frames = scenario.light_frames()
 
-    science_groups: set[str] = set()
+    # Independent group identity is the (epoch_id, group_id) PAIR, never the
+    # group_id alone: the same group_id reused across different epochs is a
+    # legitimate, *distinct* lineage (M1 fix).
+    science_groups: set[Tuple[str, str]] = set()
     for epoch in scenario.epochs:
         for group in epoch.groups:
             if any(f.frame_type == "light" for f in group.frames):
-                science_groups.add(group.group_id)
+                science_groups.add((epoch.epoch_id, group.group_id))
 
     frame_count = len(all_frames) + len(scenario.aggregates)
     observation_count = len(light_frames)
@@ -265,11 +319,13 @@ __all__ = [
     "QUALIFICATION_STATES",
     "AggregateSpec",
     "Bookkeeping",
+    "DuplicateFrameIdError",
     "EpochSpec",
     "FrameSpec",
     "GroupSpec",
     "ScenarioSpec",
     "SensorSpec",
     "SiteSpec",
+    "UnknownConstituentError",
     "compute_bookkeeping",
 ]

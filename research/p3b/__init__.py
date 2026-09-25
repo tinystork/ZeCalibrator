@@ -29,6 +29,7 @@ from .generator import CorpusResult, generate_corpus
 from .model import (
     AggregateSpec,
     Bookkeeping,
+    DuplicateFrameIdError,
     EpochSpec,
     FrameSpec,
     GroupSpec,
@@ -37,6 +38,7 @@ from .model import (
     ScenarioSpec,
     SensorSpec,
     SiteSpec,
+    UnknownConstituentError,
     compute_bookkeeping,
 )
 from .parameters import (
@@ -58,6 +60,7 @@ __all__ = [
     "generate_corpus",
     "AggregateSpec",
     "Bookkeeping",
+    "DuplicateFrameIdError",
     "EpochSpec",
     "FrameSpec",
     "GroupSpec",
@@ -66,6 +69,7 @@ __all__ = [
     "ScenarioSpec",
     "SensorSpec",
     "SiteSpec",
+    "UnknownConstituentError",
     "compute_bookkeeping",
     "EXPLORATORY",
     "SYNTHETIC_GENERATOR_PARAMETER",

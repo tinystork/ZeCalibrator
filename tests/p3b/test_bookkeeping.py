@@ -1,12 +1,16 @@
 """LOT1 tests: independence bookkeeping + structural cases (requirements 7, 8)."""
 
+import pytest
+
 from research.p3b.generator import generate_corpus
 from research.p3b.model import (
     AggregateSpec,
+    DuplicateFrameIdError,
     EpochSpec,
     FrameSpec,
     GroupSpec,
     ScenarioSpec,
+    UnknownConstituentError,
     compute_bookkeeping,
 )
 from tests.p3b.conftest import make_sensor
@@ -174,3 +178,133 @@ def test_case_master_plus_independent_replacement_sequence():
     assert bk.observation_count == 8
     assert bk.independent_group_count == 2
     assert bk.epoch_count == 2
+
+
+# ---------------------------------------------------------------------------
+# Rework-1 (M1): independent-group identity is the (epoch_id, group_id) PAIR
+# ---------------------------------------------------------------------------
+
+def test_same_group_id_in_two_epochs_counts_two_groups():
+    # Two epochs, one group each, BOTH named "g0". They must not collapse into
+    # one independent group.
+    sensor = make_sensor(shape=(48, 64))
+    scenario = ScenarioSpec(
+        name="collide", seed=1, sensor=sensor,
+        epochs=(
+            EpochSpec("e0", (GroupSpec("g0", (
+                FrameSpec("a", "light", "e0", "g0", 0),
+            ),),)),
+            EpochSpec("e1", (GroupSpec("g0", (
+                FrameSpec("b", "light", "e1", "g0", 0),
+            ),),)),
+        ),
+    )
+    bk = compute_bookkeeping(scenario)
+    assert bk.frame_count == 2
+    assert bk.observation_count == 2
+    assert bk.independent_group_count == 2
+    assert bk.epoch_count == 2
+
+
+def test_same_group_ids_reused_across_epochs_count_correctly():
+    # 2 epochs x 2 groups, ids reused across epochs -> 4 independent groups.
+    sensor = make_sensor(shape=(48, 64))
+    epochs = []
+    counter = 0
+    for e in (0, 1):
+        groups = []
+        for g in (0, 1):
+            groups.append(GroupSpec(f"g{g}", (
+                FrameSpec(f"f{counter}", "light", f"e{e}", f"g{g}", 0),
+            ),))
+            counter += 1
+        epochs.append(EpochSpec(f"e{e}", tuple(groups)))
+    scenario = ScenarioSpec(name="multi-collide", seed=2, sensor=sensor, epochs=tuple(epochs))
+    bk = compute_bookkeeping(scenario)
+    assert bk.frame_count == 4
+    assert bk.observation_count == 4
+    assert bk.independent_group_count == 4
+    assert bk.epoch_count == 2
+
+
+def test_manifest_serializes_corrected_bookkeeping(tmp_path):
+    # The manifest (not just the function) must carry the corrected counters.
+    sensor = make_sensor(shape=(48, 64))
+    scenario = ScenarioSpec(
+        name="collide", seed=1, sensor=sensor,
+        epochs=(
+            EpochSpec("e0", (GroupSpec("g0", (
+                FrameSpec("a", "light", "e0", "g0", 0),
+            ),),)),
+            EpochSpec("e1", (GroupSpec("g0", (
+                FrameSpec("b", "light", "e1", "g0", 0),
+            ),),)),
+        ),
+    )
+    r = generate_corpus(scenario, tmp_path / "c")
+    assert r.manifest["bookkeeping"]["independent_group_count"] == 2
+    assert r.manifest["bookkeeping"]["epoch_count"] == 2
+    assert r.manifest["bookkeeping"]["frame_count"] == 2
+    assert r.manifest["bookkeeping"]["observation_count"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Rework-1 (M2): typed identifier validation
+# ---------------------------------------------------------------------------
+
+def test_duplicate_frame_id_raises_typed_error():
+    sensor = make_sensor(shape=(48, 64))
+    with pytest.raises(DuplicateFrameIdError):
+        ScenarioSpec(
+            name="dup", seed=1, sensor=sensor,
+            epochs=(
+                EpochSpec("e0", (GroupSpec("g0", (
+                    FrameSpec("same", "light", "e0", "g0", 0),
+                ),),)),
+                EpochSpec("e1", (GroupSpec("g1", (
+                    FrameSpec("same", "light", "e1", "g1", 0),
+                ),),)),
+            ),
+        )
+
+
+def test_duplicate_frame_id_across_frame_types_raises():
+    sensor = make_sensor(shape=(48, 64))
+    with pytest.raises(DuplicateFrameIdError):
+        ScenarioSpec(
+            name="dup-type", seed=1, sensor=sensor,
+            epochs=(
+                EpochSpec("e0", (
+                    GroupSpec("g0", (FrameSpec("same", "light", "e0", "g0", 0),)),
+                    GroupSpec("gd", (FrameSpec("same", "dark", "e0", "gd", 0),)),
+                )),
+            ),
+        )
+
+
+def test_aggregate_with_unknown_constituent_raises_typed_error():
+    sensor = make_sensor(shape=(48, 64))
+    with pytest.raises(UnknownConstituentError):
+        ScenarioSpec(
+            name="orphan", seed=1, sensor=sensor,
+            epochs=(EpochSpec("e0", (GroupSpec("g0", (
+                FrameSpec("a", "light", "e0", "g0", 0),
+            ),),)),),
+            aggregates=(AggregateSpec(
+                aggregate_id="m", method="median", constituent_frame_ids=("a", "ghost"),
+            ),),
+        )
+
+
+def test_duplicate_aggregate_id_raises_typed_error():
+    sensor = make_sensor(shape=(48, 64))
+    frames = (FrameSpec("a", "light", "e0", "g0", 0),)
+    with pytest.raises(DuplicateFrameIdError):
+        ScenarioSpec(
+            name="dup-agg", seed=1, sensor=sensor,
+            epochs=(EpochSpec("e0", (GroupSpec("g0", frames),)),),
+            aggregates=(
+                AggregateSpec("m", "median", ("a",)),
+                AggregateSpec("m", "median", ("a",)),
+            ),
+        )
