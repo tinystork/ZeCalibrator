@@ -28,16 +28,29 @@ import pytest
 from research.p3b.generator import generate_corpus
 from research.p3b.model import EpochSpec, FrameSpec, GroupSpec, ScenarioSpec, SiteSpec
 from research.p3b.net_benefit import (
+    CONTROL_CFA_STRUCTURE_PRESERVED,
+    CONTROL_LOCAL_BACKGROUND_BIAS,
+    CONTROL_LOCAL_NOISE,
+    CONTROL_LOCALIZATION_CONCENTRATION,
+    CONTROL_NEARBY_STAR_DELTAS,
+    CONTROL_NEW_ARTIFACT_CREATED,
+    CONTROL_UNTOUCHED_DOMAIN_INVARIANCE,
     NetBenefitHarnessResult,
     SiteNetBenefit,
     representative_dark,
     run_net_benefit_harness,
+    structural_controls,
 )
 from research.p3b.parameters import all_params
 from research.p3b.preparation_plan import (
     DONORS_UNAVAILABLE,
     RUN_WIDE_ABSTAIN,
     RUN_WIDE_ELIGIBLE,
+    RUN_WIDE_NO_ACTION,
+)
+from research.p3b.qualification_policy import (
+    ACTION_ABSTAIN_INSUFFICIENT,
+    ACTION_NO_ACTION,
 )
 from research.p3b.reconstruction import (
     DONOR_OFFSETS,
@@ -60,12 +73,14 @@ CANDIDATE_AMP = 2500.0
 # ---------------------------------------------------------------------------
 
 
-def _nb_scenario(seed=0, shape=(64, 64), candidate_params=(), extra_sites=()):
+def _nb_scenario(seed=0, shape=(64, 64), candidate_action_state=None, extra_sites=()):
     """2 epochs × 2 groups × 2 light frames + 4 darks.
 
     Sites: a reconstruction candidate (INTERMITTENT_TWO_STATE, always on) and a
     control site (STABLE_ANOMALY_CORRECTED_BY_DARK) whose residual a
-    representative dark already corrects.
+    representative dark already corrects. ``candidate_action_state`` overrides
+    the candidate's declared (truth) action state without changing its class or
+    its generated data.
     """
     sensor = make_sensor(shape=shape)
     dark_frames = tuple(
@@ -90,13 +105,16 @@ def _nb_scenario(seed=0, shape=(64, 64), candidate_params=(), extra_sites=()):
         EpochSpec("e0", (GroupSpec("g0", tuple(light[:2])), GroupSpec("g1", tuple(light[2:4])))),
         EpochSpec("e1", (GroupSpec("g0", tuple(light[4:6])), GroupSpec("g1", tuple(light[6:8])))),
     )
-    candidate = SiteSpec(
-        site_id="cand",
-        x=32,
-        y=24,
-        cfa_class="INTERMITTENT_TWO_STATE",
-        params=(("on_value_adu", CANDIDATE_AMP), ("off_value_adu", 0.0), ("period_frames", 1)),
-    )
+    candidate_kwargs = {
+        "site_id": "cand",
+        "x": 32,
+        "y": 24,
+        "cfa_class": "INTERMITTENT_TWO_STATE",
+        "params": (("on_value_adu", CANDIDATE_AMP), ("off_value_adu", 0.0), ("period_frames", 1)),
+    }
+    if candidate_action_state is not None:
+        candidate_kwargs["expected_action_state"] = candidate_action_state
+    candidate = SiteSpec(**candidate_kwargs)
     control = SiteSpec(site_id="ctrl", x=24, y=40, cfa_class="STABLE_ANOMALY_CORRECTED_BY_DARK")
     sites = (candidate, control) + tuple(extra_sites)
     return ScenarioSpec(name="nb", seed=seed, sensor=sensor, epochs=epochs, sites=sites)
@@ -287,6 +305,86 @@ def test_harness_constants_are_marked_and_not_thresholds():
     for name, (_value, kind) in all_params().items():
         if name.startswith("NET_BENEFIT_") or name.startswith("RESEARCH_WITNESS_"):
             assert "THRESHOLD" not in name.upper()
+
+
+# ---------------------------------------------------------------------------
+# M1 — structural controls are marked, never read as independent proof
+# ---------------------------------------------------------------------------
+
+
+def test_structural_controls_are_marked_on_the_result(tmp_path):
+    scenario = _nb_scenario(seed=0)
+    corpus, dark = _corpus_and_dark(scenario, tmp_path)
+    result = run_net_benefit_harness(scenario, corpus.frame_arrays, dark_reference=dark)
+
+    expected = {
+        CONTROL_UNTOUCHED_DOMAIN_INVARIANCE,
+        CONTROL_NEW_ARTIFACT_CREATED,
+        CONTROL_CFA_STRUCTURE_PRESERVED,
+        CONTROL_LOCAL_BACKGROUND_BIAS,
+        CONTROL_LOCAL_NOISE,
+        CONTROL_LOCALIZATION_CONCENTRATION,
+        CONTROL_NEARBY_STAR_DELTAS,
+    }
+    # The result exposes the set, and it covers every structural control.
+    assert set(result.structural_by_construction) == expected
+    # The same set is derivable from the operator id alone.
+    assert set(structural_controls(RESEARCH_WITNESS_ONLY)) == expected
+
+
+def test_structural_controls_reject_unknown_operator():
+    with pytest.raises(ValueError):
+        structural_controls("SOME_OTHER_OPERATOR")
+
+
+# ---------------------------------------------------------------------------
+# M2 — the policy's own decision is exposed beside the experimental decision
+# ---------------------------------------------------------------------------
+
+
+def test_policy_action_is_machine_visible(tmp_path):
+    scenario = _nb_scenario(seed=0)
+    corpus, dark = _corpus_and_dark(scenario, tmp_path)
+    result = run_net_benefit_harness(scenario, corpus.frame_arrays, dark_reference=dark)
+
+    cand = _site_by_id(result, "cand")
+    # On its declared facts ALONE, the policy does NOT reach eligibility (net
+    # benefit is not established there) — while the experiment reconstructed.
+    assert cand.policy_action == ACTION_ABSTAIN_INSUFFICIENT
+    assert cand.run_wide_applicability == RUN_WIDE_ELIGIBLE
+    # The gap is machine-visible, not merely narrated.
+    assert cand.policy_action != cand.run_wide_applicability
+
+    ctrl = _site_by_id(result, "ctrl")
+    # For the control site, policy and experiment agree (both "no action").
+    assert ctrl.policy_action == ACTION_NO_ACTION
+    assert ctrl.run_wide_applicability == RUN_WIDE_NO_ACTION
+
+
+def test_same_data_only_declaration_changes_reconstruction(tmp_path):
+    # Same generated data (same class, same seed, same anomaly) — only the
+    # candidate's DECLARED action state changes. The experiment follows the
+    # declaration; the policy decision on facts alone is identical in both cases.
+    target = _nb_scenario(seed=0)  # candidate declared ELIGIBLE (class default)
+    non_target = _nb_scenario(seed=0, candidate_action_state="NO_ACTION_REQUIRED")
+
+    c_t, d_t = _corpus_and_dark(target, tmp_path / "t")
+    c_nt, d_nt = _corpus_and_dark(non_target, tmp_path / "nt")
+
+    # Same generated data: byte-identical frame arrays (only the declaration differs).
+    assert c_t.frame_arrays["l000"].tolist() == c_nt.frame_arrays["l000"].tolist()
+
+    r_t = run_net_benefit_harness(target, c_t.frame_arrays, dark_reference=d_t)
+    r_nt = run_net_benefit_harness(non_target, c_nt.frame_arrays, dark_reference=d_nt)
+
+    cand_t = _site_by_id(r_t, "cand")
+    cand_nt = _site_by_id(r_nt, "cand")
+    # The experiment's reconstruction follows the declaration, not the data.
+    assert cand_t.reconstructed is True
+    assert cand_nt.reconstructed is False
+    # The policy decision on facts alone is identical in both cases (the data
+    # and facts are the same; only the injected ESTABLISHED knob differs).
+    assert cand_t.policy_action == cand_nt.policy_action
 
 
 # ---------------------------------------------------------------------------

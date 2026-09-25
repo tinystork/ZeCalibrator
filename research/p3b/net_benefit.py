@@ -42,7 +42,16 @@ Boundary (enforced here, verified by ``tests/p3b/test_net_benefit.py``):
   DEFERRED to the owner (HUMAN_GATE);
 * a censored measurement never supports a quantitative inference (SCIENCE
   §13.4): censored frames are excluded from every quantitative aggregate, and a
-  censored site yields no reduction / no collateral deltas.
+  censored site yields no reduction / no collateral deltas;
+* **proof scope (M1)** — for the single-pixel research witness, the collateral /
+  localization controls that look OUTSIDE the site pixel are *structural* (zero
+  by construction), not independent evidence of safety; they are marked on the
+  result as :attr:`NetBenefitHarnessResult.structural_by_construction`;
+* **proof scope (M2)** — the harness measures an effect *conditional on a
+  decision already taken (declared)*: it exposes the policy's own decision on
+  facts alone (``SiteNetBenefit.policy_action``) beside the experimental decision
+  (``run_wide_applicability``), so the gap is machine-visible and the reduction
+  is never read as evidence that the system chose correctly.
 
 Every numeric constant is registered through :func:`research.p3b.parameters.param`
 and marked ``EXPLORATORY`` (analysis) — never a product threshold. The only
@@ -105,6 +114,50 @@ LOCALIZATION_OFFSETS = param(
     EXPLORATORY,
 )
 
+# ---------------------------------------------------------------------------
+# Structural-control vocabulary (proof scope, M1)
+# ---------------------------------------------------------------------------
+#
+# A collateral / localization control is STRUCTURAL for an operator when its
+# value is fixed by the operator's *footprint* alone, not by any measured
+# property of the reconstruction. The research witness operator writes exactly
+# one pixel (the site), so every control that inspects the domain OUTSIDE that
+# pixel is zero by construction — it can never record a side effect because the
+# operator cannot write anywhere else. Such zeros are NOT independent evidence
+# of safety; they become informative only for an operator able to modify more
+# than one pixel. These names make that explicit on the result.
+
+CONTROL_UNTOUCHED_DOMAIN_INVARIANCE = "untouched_domain_invariance"
+CONTROL_NEW_ARTIFACT_CREATED = "new_artifact_created"
+CONTROL_CFA_STRUCTURE_PRESERVED = "cfa_structure_preserved"
+CONTROL_LOCAL_BACKGROUND_BIAS = "local_background_bias"
+CONTROL_LOCAL_NOISE = "local_noise"
+CONTROL_LOCALIZATION_CONCENTRATION = "localization_concentration"
+CONTROL_NEARBY_STAR_DELTAS = "nearby_star_deltas"
+
+
+def structural_controls(operator_id: str) -> Tuple[str, ...]:
+    """Names of the collateral/localization controls that are STRUCTURAL for
+    ``operator_id`` — fixed by the operator's footprint, not measured evidence.
+
+    Only ``RESEARCH_WITNESS_ONLY`` exists; it writes exactly one pixel (the
+    site), so every control that inspects the domain outside that pixel is zero
+    by construction (and the star, at any distance, is never inside the
+    footprint). Returning this set explicitly means the zeros can never be read
+    as independent proof of safety.
+    """
+    if operator_id != RESEARCH_WITNESS_ONLY:
+        raise ValueError(f"unknown reconstruction operator {operator_id!r}")
+    return (
+        CONTROL_UNTOUCHED_DOMAIN_INVARIANCE,
+        CONTROL_NEW_ARTIFACT_CREATED,
+        CONTROL_CFA_STRUCTURE_PRESERVED,
+        CONTROL_LOCAL_BACKGROUND_BIAS,
+        CONTROL_LOCAL_NOISE,
+        CONTROL_LOCALIZATION_CONCENTRATION,
+        CONTROL_NEARBY_STAR_DELTAS,
+    )
+
 
 # ---------------------------------------------------------------------------
 # Result value objects
@@ -130,13 +183,21 @@ class Localization:
 
 @dataclass(frozen=True)
 class SiteNetBenefit:
-    """The measured net benefit for ONE site (paired couple + controls)."""
+    """The measured net benefit for ONE site (paired couple + controls).
+
+    ``policy_action`` is what LOT2 decides on its declared facts ALONE (no
+    ``net_benefit_established`` injection); ``run_wide_applicability`` is what
+    the experiment actually did (the frozen LOT3 plan). The gap between them is
+    machine-visible: the harness measures an effect *conditional on a decision
+    already taken (declared)* — it does not test the decision.
+    """
 
     site_id: str
     x: int
     y: int
     cfa_plane: str
-    run_wide_applicability: str  # from the frozen LOT3 plan
+    run_wide_applicability: str  # what the experiment did (frozen LOT3 plan)
+    policy_action: str  # what LOT2 decides on its facts alone (no injection)
     reconstructed: bool  # whether branch B reconstructed this site
     censored: bool  # site declared censored (no quantitative inference)
     # LOT5 typed pair: reduction (ADU + fraction) + collateral degradation.
@@ -156,12 +217,18 @@ class SiteNetBenefit:
 
 @dataclass(frozen=True)
 class NetBenefitHarnessResult:
-    """The full harness result over a scenario."""
+    """The full harness result over a scenario.
+
+    ``structural_by_construction`` lists the collateral/localization controls
+    whose values are fixed by the operator's footprint (true by construction),
+    not independent evidence of safety (proof scope, M1).
+    """
 
     scenario_name: str
     seed: int
     operator_id: str
     operator_version: str
+    structural_by_construction: Tuple[str, ...]
     sites: Tuple[SiteNetBenefit, ...]
 
 
@@ -429,8 +496,13 @@ def run_net_benefit_harness(
     declared = build_declared_facts(scenario)
     site_by_id = {s.site_id: s for s in scenario.sites}
     site_quals = []
+    policy_actions: dict = {}
     for site, sf in zip(scenario.sites, declared.sites):
         packet = evidence_packet(sf, declared)
+        # Policy decision — LOT2 on its declared facts ALONE (no net-benefit
+        # injection). Exposed as ``policy_action`` so the gap between the
+        # policy's own decision and the experimental decision is machine-visible.
+        policy_actions[site.site_id] = evaluate(packet).action
         # Measurement-run input: a declared reconstruction candidate is marked
         # net-benefit-established *so the harness can measure it*. This is not a
         # verdict — the harness reports the measurement, it does not accept it.
@@ -523,6 +595,7 @@ def run_net_benefit_harness(
                 y=site.y,
                 cfa_plane=cfa_plane_label(site.y, site.x, pattern),
                 run_wide_applicability=entry.run_wide_applicability,
+                policy_action=policy_actions[entry.site_id],
                 reconstructed=reconstructed,
                 censored=censored,
                 pair=NetBenefitPair(
@@ -547,12 +620,20 @@ def run_net_benefit_harness(
         seed=scenario.seed,
         operator_id=RESEARCH_WITNESS_ONLY,
         operator_version=OPERATOR_VERSION,
+        structural_by_construction=structural_controls(operator_id),
         sites=tuple(sites_out),
     )
 
 
 __all__ = [
     "COLLATERAL_ANNULUS",
+    "CONTROL_CFA_STRUCTURE_PRESERVED",
+    "CONTROL_LOCAL_BACKGROUND_BIAS",
+    "CONTROL_LOCAL_NOISE",
+    "CONTROL_LOCALIZATION_CONCENTRATION",
+    "CONTROL_NEARBY_STAR_DELTAS",
+    "CONTROL_NEW_ARTIFACT_CREATED",
+    "CONTROL_UNTOUCHED_DOMAIN_INVARIANCE",
     "LOCAL_REFERENCE_RADIUS",
     "LOCALIZATION_OFFSETS",
     "PROFILE_STAMP_RADIUS",
@@ -561,4 +642,5 @@ __all__ = [
     "SiteNetBenefit",
     "representative_dark",
     "run_net_benefit_harness",
+    "structural_controls",
 ]
