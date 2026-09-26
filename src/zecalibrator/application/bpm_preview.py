@@ -11,7 +11,10 @@ and records provenance — but it **never** reconstructs a pixel and **never** c
 The internal scientific gate (:data:`BPM_AUTOMATIC_APPLICATION_ENABLED`) is a
 module-level constant — not a user setting, not an environment variable, not a
 CLI/GUI flag (§23). P5 may flip it to ``True`` without changing the UX or the
-pipeline (§68). This module is headless (no Qt) and imports no ``research/*``.
+pipeline (§68). It is a *process-level constant*, not a cryptographic lock: an
+in-process ``monkeypatch`` could rewrite it at runtime, so it is a deliberate
+release gate, not an absolute impossibility. This module is headless (no Qt) and
+imports no ``research/*``.
 
 This orchestrator **calls** the engine; it never re-implements the logic already
 owned by ``zecalibrator.bpm`` (store/lookup/identity/preparation).
@@ -49,7 +52,10 @@ from zecalibrator.storage import StoragePaths
 
 #: The internal scientific gate (§22/§68). Automatic BPM application is DISABLED
 #: in this lot; P5 flips this single constant to ``True``. It is NOT a user
-#: setting, NOT an environment variable, and NOT a CLI/GUI flag (§23).
+#: setting, NOT an environment variable, and NOT a CLI/GUI flag (§23). It is a
+#: process-level constant (not a cryptographic lock: an in-process ``monkeypatch``
+#: could still rewrite it), so it gates the *released* behaviour, not an
+#: adversarial runtime.
 BPM_AUTOMATIC_APPLICATION_ENABLED = False
 
 # ---------------------------------------------------------------------------
@@ -59,6 +65,7 @@ STATUS_NO_DATABASE = "NO_DATABASE"            # no BPM configured/present (benig
 STATUS_NO_PROFILE = "NO_PROFILE"              # valid base, no compatible profile
 STATUS_UNQUALIFIED_PROFILE = "UNQUALIFIED_PROFILE"  # compatible but not promoted
 STATUS_SELECTED_PREVIEW = "SELECTED_PREVIEW"  # compatible promoted profile selected
+STATUS_PREVIEW_ERROR = "PREVIEW_ERROR"        # the preview itself failed (contained)
 # Base/profile corruption is a TYPED status (+ warning), never NO_PROFILE (§28).
 STATUS_BASE_CORRUPTED = REASON_BASE_CORRUPTED
 STATUS_BASE_INVALID = REASON_BASE_INVALID
@@ -69,6 +76,7 @@ _STATUSES: tuple[str, ...] = (
     STATUS_NO_PROFILE,
     STATUS_UNQUALIFIED_PROFILE,
     STATUS_SELECTED_PREVIEW,
+    STATUS_PREVIEW_ERROR,
     STATUS_BASE_CORRUPTED,
     STATUS_BASE_INVALID,
     STATUS_BASE_INCOMPATIBLE,
@@ -77,6 +85,7 @@ _STATUSES: tuple[str, ...] = (
 #: calibration-only reasons (§32).
 REASON_CALIBRATION_ONLY_GATE_CLOSED = "AUTOMATIC_APPLICATION_DISABLED"
 REASON_CALIBRATION_ONLY_BASE_ERROR = "BASE_ERROR"
+REASON_CALIBRATION_ONLY_PREVIEW_ERROR = "PREVIEW_ERROR"
 
 #: The engine reason-code -> orchestrator typed status mapping (§25–§28).
 _STATUS_BY_REASON = {
@@ -109,9 +118,14 @@ class BpmPreviewOutcome:
     ``eligible_site_count`` is the number of ACTION-ELIGIBLE sites in the selected
     profile; ``applicable_site_count`` is the preflight-derived run-wide eligible
     count (``None`` when not derivable). ``reconstructed_site_count`` is always
-    ``0`` in this lot. ``application_enabled`` mirrors the gate.
+    ``0`` in this lot (locked by the closed gate — it is the first field that will
+    change when P5 flips the gate). ``application_enabled`` mirrors the gate.
     ``calibration_only`` is ``True`` whenever the ordinary calibration result is
     used unchanged, and ``calibration_only_reason`` records why (§32).
+
+    ``STATUS_PREVIEW_ERROR`` (with ``lookup_outcome == ""``) is reserved for a
+    preview that failed internally and was *contained*: the ordinary calibration
+    result is unaffected and the failure is carried only as a warning (§80/§92).
     """
 
     status: str
@@ -136,7 +150,11 @@ class BpmPreviewOutcome:
         if self.lookup_outcome not in (
             OUTCOME_SELECTED, OUTCOME_CALIBRATION_ONLY, OUTCOME_BASE_ERROR,
         ):
-            raise ValueError(f"BpmPreviewOutcome.lookup_outcome invalid: {self.lookup_outcome!r}")
+            # A contained preview failure carries no engine lookup outcome.
+            if not (self.status == STATUS_PREVIEW_ERROR and self.lookup_outcome == ""):
+                raise ValueError(
+                    f"BpmPreviewOutcome.lookup_outcome invalid: {self.lookup_outcome!r}"
+                )
         if not isinstance(self.eligible_site_count, int) or self.eligible_site_count < 0:
             raise ValueError("eligible_site_count must be a non-negative int")
         if not isinstance(self.reconstructed_site_count, int) or self.reconstructed_site_count < 0:
@@ -344,6 +362,29 @@ class BpmPreviewSeam:
             frame_id=self.frame_id,
         )
 
+    def record_failure(self, exc: BaseException) -> None:
+        """Contain a preview failure: record it as a warning, never propagate.
+
+        The executor calls this (duck-typed) when :meth:`record` raised, so a
+        failed preview can never degrade an already-successful calibration
+        (§80/§92). The failure is carried only as a warning on a
+        ``STATUS_PREVIEW_ERROR`` outcome.
+        """
+        self.outcome = BpmPreviewOutcome(
+            status=STATUS_PREVIEW_ERROR,
+            reason_code=REASON_CALIBRATION_ONLY_PREVIEW_ERROR,
+            database_root=None,
+            lookup_outcome="",
+            revision_id=None,
+            eligible_site_count=0,
+            applicable_site_count=None,
+            reconstructed_site_count=0,
+            application_enabled=BPM_AUTOMATIC_APPLICATION_ENABLED,
+            calibration_only=True,
+            calibration_only_reason=REASON_CALIBRATION_ONLY_PREVIEW_ERROR,
+            warnings=(f"BPM preview failed (contained); ordinary calibration preserved: {exc}",),
+        )
+
 
 __all__ = [
     "BPM_AUTOMATIC_APPLICATION_ENABLED",
@@ -351,11 +392,13 @@ __all__ = [
     "BpmPreviewSeam",
     "REASON_CALIBRATION_ONLY_BASE_ERROR",
     "REASON_CALIBRATION_ONLY_GATE_CLOSED",
+    "REASON_CALIBRATION_ONLY_PREVIEW_ERROR",
     "STATUS_BASE_CORRUPTED",
     "STATUS_BASE_INCOMPATIBLE",
     "STATUS_BASE_INVALID",
     "STATUS_NO_DATABASE",
     "STATUS_NO_PROFILE",
+    "STATUS_PREVIEW_ERROR",
     "STATUS_SELECTED_PREVIEW",
     "STATUS_UNQUALIFIED_PROFILE",
     "orchestrate_bpm_preview",

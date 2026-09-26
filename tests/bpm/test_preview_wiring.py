@@ -13,6 +13,7 @@ import numpy as np
 from zecalibrator.application.bpm_preview import (
     BpmPreviewSeam,
     STATUS_NO_DATABASE,
+    STATUS_PREVIEW_ERROR,
     STATUS_SELECTED_PREVIEW,
 )
 from zecalibrator.application.executor import CalibrationRequest, execute_calibration
@@ -112,3 +113,36 @@ def test_wiring_absent_seam_is_byte_identical(make_frame_fixture, tmp_path):
     b = execute_calibration(light, request, {})
     assert np.array_equal(a.data, b.data)
     assert np.array_equal(a.mask, b.mask)
+
+
+class _RaisingSeam(BpmPreviewSeam):
+    """A seam whose preview raises — the executor must contain it (S1)."""
+
+    def record(self, result, light):
+        raise RuntimeError("preview exploded")
+
+
+def test_preview_failure_is_contained_not_propagated(make_frame_fixture, tmp_path):
+    # S1: a failing preview must NEVER turn a successful calibration into a
+    # failure. The CalibrationResult is returned unchanged and the failure is
+    # recorded as a warning (never an error, never an alarming message).
+    make_frame = make_frame_fixture
+    light = _light(make_frame)
+    request = CalibrationRequest(additive_mode="control", flat_mode="none")
+
+    without = execute_calibration(light, request, {})
+    seam = _RaisingSeam(_storage(tmp_path), BpmSettings())
+    with_seam = execute_calibration(light, request, {}, bpm_preview=seam)
+
+    # The calibration still succeeds, byte-identical to the no-seam path.
+    assert with_seam.status == without.status
+    assert with_seam.status in ("COMPLETED", "COMPLETED_WITH_WARNINGS")
+    assert np.array_equal(with_seam.data, without.data)
+    assert np.array_equal(with_seam.mask, without.mask)
+
+    # The failure was recorded as a warning on the preview outcome, not raised.
+    assert seam.outcome is not None
+    assert seam.outcome.status == STATUS_PREVIEW_ERROR
+    assert seam.outcome.calibration_only is True
+    assert seam.outcome.reconstructed_site_count == 0
+    assert any("preview failed" in w for w in seam.outcome.warnings)

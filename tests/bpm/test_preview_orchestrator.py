@@ -152,6 +152,26 @@ def test_prepared_site_count_zero_when_application_disabled(tmp_path):
     assert outcome.reconstructed_site_count == 0
 
 
+def test_reconstructed_site_count_locked_to_zero_while_gate_closed(tmp_path):
+    # N2: ``reconstructed_site_count`` is the first field that must change when P5
+    # flips the gate. While ``BPM_AUTOMATIC_APPLICATION_ENABLED is False`` it is
+    # locked to 0 — even with a profile containing multiple eligible sites.
+    assert BPM_AUTOMATIC_APPLICATION_ENABLED is False
+    ident = make_identity(shape=SHAPE, cfa_phase=CFA)
+    sites = [make_site(5, 5), make_site(6, 6), make_site(7, 7)]
+    root = tmp_path / "base"
+    db = create_bad_pixel_database(root)
+    db.add_revision(make_rev(ident, state=REVISION_STATE_PROMOTED, sites=sites, sequence=1))
+
+    outcome = _orchestrate(tmp_path, ident, root, _calibration(np.full(SHAPE, 100.0)))
+
+    assert outcome.eligible_site_count == 3
+    assert outcome.reconstructed_site_count == 0
+    assert outcome.prepared_site_count == 0
+    assert outcome.application_enabled is False
+    assert outcome.calibration_only is True
+
+
 # ---------------------------------------------------------------------------
 # §60 (orchestrator part) — the full typed-status matrix.
 # ---------------------------------------------------------------------------

@@ -456,6 +456,12 @@ def execute_calibration(
     never calls ``apply_preparation`` while the scientific gate is closed). It
     is opaque to this module; ``None`` (the default) leaves the returned result
     byte-identical to today's path (mission §63).
+
+    A failing preview is **contained**: ``record`` is wrapped in ``try/except
+    Exception``, so a broken/raising seam never degrades an already-successful
+    calibration — the ``CalibrationResult`` is returned unchanged and the
+    failure is handed to the seam's ``record_failure`` hook (if present) to be
+    recorded as a warning, never propagated (§80/§92).
     """
     if request.additive_mode not in ("control", "bias_only", "dark_incl_bias", "dark_bias_removed"):
         raise InvalidRequestError(f"unsupported additive_mode: {request.additive_mode!r}")
@@ -482,11 +488,18 @@ def execute_calibration(
     # P4-P1 LOT 1: optional BPM preview orchestration, branched into the existing
     # CalibrationResult producer as ONE optional step after ordinary calibration
     # (mission §5/§11). The seam is opaque; absent (``None``) the behaviour is
-    # byte-identical to today's path (mission §63).
+    # byte-identical to today's path (mission §63). A failing preview is
+    # contained: it must never turn a successful calibration into a failure
+    # (§80/§92); the failure is recorded as a warning, never propagated.
     if bpm_preview is not None:
         record = getattr(bpm_preview, "record", None)
         if record is not None:
-            record(result, light)
+            try:
+                record(result, light)
+            except Exception as exc:  # noqa: BLE001 - preview is best-effort only
+                record_failure = getattr(bpm_preview, "record_failure", None)
+                if record_failure is not None:
+                    record_failure(exc)
     return result
 
 
