@@ -48,6 +48,7 @@ def auto_route_batch(
     cancel=None,
     progress=None,
     collision_decision=None,
+    bpm_preview=None,
 ):
     """Auto-route batch: per light, inspect -> auto-route -> calibrate -> write.
 
@@ -176,7 +177,7 @@ def auto_route_batch(
                 replace_existing = True
 
         try:
-            result = _calibrate_frame_impl(frame, plan, ExecutionOptions(), token=token, obs=None, slot=context_slot, decoded_light=decoded_light)
+            result = _calibrate_frame_impl(frame, plan, ExecutionOptions(), token=token, obs=None, slot=context_slot, decoded_light=decoded_light, bpm_preview=bpm_preview)
         except OperationCancelled:
             raise
         except InvalidRequestError as exc:

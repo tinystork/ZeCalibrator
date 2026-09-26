@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 import zecalibrator.api.v1 as v1
+from zecalibrator.api.v1 import _bpm
 
 PROG = "zecalibrator"
 
@@ -312,12 +313,22 @@ def _cmd_calibrate(args, token) -> int:
     library = opened.handle
     request = v1.CalibrationRequest(args.additive_mode, args.flat_mode)
 
+    # Bad Pixel Database preview (§18/§38): resolve the persistent root
+    # automatically (never mandatory); an explicit ``--bad-pixel-db`` override is
+    # optional. The scientific gate stays closed — this only *reports* the preview.
+    storage = _bpm.resolve_storage_paths()
+    if args.bad_pixel_db is not None:
+        bpm_settings = _bpm.bpm_settings(args.bad_pixel_db)
+    else:
+        bpm_settings = _bpm.load_bpm_settings(storage.user_config_path).settings
+    seam = _bpm.make_bpm_seam(storage, bpm_settings, frame_id=batch_id)
+
     items = []
     cancelled = False
     manifest_error = None
     try:
-        for item in v1.calibrate_batch(
-            frames, request, library, v1.default_match_policy(), options, cancel=token
+        for item in _bpm.calibrate_batch(
+            frames, request, library, v1.default_match_policy(), options, cancel=token, seam=seam
         ):
             items.append(item.to_dict())
     except v1.OperationCancelled:
@@ -346,6 +357,8 @@ def _cmd_calibrate(args, token) -> int:
         if args.destination is not None
         else None
     )
+    # §50 log synthesis (stderr, so the JSON on stdout stays scriptable).
+    _emit_bpm_synthesis(seam.outcome, str(_bpm.resolve_bpm_root(storage, bpm_settings)))
     _emit({"status": batch_status, "items": items, "manifest": manifest})
     return 3 if batch_status == "PARTIAL" else 0
 
@@ -394,8 +407,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_cal.add_argument("--roi-extent", help="JSON object or @path for the ROI-extent evidence")
     p_cal.add_argument("--destination", help="output directory for standalone FITS (omit for in-memory)")
     p_cal.add_argument("--batch-id", help="explicit batch id (default generated)")
+    p_cal.add_argument(
+        "--bad-pixel-db",
+        help="optional Bad Pixel Database root override (never required; default: persisted setting)",
+    )
 
     return parser
+
+
+def _emit_bpm_synthesis(outcome, root_fallback: str) -> None:
+    """§50: write the six-line Bad Pixel Database synthesis to stderr."""
+    for line in _bpm.synthesis_text(outcome, root_fallback):
+        sys.stderr.write(line + "\n")
 
 
 def main(argv: Optional[list] = None, *, cancel=None) -> int:

@@ -84,6 +84,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._settings_state = None
         self._settings_loaded = False
         self._settings_saved = False
+        self._bpm_root: str | None = None
+        self._bpm_settings_state = None
+        self._bpm_loaded = False
+        self._bpm_saved = False
 
         self._lights: list[_LightEntry] = []
         self._library_spec: v1.LibrarySpec | None = None
@@ -415,7 +419,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.main_tabs.addTab(page, "Advanced")
 
     def _build_settings_tab(self) -> None:
-        """Settings: application preferences only (Appearance / Theme)."""
+        """Settings: application preferences (Appearance / Theme + BPM location)."""
         page = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(page)
 
@@ -431,6 +435,26 @@ class MainWindow(QtWidgets.QMainWindow):
         theme_row.addStretch(1)
         appearance_layout.addLayout(theme_row)
         layout.addWidget(appearance_box)
+
+        # §16/§17: the single Bad Pixel Database user setting (location only —
+        # never a scientific setting). Persisted through the existing bpm.settings
+        # + injected StoragePaths, never a second configuration system.
+        bpm_box = QtWidgets.QGroupBox("Bad Pixel Database")
+        bpm_layout = QtWidgets.QVBoxLayout(bpm_box)
+        bpm_row = QtWidgets.QHBoxLayout()
+        bpm_row.addWidget(QtWidgets.QLabel("Bad Pixel Database location:"))
+        self.bpm_root_edit = QtWidgets.QLineEdit()
+        self.bpm_root_edit.setPlaceholderText("No location selected (preview disabled)")
+        self.bpm_root_edit.setReadOnly(True)
+        bpm_row.addWidget(self.bpm_root_edit, 1)
+        self.bpm_browse_btn = QtWidgets.QPushButton("Browse…")
+        self.bpm_browse_btn.setEnabled(False)  # enabled after async BPM settings load
+        bpm_row.addWidget(self.bpm_browse_btn)
+        bpm_layout.addLayout(bpm_row)
+        self.bpm_status_label = QtWidgets.QLabel("")
+        self.bpm_status_label.setStyleSheet("color: gray;")
+        bpm_layout.addWidget(self.bpm_status_label)
+        layout.addWidget(bpm_box)
         layout.addStretch(1)
 
         self.main_tabs.addTab(page, "Settings")
@@ -478,6 +502,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.scan_masters_btn.clicked.connect(self._on_scan_masters)
         self.confirm_masters_btn.clicked.connect(self._on_confirm_masters)
         self.build_managed_btn.clicked.connect(self._on_build_managed)
+        self.bpm_browse_btn.clicked.connect(self._on_browse_bpm_root)
 
         self.additive_combo.currentIndexChanged.connect(self._on_mode_changed)
         self.flat_combo.currentIndexChanged.connect(self._on_mode_changed)
@@ -668,6 +693,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self._settings_state = summary.get("state")
         self._settings = GuiSettings.from_dict(summary.get("settings", {}))
         self._settings_loaded = True
+        # BPM settings load folded into the same startup operation (single async
+        # load, no second queued operation).
+        self._bpm_settings_state = summary.get("bpm_state")
+        self._bpm_root = summary.get("bpm_root")
+        self._bpm_loaded = True
+        self.bpm_root_edit.setText(self._bpm_root or "")
+        self.bpm_browse_btn.setEnabled(True)
+        self._refresh_bpm_status_label()
         self.resize(self._settings.window_width, self._settings.window_height)
         self._apply_theme(self._settings.appearance_theme)
         self._sync_theme_combo()
@@ -703,6 +736,57 @@ class MainWindow(QtWidgets.QMainWindow):
         self._settings_saved = True
         if summary.get("status") == "PRESERVED":
             self._log("[settings] existing settings preserved (not overwritten).")
+
+    # -- Bad Pixel Database setting (single location; never scientific) ----
+    def _request_bpm_settings_save(self, root: str) -> None:
+        snapshot = service.OperationSnapshot(
+            op_id=service.new_operation_id(), kind="save_bpm_settings",
+            library_spec=None, request=None, policy=None, lights=(),
+            config_dir=str(self._storage.user_config_path),
+            bpm_root=root,
+        )
+        self._start_operation(snapshot)
+
+    def _handle_bpm_settings_saved(self, summary: dict) -> None:
+        self._bpm_saved = True
+        if summary.get("status") == "PRESERVED":
+            self._log("[bpm] existing Bad Pixel Database settings preserved (not overwritten).")
+        else:
+            self._bpm_root = summary.get("root") if "root" in summary else self.bpm_root_edit.text().strip()
+            self.bpm_root_edit.setText(self._bpm_root or "")
+        self._refresh_bpm_status_label()
+
+    def _refresh_bpm_status_label(self) -> None:
+        if not self._bpm_loaded:
+            self.bpm_status_label.setText("")
+            return
+        if self._bpm_root:
+            self.bpm_status_label.setText(
+                f"Bad Pixel Database: {self._bpm_root} — preview only (BPM correction disabled)"
+            )
+        else:
+            self.bpm_status_label.setText(
+                "Bad Pixel Database: not configured — preview disabled"
+            )
+
+    def _on_browse_bpm_root(self) -> None:
+        """Browse → validate/create the selected folder → persist the location."""
+        start = self._bpm_root or str(self._storage.user_data_path)
+        folder = QtWidgets.QFileDialog.getExistingDirectory(
+            self, "Select Bad Pixel Database location", start
+        )
+        if not folder:
+            return
+        from zecalibrator.api.v1 import _bpm
+
+        path, error = _bpm.ensure_bpm_root(folder, create=True)
+        if error is not None:
+            QtWidgets.QMessageBox.warning(self, "Bad Pixel Database location", error)
+            return
+        self._request_bpm_settings_save(path)
+
+    def _storage_paths_dict(self) -> dict:
+        return {name: str(p) for name, p in self._storage.as_dict().items()}
 
     # -- theme / appearance ------------------------------------------------
     def _apply_theme(self, theme_name) -> None:
@@ -1410,6 +1494,8 @@ class MainWindow(QtWidgets.QMainWindow):
             op_id=service.new_operation_id(), kind="calibrate_in_memory",
             library_spec=None, request=None, policy=None,
             lights=self._lights_snapshot([light]), plan=plan,
+            storage_paths=self._storage_paths_dict(),
+            bpm_root=self._bpm_root,
         )
         self._start_operation(snapshot)
 
@@ -1526,6 +1612,8 @@ class MainWindow(QtWidgets.QMainWindow):
             request=request, policy=self._policy(),
             lights=self._lights_snapshot(entries),
             destination=destination, batch_id=service.new_batch_id(),
+            storage_paths=self._storage_paths_dict(),
+            bpm_root=self._bpm_root,
         )
         self._start_operation(snapshot)
 
@@ -1653,6 +1741,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._handle_settings_loaded(summary)
         elif kind == "save_settings":
             self._handle_settings_saved(summary)
+        elif kind == "save_bpm_settings":
+            self._handle_bpm_settings_saved(summary)
         elif kind == "scan_masters":
             self._handle_scan_masters(summary)
         elif kind == "confirm_evidence":
@@ -1720,6 +1810,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self._log(f"in-memory {status} [{summary.get('reason_code')}]: {summary.get('details', '')}")
         else:
             self.status_label.setText(f"In-memory calibration: {status}")
+        bpm_status = summary.get("bpm_status")
+        if bpm_status:
+            self._log(f"Bad Pixel Database status: {bpm_status}")
         self._render_in_memory_details(summary)
         self._audit_show(summary.get("provenance_audit"))
 
@@ -1741,6 +1834,9 @@ class MainWindow(QtWidgets.QMainWindow):
             f"failed={failed}", f"not-started={len(not_started)}",
         ]
         self.status_label.setText(f"Export {status}: " + ", ".join(parts))
+        bpm_status = summary.get("bpm_status")
+        if bpm_status:
+            self._log(f"Bad Pixel Database status: {bpm_status}")
         if summary.get("reason_code"):
             self._log(f"export {status} [{summary['reason_code']}]: {summary.get('details')}")
         if status == "CANCELLED":

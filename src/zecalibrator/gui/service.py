@@ -915,6 +915,8 @@ class OperationSnapshot:
     target_indices: Tuple[int, ...] = ()  # light rows a declaration/ROI applies to
     config_dir: Optional[str] = None  # settings root (load_settings/save_settings)
     settings_payload: Optional[dict] = None  # GuiSettings.to_dict() for save
+    storage_paths: Optional[dict] = None  # 5 StoragePaths (str) for the BPM seam
+    bpm_root: Optional[str] = None  # Bad Pixel Database root override (save_bpm_settings)
     # managed master ingestion (P7-M3B)
     master_paths: Tuple[str, ...] = ()
     master_type: Optional[str] = None

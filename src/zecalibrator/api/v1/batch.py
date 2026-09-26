@@ -95,7 +95,7 @@ def _validate_batch_args(frames, request, library, policy, options):
     return options
 
 
-def _process_one(idx, frame, request, library, policy, destination, token, plan_schema_holder=None, slot=None):
+def _process_one(idx, frame, request, library, policy, destination, token, plan_schema_holder=None, slot=None, bpm_preview=None):
     """Process one frame into a :class:`BatchItem` (raises on cancellation).
 
     ``plan_schema_holder`` is an optional mutable mapping; when a plan is
@@ -180,7 +180,7 @@ def _process_one(idx, frame, request, library, policy, destination, token, plan_
         plan_schema_holder["provenance_schema"] = plan.versions.provenance_schema
 
     try:
-        result = _calibrate_frame_impl(frame, plan, ExecutionOptions(), token=token, obs=None, slot=slot, decoded_light=decoded_light)
+        result = _calibrate_frame_impl(frame, plan, ExecutionOptions(), token=token, obs=None, slot=slot, decoded_light=decoded_light, bpm_preview=bpm_preview)
     except OperationCancelled:
         raise
     except InvalidRequestError as exc:
@@ -291,7 +291,7 @@ def _output_path_for(input_identity, plan_id, destination) -> str:
     return os.path.join(os.fspath(destination), output_filename(logical_id))
 
 
-def _batch_generator(frames, request, library, policy, options, token, obs):
+def _batch_generator(frames, request, library, policy, options, token, obs, bpm_preview=None):
     total = len(frames)
     batch_id = options.batch_id or new_batch_id()
     destination = os.fspath(options.destination) if options.destination is not None else None
@@ -309,7 +309,7 @@ def _batch_generator(frames, request, library, policy, options, token, obs):
             frame_id = frame_display_id(frame)
             emit_batch_progress(obs, "frame_start", idx, total, frame_id=frame_id)
 
-            item = _process_one(idx, frame, request, library, policy, destination, token, plan_schema_holder, slot=context_slot)
+            item = _process_one(idx, frame, request, library, policy, destination, token, plan_schema_holder, slot=context_slot, bpm_preview=bpm_preview)
 
             manifest_inputs.append({"index": idx, "identity": _identity_to_dict(item.input_identity)})
             manifest_items.append(item.to_dict())

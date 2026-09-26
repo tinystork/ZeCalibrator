@@ -877,7 +877,7 @@ def _decode_light_for_plan(source, plan, *, policy, request, token, obs, decoded
     return None, light, input_identity, facts
 
 
-def _execute_prepared(light, context, plan, input_identity, facts, *, token, obs):
+def _execute_prepared(light, context, plan, input_identity, facts, *, token, obs, bpm_preview=None):
     request = plan.request
     policy = _reconstruct_policy(plan)
     masters = _to_executor_masters(context.bindings)
@@ -898,6 +898,7 @@ def _execute_prepared(light, context, plan, input_identity, facts, *, token, obs
             operation_id=OPERATION_ID,
             prepared_flat_outcome=context.prepared_flat,
             prepared_master_forms=context.master_forms,
+            bpm_preview=bpm_preview,
         )
     except OperationCancelled:
         return _wrap(
@@ -927,7 +928,7 @@ def _execute_prepared(light, context, plan, input_identity, facts, *, token, obs
     return result
 
 
-def _apply_prepared_context(source, context, options, *, token, progress):
+def _apply_prepared_context(source, context, options, *, token, progress, bpm_preview=None):
     """Apply a prepared context to one light source (decode + calibrate + wrap).
 
     Private seam: ``prepare + apply`` reproduces ``calibrate_frame`` exactly
@@ -943,10 +944,10 @@ def _apply_prepared_context(source, context, options, *, token, progress):
     )
     if failure is not None:
         return failure
-    return _execute_prepared(light, context, context.plan, input_identity, facts, token=token, obs=obs)
+    return _execute_prepared(light, context, context.plan, input_identity, facts, token=token, obs=obs, bpm_preview=bpm_preview)
 
 
-def _calibrate_frame_impl(source, plan, options, *, token, obs, slot, decoded_light=None):
+def _calibrate_frame_impl(source, plan, options, *, token, obs, slot, decoded_light=None, bpm_preview=None):
     """Single per-frame execution path shared by ``calibrate_frame`` and batch.
 
     Preserves today's exact order and failure precedence: pre-cancel →
@@ -1001,7 +1002,7 @@ def _calibrate_frame_impl(source, plan, options, *, token, obs, slot, decoded_li
             input_identity=input_identity, facts=facts,
         )
 
-    return _execute_prepared(light, context, plan, input_identity, facts, token=token, obs=obs)
+    return _execute_prepared(light, context, plan, input_identity, facts, token=token, obs=obs, bpm_preview=bpm_preview)
 
 
 def calibrate_frame(

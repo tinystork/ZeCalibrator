@@ -54,6 +54,7 @@ from pathlib import Path
 from PySide6 import QtCore
 
 import zecalibrator.api.v1 as v1
+from zecalibrator.api.v1 import _bpm
 from zecalibrator.api.v1._auto_route import (
     auto_route_batch,
     light_constraints_from_sensor_metadata,
@@ -408,6 +409,8 @@ class _OperationWorker(QtCore.QObject):
             return self._load_settings(snap)
         if snap.kind == "save_settings":
             return self._save_settings(snap)
+        if snap.kind == "save_bpm_settings":
+            return self._save_bpm_settings(snap)
         if snap.kind == "scan_masters":
             return self._scan_masters(snap)
         if snap.kind == "load_ledger":
@@ -586,8 +589,9 @@ class _OperationWorker(QtCore.QObject):
     def _calibrate_in_memory(self, snap, token, progress) -> dict:
         light = snap.lights[0]
         source = light.to_source()
-        result = v1.calibrate_frame(
-            source, snap.plan, v1.ExecutionOptions(), cancel=token, progress=progress
+        seam, bpm_root = self._bpm_context(snap)
+        result = _bpm.calibrate_frame(
+            source, snap.plan, v1.ExecutionOptions(), cancel=token, progress=progress, seam=seam
         )
         if result.status == "CANCELLED":
             return {
@@ -606,6 +610,10 @@ class _OperationWorker(QtCore.QObject):
             "counts": result.to_dict().get("counts"),
             "saturation_evidence": result.frame_quality.saturation_evidence,
             "provenance": provenance,
+            "bpm_status": (
+                _bpm.bpm_status_line(seam.outcome if seam is not None else None, bpm_root)
+                if bpm_root is not None else None
+            ),
             # Full execution audit (nested master identities/policy/input scaling).
             "provenance_audit": provenance,
         }
@@ -629,10 +637,11 @@ class _OperationWorker(QtCore.QObject):
         items = []
         cancelled = False
         manifest_error = None
+        seam, bpm_root = self._bpm_context(snap)
         try:
-            for item in v1.calibrate_batch(
+            for item in _bpm.calibrate_batch(
                 frames, snap.request, handle, snap.policy, options,
-                cancel=token, progress=progress,
+                cancel=token, progress=progress, seam=seam,
             ):
                 d = item.to_dict()
                 items.append(d)
@@ -689,6 +698,10 @@ class _OperationWorker(QtCore.QObject):
             "items": items,
             "total_inputs": len(snap.lights),
             "input_displays": [light.display_name for light in snap.lights],
+            "bpm_status": (
+                _bpm.bpm_status_line(seam.outcome if seam is not None else None, bpm_root)
+                if bpm_root is not None else None
+            ),
         }
 
     def _standard_export(self, snap, token, progress) -> dict:
@@ -716,6 +729,7 @@ class _OperationWorker(QtCore.QObject):
         items = []
         cancelled = False
         manifest_error = None
+        seam, bpm_root = self._bpm_context(snap)
 
         def collision_decision(planned_path: str) -> str:
             """Ask the GUI once per batch; block the worker thread (bounded)."""
@@ -743,9 +757,9 @@ class _OperationWorker(QtCore.QObject):
             return channel.result
 
         try:
-            for item in auto_route_batch(
+            for item in _bpm.auto_route_batch(
                 frames, handle, snap.policy, options, cancel=token, progress=progress,
-                collision_decision=collision_decision,
+                collision_decision=collision_decision, seam=seam,
             ):
                 d = item.to_dict()
                 items.append(d)
@@ -802,6 +816,10 @@ class _OperationWorker(QtCore.QObject):
             "items": items,
             "total_inputs": len(snap.lights),
             "input_displays": [light.display_name for light in snap.lights],
+            "bpm_status": (
+                _bpm.bpm_status_line(seam.outcome if seam is not None else None, bpm_root)
+                if bpm_root is not None else None
+            ),
         }
 
     def _load_declaration(self, snap) -> dict:
@@ -826,13 +844,31 @@ class _OperationWorker(QtCore.QObject):
             "display": os.path.basename(snap.evidence_path),
         }
 
+    def _bpm_context(self, snap):
+        """Build the BPM preview seam + root string for an operation, or None.
+
+        The seam is the safe orchestrator front door (§3/§35/§74); building it
+        here (from the injected ``storage_paths`` + optional root override) keeps
+        the worker on the one-chain path and never reaches ``apply_preparation``.
+        """
+        if not snap.storage_paths:
+            return None, None
+        storage = _bpm.storage_from_mapping(snap.storage_paths)
+        settings = _bpm.bpm_settings(snap.bpm_root)
+        seam = _bpm.make_bpm_seam(storage, settings, frame_id=snap.batch_id or snap.op_id)
+        root = str(_bpm.resolve_bpm_root(storage, settings))
+        return seam, root
+
     def _load_settings(self, snap) -> dict:
         result = settings_mod.load_settings(Path(snap.config_dir))
+        bpm = _bpm.load_bpm_settings(Path(snap.config_dir))
         return {
             "kind": "load_settings",
             "status": "COMPLETED",
             "state": result.state,
             "settings": result.settings.to_dict(),
+            "bpm_state": bpm.state,
+            "bpm_root": bpm.settings.bad_pixel_database_root,
         }
 
     def _save_settings(self, snap) -> dict:
@@ -851,6 +887,20 @@ class _OperationWorker(QtCore.QObject):
             settings_mod.GuiSettings.from_dict(snap.settings_payload),
         )
         return {"kind": "save_settings", "status": "COMPLETED", "state": current.state}
+
+    def _save_bpm_settings(self, snap) -> dict:
+        # Preservation-safe: never overwrite a malformed/unsupported existing
+        # file (mirror gui.settings discipline).
+        current = _bpm.load_bpm_settings(Path(snap.config_dir))
+        if current.state in ("malformed", "unsupported"):
+            return {
+                "kind": "save_bpm_settings",
+                "status": "PRESERVED",
+                "state": current.state,
+                "details": "existing BPM settings preserved (not overwritten)",
+            }
+        _bpm.save_bpm_settings(Path(snap.config_dir), _bpm.bpm_settings(snap.bpm_root))
+        return {"kind": "save_bpm_settings", "status": "COMPLETED", "state": current.state, "root": snap.bpm_root}
 
     # -- managed master ingestion (P7-M3B) ----------------------------------
     def _scan_masters(self, snap) -> dict:
