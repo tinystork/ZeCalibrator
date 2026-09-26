@@ -130,8 +130,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self._bpm_proposed = False
         self._pending_bpm_export = None
         # P4.2.1: one rebuild decision per run (§3) + one no-database prompt (§4).
-        self._bpm_mismatch_prompted = False
+        # The mismatch decision is an explicit per-run cache (never just "prompt
+        # seen"): "rebuild" | "use_existing" | "cancel" | None (not yet asked).
+        self._bpm_mismatch_decision = None
         self._bpm_no_db_prompted = False
+        # Serialized §4 onboarding: continue the BPM decision workflow only after
+        # the settings-save worker has ended (never while it is still active).
+        self._pending_bpm_workflow = None  # (request, destination) or None
+        self._pending_bpm_workflow_ok = False
 
         self._build_ui()
         self._wire_controller()
@@ -567,7 +573,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._reset_standard_summary()
         # A new run (config/input change) allows one fresh map-creation offer.
         self._bpm_proposed = False
-        self._bpm_mismatch_prompted = False
+        self._bpm_mismatch_decision = None
         self._bpm_no_db_prompted = False
 
     def _clear_batch_presentation(self) -> None:
@@ -786,6 +792,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _handle_bpm_settings_saved(self, summary: dict) -> None:
         self._bpm_saved = True
+        # Record whether persistence actually succeeded so a serialized §4
+        # onboarding continuation only proceeds after a real, successful save.
+        self._pending_bpm_workflow_ok = summary.get("status") == "COMPLETED"
         if summary.get("status") == "PRESERVED":
             self._log("[bpm] existing Bad Pixel Database settings preserved (not overwritten).")
         else:
@@ -1733,9 +1742,27 @@ class MainWindow(QtWidgets.QMainWindow):
             self._start_export(request, destination)
             return
         action = decision["action"]
-        if action == "mismatch" and not self._bpm_mismatch_prompted:
-            self._bpm_mismatch_prompted = True
-            self._offer_bpm_mismatch(request, destination, decision)
+        if action == "mismatch":
+            # §3: cache an explicit per-run decision, not just "prompt seen".
+            cached = self._bpm_mismatch_decision
+            if cached is None:
+                # First time this run: ask once, then remember the outcome.
+                self._offer_bpm_mismatch(request, destination, decision)
+                return
+            if cached == "cancel":
+                # Cancel is sticky for this unchanged run: never launch and never
+                # silently fall through to "Use existing".
+                self.status_label.setText("Calibration cancelled.")
+                return
+            if cached == "use_existing":
+                # Explicit use-existing: later exports reuse it without re-prompting.
+                self.status_label.setText("Using the existing Bad Pixel Map.")
+                self._start_export(request, destination)
+                return
+            # cached == "rebuild": the rebuild already happened; the new revision
+            # now matches (or creation failed and was reported). Proceed rather
+            # than re-prompting for this run.
+            self._start_export(request, destination)
             return
         if action == "propose" and not self._bpm_proposed:
             self._bpm_proposed = True
@@ -1798,11 +1825,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self._bpm_root = path
         self.bpm_root_edit.setText(path)
         self._refresh_bpm_status_label()
+        # Persist first; continue the SAME normal BPM workflow only AFTER the
+        # settings-save worker ends (serialized), never while it is still active.
+        # This prevents map creation from being offered/accepted mid-save (which
+        # would otherwise drop the create op on "an operation is already running").
+        self._pending_bpm_workflow = (request, destination)
+        self._pending_bpm_workflow_ok = False
         self._request_bpm_settings_save(path, detector_k=self._bpm_detector_k)
-        # Continue the SAME normal BPM workflow: after Create/Select, if no
-        # compatible map exists and a selected Master Dark exists, offer creation
-        # (§4 "immediately offer map creation"); otherwise use the map silently.
-        self._check_bpm_proposal_then_export(request, destination)
 
     def _offer_bpm_mismatch(self, request, destination, decision) -> None:
         """§3: compatible map K differs from the current setting — one decision."""
@@ -1835,16 +1864,21 @@ class MainWindow(QtWidgets.QMainWindow):
         if clicked is rebuild_btn and has_dark:
             # Rebuild: create a NEW immutable revision at the current K, promote
             # it; the old revision stays intact/addressable. Then export.
+            self._bpm_mismatch_decision = "rebuild"
             self._request_bpm_map_creation(request, destination)
             return
         if clicked is use_btn:
             # Use existing: keep that exact revision and its recorded K; never
-            # relabel as the current K. Export proceeds with the existing map.
+            # relabel as the current K. Export proceeds with the existing map,
+            # and later exports in this run reuse it without re-prompting.
+            self._bpm_mismatch_decision = "use_existing"
             self.status_label.setText("Using the existing Bad Pixel Map.")
             self._start_export(request, destination)
             return
-        # Cancel (or no rebuild available): do NOT launch the run, write no
-        # outputs/revision.
+        # Cancel (or no rebuild available, or dialog closed): do NOT launch the
+        # run, write no outputs/revision. The decision is cached as "cancel" so
+        # later exports in this unchanged run never silently use the old map.
+        self._bpm_mismatch_decision = "cancel"
         self.status_label.setText("Calibration cancelled.")
 
     def _offer_bpm_creation(self, request, destination) -> None:
@@ -1869,6 +1903,15 @@ class MainWindow(QtWidgets.QMainWindow):
             self._start_export(request, destination)
 
     def _request_bpm_map_creation(self, request, destination) -> None:
+        # Never set the pending-export continuation for a start that would be
+        # dropped: ``_pending_bpm_export`` must only mean the map-creation
+        # operation was ACTUALLY admitted.
+        if self._controller.is_active:
+            self._log("an operation is already running")
+            self.status_label.setText(
+                "Calibration not started (an operation is still running)."
+            )
+            return
         plan = self._run_dark_plan()
         if plan is None:
             self._start_export(request, destination)
@@ -1896,6 +1939,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 f"{summary.get('details')}"
             )
             self.status_label.setText("Bad Pixel Map creation failed.")
+            # A failed create/rebuild must never be followed by an export, and the
+            # per-run mismatch decision is cleared so a later export re-asks.
+            self._pending_bpm_export = None
+            self._bpm_mismatch_decision = None
 
     def _start_export(self, request, destination) -> None:
         selected = self._selected_rows()
@@ -2275,6 +2322,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._terminal_seen = True
         self.status_label.setText(f"Failed: {reason_code}")
         self._log(f"operation {op_id[:12]} FAILED [{reason_code}]: {details}")
+        # A failed operation must never leave a pending BPM continuation that
+        # later fires as if it succeeded.
+        self._pending_bpm_export = None
+        self._pending_bpm_workflow = None
+        self._pending_bpm_workflow_ok = False
         self.progress_bar.setRange(0, 1)
         self.progress_bar.setValue(0)
 
@@ -2288,6 +2340,19 @@ class MainWindow(QtWidgets.QMainWindow):
         elif self._export_after_preflight:
             self._export_after_preflight = False
             self._continue_export_after_preflight()
+        elif self._pending_bpm_workflow is not None:
+            # The settings save just ended: continue the SAME BPM decision
+            # workflow only if persistence succeeded. A failed/preserved save
+            # must never enter a partly-configured BPM workflow or silently
+            # export as if persistence had succeeded.
+            request, destination = self._pending_bpm_workflow
+            self._pending_bpm_workflow = None
+            if self._pending_bpm_workflow_ok:
+                self._pending_bpm_workflow_ok = False
+                self._check_bpm_proposal_then_export(request, destination)
+            else:
+                self.status_label.setText("Could not save Bad Pixel Database settings.")
+                self._log("[bpm] Bad Pixel Database settings save failed; calibration not started.")
         elif self._pending_bpm_export is not None:
             # After the map-creation op ended, resume the pending export (the
             # freshly created map is now found automatically).

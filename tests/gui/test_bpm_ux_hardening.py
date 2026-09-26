@@ -214,15 +214,22 @@ def test_mismatch_offer_is_emitted_once_per_run(qapp, monkeypatch, tmp_path):
     try:
         offers = []
         exports = []
-        w._offer_bpm_mismatch = lambda request, destination, decision: offers.append(decision)
+
+        def _offer(request, destination, decision):
+            offers.append(decision)
+            # The dialog records an explicit decision (e.g. Cancel).
+            w._bpm_mismatch_decision = "cancel"
+
+        w._offer_bpm_mismatch = _offer
         w._start_export = lambda request, destination: exports.append((request, destination))
 
         w._check_bpm_proposal_then_export(None, "/dest")
         assert len(offers) == 1
-        assert w._bpm_mismatch_prompted is True
-        # A second export in the SAME run must not re-offer.
+        assert w._bpm_mismatch_decision == "cancel"
+        # A second export in the SAME run must not re-offer (the decision is cached).
         w._check_bpm_proposal_then_export(None, "/dest")
         assert len(offers) == 1
+        assert exports == []  # Cancel never silently exports on re-click
     finally:
         _close(w)
 
@@ -285,6 +292,97 @@ def test_mismatch_without_dark_never_offers_rebuild(qapp, monkeypatch, tmp_path)
         assert "Rebuild" not in seen.get("buttons", [])
         assert "Use existing map" in seen.get("buttons", [])
         assert "Cancel" in seen.get("buttons", [])
+    finally:
+        _close(w)
+
+
+# ---------------------------------------------------------------------------
+# §3 F2 regression: the mismatch decision is an explicit per-run CACHE.
+# ---------------------------------------------------------------------------
+def test_mismatch_cancel_is_sticky_for_the_run(qapp, monkeypatch, tmp_path):
+    """F2: Cancel caches an explicit decision; a second export in the same
+    unchanged run must NOT silently export with the old map."""
+    w = _prep(qapp, monkeypatch, tmp_path, _MISMATCH)
+    try:
+        exports = []
+        w._start_export = lambda request, destination: exports.append((request, destination))
+        # First click: Cancel.
+        _fake_message_box(monkeypatch, "Cancel")
+        w._check_bpm_proposal_then_export(None, "/dest")
+        assert w._bpm_mismatch_decision == "cancel"
+        assert exports == []
+        # Second click in the SAME unchanged run: still cancelled, no dialog, no export.
+        dialogs = []
+        w._offer_bpm_mismatch = lambda request, destination, decision: dialogs.append(decision)
+        w._check_bpm_proposal_then_export(None, "/dest")
+        assert dialogs == []  # no second dialog
+        assert exports == []  # no silent "Use existing"
+    finally:
+        _close(w)
+
+
+def test_mismatch_use_existing_sticky_no_reprompt(qapp, monkeypatch, tmp_path):
+    """F2: Use existing is cached; later exports reuse it without re-prompting."""
+    w = _prep(qapp, monkeypatch, tmp_path, _MISMATCH)
+    try:
+        exports = []
+        dialogs = []
+        w._start_export = lambda request, destination: exports.append((request, destination))
+        _fake_message_box(monkeypatch, "Use existing map")
+        w._check_bpm_proposal_then_export(None, "/dest")
+        assert w._bpm_mismatch_decision == "use_existing"
+        assert len(exports) == 1
+        # Second export: reuses the decision, no second dialog.
+        real_offer = w._offer_bpm_mismatch
+        w._offer_bpm_mismatch = lambda request, destination, decision: dialogs.append(decision) or real_offer(
+            request, destination, decision
+        )
+        w._check_bpm_proposal_then_export(None, "/dest")
+        assert dialogs == []  # no re-prompt
+        assert len(exports) == 2
+    finally:
+        _close(w)
+
+
+def test_mismatch_generation_bump_resets_decision(qapp, monkeypatch, tmp_path):
+    """F2: a fresh input/config generation resets the cached decision and allows
+    one new prompt."""
+    w = _prep(qapp, monkeypatch, tmp_path, _MISMATCH)
+    try:
+        exports = []
+        w._start_export = lambda request, destination: exports.append((request, destination))
+        _fake_message_box(monkeypatch, "Cancel")
+        w._check_bpm_proposal_then_export(None, "/dest")
+        assert w._bpm_mismatch_decision == "cancel"
+        assert exports == []
+
+        # A config/input change begins a new run.
+        w._bump_generation()
+        w._plans = {"r1": _FakePlan(has_dark=True)}
+        assert w._bpm_mismatch_decision is None
+        # One new prompt is allowed again.
+        dialogs = []
+        w._offer_bpm_mismatch = lambda request, destination, decision: dialogs.append(decision)
+        w._check_bpm_proposal_then_export(None, "/dest")
+        assert len(dialogs) == 1
+        assert exports == []
+    finally:
+        _close(w)
+
+
+def test_mismatch_dialog_closed_equals_cancel(qapp, monkeypatch, tmp_path):
+    """F2: closing the dialog (clickedButton() is None) is equivalent to Cancel."""
+    w = _prep(qapp, monkeypatch, tmp_path, _MISMATCH)
+    try:
+        exports = []
+        w._start_export = lambda request, destination: exports.append((request, destination))
+        _fake_message_box(monkeypatch, None)  # dialog closed
+        w._check_bpm_proposal_then_export(None, "/dest")
+        assert w._bpm_mismatch_decision == "cancel"
+        assert exports == []
+        # And it stays cancelled for the run.
+        w._check_bpm_proposal_then_export(None, "/dest")
+        assert exports == []
     finally:
         _close(w)
 
@@ -433,5 +531,83 @@ def test_no_preview_disabled_wording_in_status(qapp, paths):
         assert w.bpm_root_edit.placeholderText() == "No Bad Pixel Database configured"
         assert "preview disabled" not in w.bpm_status_label.text()
         assert "preview" not in w.bpm_status_label.text().lower()
+    finally:
+        _close(w)
+
+
+# ---------------------------------------------------------------------------
+# F1 regression: fresh-DB onboarding serializes save → offer/create → export
+# using the REAL controller/worker (no stubbed continuation).
+# ---------------------------------------------------------------------------
+def test_fresh_db_onboarding_serializes_save_then_create_then_export(qapp, monkeypatch, tmp_path):
+    """F1: after Create root, map creation must be admitted only AFTER the
+    save_bpm_settings worker ends; the operation ordering is save → create map
+    → export, with no "operation is already running" and a real revision."""
+    import json
+    from zecalibrator.api.v1 import _bpm
+    import zecalibrator.api.v1 as v1
+    from zecalibrator.gui.window import _LightEntry
+    from .conftest import make_synth_fixture
+
+    paths = resolve_paths(base=str(tmp_path))
+    fixture = make_synth_fixture(tmp_path)
+    new_base = tmp_path / "new" / "base"
+
+    w = MainWindow(paths)
+    assert _pump(lambda: w._bpm_loaded and not w._controller.is_active)
+
+    # Real light + library (dark master indexed by make_synth_fixture).
+    decl = v1.ImportDeclaration(**json.loads(open(fixture["decl"]).read()))
+    roi = v1.RoiExtentEvidence(**json.loads(open(fixture["roi"]).read()))
+    w._lights.append(_LightEntry(fixture["light"], hdu=0, declaration=decl, roi_extent=roi))
+    w._refresh_lights_list()
+    w._library_spec = v1.LibrarySpec(root=fixture["root"], index_path=fixture["index"])
+
+    # Real preflight to populate a resolved plan (dark binding).
+    w._on_preflight()
+    assert _pump(lambda: not w._controller.is_active)
+    assert w._run_dark_available(), "expected a resolved dark master plan"
+
+    # Fresh camera: no DB configured → §4 Create root path.
+    w._bpm_root = None
+    monkeypatch.setattr(
+        QtWidgets.QFileDialog, "getExistingDirectory",
+        staticmethod(lambda *a, **k: str(new_base)),
+    )
+    # Auto-accept the §5 map-creation offer (and the §4 Create is entered
+    # directly via _choose_bpm_database below).
+    _fake_message_box(monkeypatch, "Create Bad Pixel Map")
+
+    kinds = []
+    real_start = w._start_operation
+    def recording_start(snapshot):
+        kinds.append(snapshot.kind)
+        return real_start(snapshot)
+    w._start_operation = recording_start
+
+    logs = []
+    real_log = w._log
+    def recording_log(text):
+        logs.append(text)
+        return real_log(text)
+    w._log = recording_log
+
+    try:
+        w._choose_bpm_database(None, str(tmp_path / "out"), create=True)
+        # Wait for the full serialized chain to drain.
+        assert _pump(lambda: not w._controller.is_active, timeout_ms=60000)
+
+        # save → create map → export, in order, with no dropped start.
+        assert kinds == ["save_bpm_settings", "create_bpm_map", "export"], kinds
+        assert not any("operation is already running" in t for t in logs), logs
+
+        # A real promoted revision was created in the new base.
+        from zecalibrator.bpm.store import load_bad_pixel_database
+
+        loaded = load_bad_pixel_database(new_base)
+        assert loaded.state == "OPENED", loaded.reason_code
+        promoted = [r for r in loaded.database.revisions() if r.state == "promoted"]
+        assert promoted, "expected a promoted revision after map creation"
+        assert promoted[-1].detector_k == 30.0
     finally:
         _close(w)
