@@ -425,6 +425,7 @@ def execute_calibration(
     operation_id: str = "zecalibrator-calibration",
     prepared_flat_outcome: object = None,
     prepared_master_forms: object = None,
+    bpm_preview: object = None,
 ) -> CalibrationResult:
     """Execute one bounded frame calibration with no partial mutation.
 
@@ -446,6 +447,15 @@ def execute_calibration(
     hands ``masters_prevalidated=True`` to ``calibrate_light``. It is opaque to
     this module (duck-typed); ``None`` (the default) preserves today's per-frame
     checked path exactly. Per-frame shape checks stay.
+
+    ``bpm_preview`` is an additive private seam (P4-P1 LOT 1): when the caller
+    supplies an opaque duck-typed object exposing ``record(result, light)``, the
+    producer invokes it with the completed ``CalibrationResult`` and the decoded
+    light exactly once, after ordinary calibration has produced its result. The
+    seam runs the safe BPM preview orchestration (never reconstructs a pixel,
+    never calls ``apply_preparation`` while the scientific gate is closed). It
+    is opaque to this module; ``None`` (the default) leaves the returned result
+    byte-identical to today's path (mission §63).
     """
     if request.additive_mode not in ("control", "bias_only", "dark_incl_bias", "dark_bias_removed"):
         raise InvalidRequestError(f"unsupported additive_mode: {request.additive_mode!r}")
@@ -461,13 +471,23 @@ def execute_calibration(
         )
 
     try:
-        return _execute(
+        result = _execute(
             light, request, masters, flat_prep_mode=flat_prep_mode, token=token, emit=emit,
             prepared_flat_outcome=prepared_flat_outcome,
             prepared_master_forms=prepared_master_forms,
         )
     except OperationCancelled:
         return _cancelled_result()
+
+    # P4-P1 LOT 1: optional BPM preview orchestration, branched into the existing
+    # CalibrationResult producer as ONE optional step after ordinary calibration
+    # (mission §5/§11). The seam is opaque; absent (``None``) the behaviour is
+    # byte-identical to today's path (mission §63).
+    if bpm_preview is not None:
+        record = getattr(bpm_preview, "record", None)
+        if record is not None:
+            record(result, light)
+    return result
 
 
 def _resolve_light_masters(light, request, masters) -> dict[str, MasterBinding]:
