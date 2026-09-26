@@ -20,6 +20,14 @@ This module states the corrected definition, before any integration code exists:
   and a residual ≈ 0 (background) in its OFF state; only the read noise crosses
   zero. If the sensor persistence is otherwise established, that state change is
   *not* contradictory evidence.
+* **Detection floor (a documented blind band).** This fact detects only the
+  conflicts whose **both** sides exceed ``conflict_amplitude_floor``. Below it,
+  the state is ``NO`` **by construction**, without claiming the absence of a
+  conflict: a genuine low-amplitude sign reversal (e.g. ±40 ADU, well above the
+  ~4-5 ADU read noise) is **not** detected. The floor is a
+  ``RESEARCH_CANDIDATE_PARAMETER``; a relative floor (``k × local σ``) would
+  remove the blind band but introduces a new measurement (a local scale and its
+  window) that must be adopted as a product parameter — deferred, not of this lot.
 
 The corrected rule consumes the canonical residual series (the post-calibration
 CFA residual when a representative dark is supplied; the same-CFA local residual

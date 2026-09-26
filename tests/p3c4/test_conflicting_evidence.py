@@ -137,6 +137,37 @@ def test_assess_conflicting_evidence_is_binary_and_deterministic():
     assert absent.sign_reversals == 0
 
 
+def test_conflict_below_floor_is_documented_false_negative():
+    # The detection floor is a documented blind band, pinned here (F1 rework-1):
+    # a genuine *low-amplitude* sign reversal BELOW conflict_amplitude_floor is
+    # NOT detected (state=NO, 0 reversals) — the rule does not claim the absence
+    # of a conflict, it simply cannot see one under the floor. Just above the
+    # floor the same reversal IS detected. This pins the boundary, it does not
+    # hide the window.
+    below = assess_conflicting_evidence(
+        [45.0, -45.0, 45.0, -45.0], conflict_amplitude_floor=50.0, min_conflict_reversals=2
+    )
+    assert below.state == NO
+    assert below.sign_reversals == 0  # ±45 is a real signal, not read noise — yet undetected
+
+    above = assess_conflicting_evidence(
+        [55.0, -55.0, 55.0, -55.0], conflict_amplitude_floor=50.0, min_conflict_reversals=2
+    )
+    assert above.state == YES
+    assert above.sign_reversals == 3
+
+    # The floor sits well above the corpus read noise (~4-5 ADU): a genuine
+    # low-amplitude systematic reversal (e.g. ±40 ADU) falls in the blind band
+    # [noise, floor), which is exactly the non-conservative window this test
+    # documents. Removing it requires a relative floor (k x local sigma) — a
+    # product-lot decision, not this lot.
+    blind = assess_conflicting_evidence(
+        [40.0, -40.0, 40.0, -40.0], conflict_amplitude_floor=50.0, min_conflict_reversals=2
+    )
+    assert blind.state == NO
+    assert blind.sign_reversals == 0
+
+
 # ---------------------------------------------------------------------------
 # Corrected candidate family: versioned, bounded, marked research parameters
 # ---------------------------------------------------------------------------
