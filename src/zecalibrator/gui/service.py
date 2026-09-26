@@ -917,6 +917,7 @@ class OperationSnapshot:
     settings_payload: Optional[dict] = None  # GuiSettings.to_dict() for save
     storage_paths: Optional[dict] = None  # 5 StoragePaths (str) for the BPM seam
     bpm_root: Optional[str] = None  # Bad Pixel Database root override (save_bpm_settings)
+    bpm_detector_k: Optional[float] = None  # detector threshold K (create/save BPM)
     # managed master ingestion (P7-M3B)
     master_paths: Tuple[str, ...] = ()
     master_type: Optional[str] = None

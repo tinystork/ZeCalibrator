@@ -198,7 +198,8 @@ def test_facade_calibrate_frame_with_seam_records_outcome_gate_closed(tmp_path):
     assert "Result mode: calibration-only" in text
     assert "BPM scientific application: disabled" in text
     status = _bpm.bpm_status_line(seam.outcome, str(root))
-    assert "not required / preview disabled" in status
+    assert "not required" in status
+    assert "preview disabled" not in status
 
 
 def test_synthesis_without_outcome_is_calibration_only_defaults(tmp_path):
@@ -225,7 +226,8 @@ def test_status_line_never_applied_when_zero(tmp_path):
         calibration_only = True
 
     line = _bpm.bpm_status_line(_Outcome(), "/x/base")
-    assert "not required / preview disabled" in line
+    assert "not required" in line
+    assert "preview disabled" not in line
     assert "applied" not in line
     assert "Profile: selected" in line
 

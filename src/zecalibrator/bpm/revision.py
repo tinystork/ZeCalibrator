@@ -15,6 +15,7 @@ application happens in P4-A2, never here.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Optional
 
@@ -22,6 +23,7 @@ from zecalibrator.core.digests import canonical_json, sha256_hex
 
 from .errors import BpmBaseCorrupted
 from .identity import SensorIdentity
+from .settings import DEFAULT_DETECTOR_K, resolved_detector_k
 from .vocabulary import (
     ACTION_STATE_LADDER,
     BPM_SCHEMA_VERSION,
@@ -103,6 +105,12 @@ class Revision:
     ``sequence`` is store-ordering metadata (the promotion order), used only for
     the deterministic "latest promoted compatible" selection; it is **not** part
     of the integrity digest (like ``acquired_at`` in the master library).
+
+    ``detector_k`` records the detector threshold multiplier ``K`` actually used
+    to create this revision's map (provenance, part of the integrity digest). A
+    revision created by P4.2 without this field carries ``detector_k=None`` and
+    resolves compatibly to :data:`DEFAULT_DETECTOR_K` (30.0) via
+    :func:`zecalibrator.bpm.settings.resolved_detector_k`.
     """
 
     revision_id: str
@@ -112,6 +120,7 @@ class Revision:
     integrity_digest: str
     schema_version: str = BPM_SCHEMA_VERSION
     sequence: int = 0
+    detector_k: Optional[float] = None
 
     def __post_init__(self) -> None:
         if self.schema_version != BPM_SCHEMA_VERSION:
@@ -124,7 +133,21 @@ class Revision:
             raise ValueError("Revision.revision_id must be a non-empty string")
         if not isinstance(self.integrity_digest, str) or len(self.integrity_digest) != 64:
             raise ValueError("Revision.integrity_digest must be a 64-char hex string")
+        if self.detector_k is not None:
+            if isinstance(self.detector_k, bool) or not isinstance(self.detector_k, (int, float)):
+                raise ValueError(
+                    f"Revision.detector_k must be a finite positive float or None, got {self.detector_k!r}"
+                )
+            k = float(self.detector_k)
+            if not math.isfinite(k) or k <= 0.0:
+                raise ValueError(f"Revision.detector_k must be a finite positive float, got {k!r}")
+            object.__setattr__(self, "detector_k", k)
         object.__setattr__(self, "sites", tuple(self.sites))
+
+    @property
+    def effective_detector_k(self) -> float:
+        """The detector K this revision was created with (legacy None -> 30.0)."""
+        return resolved_detector_k(self)
 
     def verify(self) -> None:
         """Reject a tampered revision (recompute the integrity digest).
@@ -132,7 +155,10 @@ class Revision:
         Raises :class:`BpmBaseCorrupted` with the revision id and provenance when
         the recomputed digest differs from ``integrity_digest``.
         """
-        recomputed = revision_digest(self.state, self.sensor_identity, self.sites, self.schema_version)
+        recomputed = revision_digest(
+            self.state, self.sensor_identity, self.sites, self.schema_version,
+            detector_k=self.detector_k,
+        )
         if recomputed != self.integrity_digest:
             raise BpmBaseCorrupted(
                 f"revision {self.revision_id!r} integrity digest mismatch: "
@@ -141,7 +167,7 @@ class Revision:
             )
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "schema_version": self.schema_version,
             "revision_id": self.revision_id,
             "state": self.state,
@@ -150,6 +176,9 @@ class Revision:
             "sites": [s.to_dict() for s in self.sites],
             "integrity_digest": self.integrity_digest,
         }
+        if self.detector_k is not None:
+            d["detector_k"] = self.detector_k
+        return d
 
 
 def _sorted_sites(sites) -> tuple[SiteRecord, ...]:
@@ -161,12 +190,16 @@ def revision_digest(
     sensor_identity: SensorIdentity,
     sites,
     schema_version: str = BPM_SCHEMA_VERSION,
+    detector_k: Optional[float] = None,
 ) -> str:
     """Compute the canonical integrity digest of a revision's content.
 
     Site order is normalized (sorted by position) so identical evidence always
     yields the identical digest regardless of insertion order — this is what
-    makes "same evidence -> deterministic profile" hold.
+    makes "same evidence -> deterministic profile" hold. When ``detector_k`` is
+    present it participates in the digest (provenance is integrity-protected); a
+    legacy revision (``detector_k=None``) omits it and keeps its historical
+    digest byte-identical.
     """
     obj = {
         "schema_version": schema_version,
@@ -174,6 +207,8 @@ def revision_digest(
         "sensor_identity": sensor_identity.to_dict(),
         "sites": [s.to_dict() for s in _sorted_sites(sites)],
     }
+    if detector_k is not None:
+        obj["detector_k"] = detector_k
     return sha256_hex(canonical_json(obj).encode("utf-8"))
 
 
@@ -185,15 +220,17 @@ def make_revision(
     sequence: int = 0,
     revision_id: Optional[str] = None,
     schema_version: str = BPM_SCHEMA_VERSION,
+    detector_k: Optional[float] = None,
 ) -> Revision:
     """Build an immutable revision with a content-addressed identity.
 
     ``revision_id`` defaults to the integrity digest (deterministic: identical
     evidence -> identical id; new evidence -> new id). ``sites`` are normalized
-    to a deterministic order.
+    to a deterministic order. ``detector_k`` records the detector threshold used
+    to create the map (optional; ``None`` for legacy P4.2 revisions).
     """
     canonical_sites = _sorted_sites(sites)
-    digest = revision_digest(state, sensor_identity, canonical_sites, schema_version)
+    digest = revision_digest(state, sensor_identity, canonical_sites, schema_version, detector_k=detector_k)
     return Revision(
         revision_id=revision_id or digest,
         state=state,
@@ -202,6 +239,7 @@ def make_revision(
         integrity_digest=digest,
         schema_version=schema_version,
         sequence=sequence,
+        detector_k=detector_k,
     )
 
 
@@ -209,7 +247,8 @@ def promote_revision(revision: Revision, *, sequence: int) -> Revision:
     """Return a **new** promoted revision carrying ``revision``'s knowledge.
 
     The original revision remains untouched; promotion is a new immutable
-    revision (new id / digest, state=``promoted``, assigned ``sequence``).
+    revision (new id / digest, state=``promoted``, assigned ``sequence``). The
+    detector K provenance is carried over unchanged.
     """
     if isinstance(sequence, bool) or not isinstance(sequence, int) or sequence < 0:
         raise ValueError("promote_revision.sequence must be a non-negative int")
@@ -218,6 +257,7 @@ def promote_revision(revision: Revision, *, sequence: int) -> Revision:
         sensor_identity=revision.sensor_identity,
         sites=revision.sites,
         sequence=sequence,
+        detector_k=revision.detector_k,
     )
 
 

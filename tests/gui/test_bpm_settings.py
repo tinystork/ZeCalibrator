@@ -90,12 +90,13 @@ def test_bpm_status_label_reflects_configuration(qapp, paths):
     w = MainWindow(paths)
     try:
         assert _pump(lambda: w._bpm_loaded and not w._controller.is_active)
-        assert "not configured" in w.bpm_status_label.text()
+        assert w.bpm_status_label.text() == "No Bad Pixel Database configured"
         w._bpm_root = "/some/base"
         w._refresh_bpm_status_label()
-        # LOT 3: the correction is now applied automatically (not "preview only").
-        assert "applied automatically" in w.bpm_status_label.text()
-        assert "preview only" not in w.bpm_status_label.text()
+        # §7: product wording — exactly the path, no "preview" / "not configured"
+        # relics, no misleading "applied automatically".
+        assert w.bpm_status_label.text() == "Bad Pixel Database: /some/base"
+        assert "preview" not in w.bpm_status_label.text()
     finally:
         _close(w)
 

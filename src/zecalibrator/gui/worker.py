@@ -840,10 +840,11 @@ class _OperationWorker(QtCore.QObject):
                 "details": "no selected dark master to create a Bad Pixel Map from",
             }
         storage = _bpm.storage_from_mapping(snap.storage_paths)
-        settings = _bpm.bpm_settings(snap.bpm_root)
+        settings = _bpm.bpm_settings(snap.bpm_root, detector_k=snap.bpm_detector_k)
         try:
             result = _bpm.create_bpm_map_from_binding(
-                storage, settings, plan.masters["dark"], cancel=token
+                storage, settings, plan.masters["dark"], cancel=token,
+                detector_k=snap.bpm_detector_k,
             )
         except Exception as exc:  # noqa: BLE001 - typed creation failure
             return {
@@ -924,6 +925,7 @@ class _OperationWorker(QtCore.QObject):
             "settings": result.settings.to_dict(),
             "bpm_state": bpm.state,
             "bpm_root": bpm.settings.bad_pixel_database_root,
+            "bpm_detector_k": bpm.settings.detector_k,
         }
 
     def _save_settings(self, snap) -> dict:
@@ -954,8 +956,15 @@ class _OperationWorker(QtCore.QObject):
                 "state": current.state,
                 "details": "existing BPM settings preserved (not overwritten)",
             }
-        _bpm.save_bpm_settings(Path(snap.config_dir), _bpm.bpm_settings(snap.bpm_root))
-        return {"kind": "save_bpm_settings", "status": "COMPLETED", "state": current.state, "root": snap.bpm_root}
+        _bpm.save_bpm_settings(
+            Path(snap.config_dir),
+            _bpm.bpm_settings(snap.bpm_root, detector_k=snap.bpm_detector_k),
+        )
+        return {
+            "kind": "save_bpm_settings", "status": "COMPLETED", "state": current.state,
+            "root": snap.bpm_root,
+            "detector_k": snap.bpm_detector_k,
+        }
 
     # -- managed master ingestion (P7-M3B) ----------------------------------
     def _scan_masters(self, snap) -> dict:

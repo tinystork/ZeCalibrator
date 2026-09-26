@@ -1,4 +1,4 @@
-"""The single Bad Pixel Database user setting: ``bad_pixel_database_root``.
+"""Bad Pixel Database user settings.
 
 Reuses the existing storage adapter (:class:`zecalibrator.storage.StoragePaths`)
 and the existing settings *mechanism* (the versioned, atomic, preservation-safe
@@ -7,13 +7,23 @@ storage system and no second ``QStandardPaths``-style owner.
 
 The default root is derived from ``StoragePaths.user_data_path`` (portable via
 ``pathlib``/``platformdirs`` — no hardcoded ``/home/...`` or ``C:\\...``).
-``bad_pixel_database_root`` is the **only** user setting: no sigma, no threshold,
-no radius, no duty cycle, no reconstruction operator.
+
+Two settings exist:
+
+* ``bad_pixel_database_root`` — the Bad Pixel Database location (a path, not
+  scientific).
+* ``detector_k`` — the **single** scientific BPM setting (owner decision,
+  2026-09-26): the detector threshold multiplier ``K`` used **only** when
+  CREATING/REBUILDING an immutable Bad Pixel Map revision. Default ``30.0``.
+  No other scientific control (no sigma, no radius, no duty cycle, no
+  reconstruction operator, no per-frame threshold, no automatic retune) is
+  exposed.
 """
 
 from __future__ import annotations
 
 import json
+import math
 import os
 import tempfile
 from dataclasses import dataclass
@@ -29,7 +39,15 @@ BPM_SETTINGS_FILENAME = "bpm_settings.json"
 #: The default base subdirectory name under ``StoragePaths.user_data_path``.
 BPM_DEFAULT_DIRNAME = "bad_pixel_database"
 
-_KNOWN_KEYS = frozenset({"schema_version", "bad_pixel_database_root"})
+#: The default detector threshold multiplier K (median + K * MAD * 1.4826).
+DEFAULT_DETECTOR_K = 30.0
+
+#: A conservative upper bound on the detector K setting. Values beyond this are
+#: rejected calmly (never silently clamped); it is far above the default and
+#: exists only to bound absurd input.
+DETECTOR_K_MAX = 1000.0
+
+_KNOWN_KEYS = frozenset({"schema_version", "bad_pixel_database_root", "detector_k"})
 
 STATE_OK = "ok"
 STATE_MISSING = "missing"
@@ -37,21 +55,55 @@ STATE_MALFORMED = "malformed"
 STATE_UNSUPPORTED = "unsupported"
 
 
+def validate_detector_k(value) -> float:
+    """Validate the detector K setting; return it as a finite positive float.
+
+    Rejects (raises ``ValueError``) non-numeric, non-finite, non-positive and
+    out-of-bound values calmly — never silently clamps and never auto-retunes.
+    """
+    try:
+        k = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(
+            f"Bad pixel detection threshold must be a number, got {value!r}"
+        )
+    if not math.isfinite(k) or k <= 0.0 or k > DETECTOR_K_MAX:
+        raise ValueError(
+            "Bad pixel detection threshold must be finite, positive and at most "
+            f"{DETECTOR_K_MAX}, got {value!r}"
+        )
+    return k
+
+
+def resolved_detector_k(revision) -> float:
+    """Return a revision's effective detector K.
+
+    A revision with no recorded ``detector_k`` (a legacy P4.2 revision) resolves
+    explicitly and compatibly to :data:`DEFAULT_DETECTOR_K` (30.0) — never a
+    silent fiction that it was created with a different K.
+    """
+    k = getattr(revision, "detector_k", None)
+    return DEFAULT_DETECTOR_K if k is None else float(k)
+
+
 @dataclass(frozen=True)
 class BpmSettings:
-    """Immutable BPM settings snapshot (a single field)."""
+    """Immutable BPM settings snapshot (location + the single detector K)."""
 
     schema_version: int = BPM_SETTINGS_SCHEMA_VERSION
     bad_pixel_database_root: Optional[str] = None
+    detector_k: float = DEFAULT_DETECTOR_K
     extra: Mapping[str, object] = MappingProxyType({})
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "extra", MappingProxyType(dict(self.extra)))
+        object.__setattr__(self, "detector_k", validate_detector_k(self.detector_k))
 
     def to_dict(self) -> dict:
         d = {
             "schema_version": self.schema_version,
             "bad_pixel_database_root": self.bad_pixel_database_root,
+            "detector_k": self.detector_k,
         }
         for key, value in self.extra.items():
             if key not in _KNOWN_KEYS:
@@ -67,10 +119,12 @@ class BpmSettings:
         root = d.get("bad_pixel_database_root")
         if root is not None and (not isinstance(root, str) or not root.strip()):
             raise ValueError("bad_pixel_database_root must be a non-empty string or null")
+        detector_k = validate_detector_k(d.get("detector_k", DEFAULT_DETECTOR_K))
         extra = {k: v for k, v in d.items() if k not in _KNOWN_KEYS}
         return cls(
             schema_version=BPM_SETTINGS_SCHEMA_VERSION,
             bad_pixel_database_root=root if root is not None else None,
+            detector_k=detector_k,
             extra=extra,
         )
 
@@ -177,6 +231,8 @@ __all__ = [
     "BPM_SETTINGS_SCHEMA_VERSION",
     "BpmSettings",
     "BpmSettingsLoad",
+    "DEFAULT_DETECTOR_K",
+    "DETECTOR_K_MAX",
     "STATE_MALFORMED",
     "STATE_MISSING",
     "STATE_OK",
@@ -185,6 +241,8 @@ __all__ = [
     "default_settings",
     "load_settings",
     "resolve_bad_pixel_database_root",
+    "resolved_detector_k",
     "save_settings",
     "settings_path",
+    "validate_detector_k",
 ]

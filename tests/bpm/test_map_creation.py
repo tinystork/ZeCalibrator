@@ -60,6 +60,10 @@ def _reference_positions(dark) -> list[tuple[int, int]]:
 
     Literally re-derives the recipe rather than calling the module under test.
     """
+    return _reference_positions_k(dark, 30.0)
+
+
+def _reference_positions_k(dark, k: float) -> list[tuple[int, int]]:
     dark = np.asarray(dark)
     positions = set()
     for py in (0, 1):
@@ -67,7 +71,7 @@ def _reference_positions(dark) -> list[tuple[int, int]]:
             sub = dark[py::2, px::2]
             med = np.median(sub)
             mad = np.median(np.abs(sub - med)) * 1.4826
-            thr = med + 30.0 * mad
+            thr = med + float(k) * mad
             ys, xs = np.nonzero(sub > thr)
             for yy, xx in zip(ys, xs):
                 positions.add((int(2 * yy + py), int(2 * xx + px)))
@@ -96,35 +100,107 @@ def test_detection_matches_reference_exactly():
     assert len(got) == len(hot)
 
 
+def test_detection_with_injected_k_matches_reference():
+    # The detector formula stays exactly median + K * MAD * 1.4826, only K is
+    # injected (independent per CFA plane).
+    hot = [(3, 3), (8, 9), (12, 12)]
+    dark = _synthetic_dark(hot=hot)
+    for k in (20.0, 30.0, 40.0):
+        got = detect_site_positions(dark, detector_k=k)
+        expected = _reference_positions_k(dark, k)
+        assert got == tuple(expected), f"detector K={k} diverges from the reference recipe"
+
+
+def test_lower_k_detects_more_candidates():
+    # Lower K lowers the threshold, so it can only add candidate pixels, never
+    # remove any that a higher K already found (same master, same planes).
+    rng = np.random.default_rng(1)
+    dark = (100.0 + rng.normal(0.0, 2.0, size=SHAPE)).astype(np.float32)
+    dark[5, 5] = 160.0
+    dark[6, 6] = 180.0
+    k40 = set(detect_site_positions(dark, detector_k=40.0))
+    k20 = set(detect_site_positions(dark, detector_k=20.0))
+    assert k40 <= k20  # K20 detects a superset of K40
+
+
+def test_create_map_with_selected_k_records_provenance(tmp_path):
+    root = tmp_path / "base"
+    result = create_bad_pixel_map(root, _master(hot=[(2, 2)]), detector_k=20.0)
+    assert result.candidate.detector_k == 20.0
+    assert result.promoted.detector_k == 20.0
+    assert result.promoted.effective_detector_k == 20.0
+
+    # Provenance survives store/reload.
+    from zecalibrator.bpm.store import load_bad_pixel_database
+
+    load = load_bad_pixel_database(root)
+    assert load.state == "OPENED"
+    promoted = [r for r in load.database.revisions() if r.state == "promoted"][0]
+    assert promoted.detector_k == 20.0
+    assert promoted.effective_detector_k == 20.0
+
+
+def test_legacy_revision_without_detector_k_resolves_as_30(tmp_path):
+    from zecalibrator.bpm.settings import resolved_detector_k
+    from zecalibrator.bpm.store import load_bad_pixel_database, create_bad_pixel_database
+    from zecalibrator.bpm.vocabulary import REVISION_STATE_PROMOTED
+
+    root = tmp_path / "base"
+    db = create_bad_pixel_database(root)
+    ident = make_identity(shape=SHAPE, cfa_phase=CFA)
+    # A P4.2-style legacy revision created WITHOUT detector_k (None).
+    legacy = make_revision(
+        state=REVISION_STATE_PROMOTED,
+        sensor_identity=ident,
+        sites=[make_site(4, 4)],
+        sequence=1,
+    )
+    db.add_revision(legacy)
+
+    # The written file omits detector_k (legacy), so a reload must resolve to 30.0.
+    rev_path = root / "revisions" / f"{legacy.revision_id}.json"
+    import json
+
+    on_disk = json.loads(rev_path.read_text(encoding="utf-8"))
+    assert "detector_k" not in on_disk
+
+    revs = load_bad_pixel_database(root).database.revisions()
+    legacy_rev = [r for r in revs if r.revision_id == legacy.revision_id][0]
+    assert legacy_rev.detector_k is None
+    assert legacy_rev.effective_detector_k == 30.0
+    assert resolved_detector_k(legacy_rev) == 30.0
+
+
 def test_detection_handles_no_hot_pixels():
     dark = _synthetic_dark(hot=())
     assert detect_site_positions(dark) == ()
 
 
-def test_k_is_30_and_not_exposed():
-    assert mc._DETECTOR_K == 30.0
+def test_k_default_is_30_and_only_k_is_injectable():
+    # The single scientific BPM setting: detector K (default 30.0). The MAD scale
+    # stays internal. No other scientific control (sigma/radius/duty cycle) is a
+    # parameter.
+    assert mc.DEFAULT_DETECTOR_K == 30.0
     assert mc._DETECTOR_MAD_SCALE == 1.4826
-    # The constant is internal: never exported, never a parameter, never a knob.
-    assert "_DETECTOR_K" not in mc.__all__
     assert "_DETECTOR_MAD_SCALE" not in mc.__all__
     for fn in (detect_site_positions, detect_sites, create_bad_pixel_map):
         params = set(inspect.signature(fn).parameters)
-        assert not ({"k", "sigma", "threshold", "seuil"} & params)
-    for name in ("k", "sigma", "threshold"):
+        assert "detector_k" in params  # the single injected scientific control
+        assert not ({"sigma", "threshold", "seuil", "radius", "duty_cycle"} & params)
+    for name in ("sigma", "threshold", "radius", "duty_cycle"):
         assert name not in SelectedDarkMaster.__dataclass_fields__
 
 
-def test_no_user_surface_references_detector_constant():
-    # No user surface (CLI/GUI/settings) references the internal detector token.
-    offenders = []
-    for path in sorted(SRC_ROOT.rglob("*.py")):
-        if path.name == "map_creation.py":
-            continue
-        text = path.read_text(encoding="utf-8")
-        for token in ("_DETECTOR_K", "_DETECTOR_MAD_SCALE", "DETECTOR_K"):
-            if token in text:
-                offenders.append((str(path), token))
-    assert not offenders, f"user surface references internal detector constants: {offenders}"
+def test_no_other_scientific_bpm_setting_exposed():
+    # The ONLY scientific BPM setting is detector K. No other scientific control
+    # may be a BpmSettings field (sigma/radius/duty-cycle/epoch/net-benefit are
+    # absent); the location + schema_version + extra are the only non-K fields.
+    from zecalibrator.bpm.settings import BpmSettings
+
+    fields = set(BpmSettings.__dataclass_fields__)
+    assert "detector_k" in fields
+    assert "bad_pixel_database_root" in fields
+    assert not ({"sigma", "radius", "duty_cycle", "epoch", "net_benefit"} & fields)
 
 
 # ---------------------------------------------------------------------------

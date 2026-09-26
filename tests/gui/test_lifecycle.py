@@ -57,6 +57,11 @@ def _ready_window(qapp, paths, fixture):
     w._lights[0].roi_extent = v1.RoiExtentEvidence(**json.loads(open(fixture["roi"]).read()))
     w._refresh_lights_list()
     w._library_spec = v1.LibrarySpec(root=fixture["root"], index_path=fixture["index"])
+    # BPM is out of scope for these lifecycle/transport tests; stub the BPM
+    # decision dialogs so a fresh (unconfigured) database never blocks export.
+    w._offer_bpm_database_setup = lambda req, dst: w._start_export(req, dst)
+    w._offer_bpm_creation = lambda req, dst: w._start_export(req, dst)
+    w._offer_bpm_mismatch = lambda req, dst, dec: w._start_export(req, dst)
     return w
 
 

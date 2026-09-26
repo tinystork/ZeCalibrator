@@ -88,6 +88,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._bpm_settings_state = None
         self._bpm_loaded = False
         self._bpm_saved = False
+        self._bpm_detector_k = 30.0
 
         self._lights: list[_LightEntry] = []
         self._library_spec: v1.LibrarySpec | None = None
@@ -128,6 +129,9 @@ class MainWindow(QtWidgets.QMainWindow):
         # LOT 3: map-creation proposal state (one offer per run, §9 E).
         self._bpm_proposed = False
         self._pending_bpm_export = None
+        # P4.2.1: one rebuild decision per run (§3) + one no-database prompt (§4).
+        self._bpm_mismatch_prompted = False
+        self._bpm_no_db_prompted = False
 
         self._build_ui()
         self._wire_controller()
@@ -181,6 +185,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.include_subfolders_check,
             self.scan_masters_btn, self.confirm_masters_btn, self.build_managed_btn,
             self.output_browse_btn,
+            self.bpm_k_edit, self.bpm_k_reset_btn,
         ]
         self._launch_widgets = [self.calibrate_btn, self.export_btn,
                                 self.advanced_preflight_btn, self.advanced_export_btn]
@@ -377,6 +382,25 @@ class MainWindow(QtWidgets.QMainWindow):
         layout.addWidget(modes_box)
         self._update_mode_note()
 
+        # P4.2.1: the single scientific BPM setting — detector threshold K.
+        bpm_box = QtWidgets.QGroupBox("Bad Pixel Map")
+        bpm_layout = QtWidgets.QGridLayout(bpm_box)
+        bpm_layout.addWidget(QtWidgets.QLabel("Bad pixel detection threshold:"), 0, 0)
+        self.bpm_k_edit = QtWidgets.QDoubleSpinBox()
+        self.bpm_k_edit.setRange(0.01, 1000.0)
+        self.bpm_k_edit.setDecimals(1)
+        self.bpm_k_edit.setSingleStep(1.0)
+        self.bpm_k_edit.setValue(30.0)
+        self.bpm_k_edit.setToolTip("Lower values detect more candidate bad pixels.")
+        bpm_layout.addWidget(self.bpm_k_edit, 0, 1)
+        self.bpm_k_reset_btn = QtWidgets.QPushButton("Reset default")
+        self.bpm_k_reset_btn.setToolTip("Restore the default threshold (30.0).")
+        bpm_layout.addWidget(self.bpm_k_reset_btn, 0, 2)
+        self.bpm_k_note = QtWidgets.QLabel("")
+        self.bpm_k_note.setStyleSheet("color: gray;")
+        bpm_layout.addWidget(self.bpm_k_note, 1, 0, 1, 3)
+        layout.addWidget(bpm_box)
+
         self.qualification_label = QtWidgets.QLabel(_SYNTH_ONLY_LABEL)
         self.qualification_label.setStyleSheet("color: gray;")
         layout.addWidget(self.qualification_label)
@@ -447,7 +471,7 @@ class MainWindow(QtWidgets.QMainWindow):
         bpm_row = QtWidgets.QHBoxLayout()
         bpm_row.addWidget(QtWidgets.QLabel("Bad Pixel Database location:"))
         self.bpm_root_edit = QtWidgets.QLineEdit()
-        self.bpm_root_edit.setPlaceholderText("No location selected (preview disabled)")
+        self.bpm_root_edit.setPlaceholderText("No Bad Pixel Database configured")
         self.bpm_root_edit.setReadOnly(True)
         bpm_row.addWidget(self.bpm_root_edit, 1)
         self.bpm_browse_btn = QtWidgets.QPushButton("Browse…")
@@ -506,6 +530,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.confirm_masters_btn.clicked.connect(self._on_confirm_masters)
         self.build_managed_btn.clicked.connect(self._on_build_managed)
         self.bpm_browse_btn.clicked.connect(self._on_browse_bpm_root)
+        self.bpm_k_edit.valueChanged.connect(self._on_bpm_k_changed)
+        self.bpm_k_reset_btn.clicked.connect(self._on_bpm_k_reset)
 
         self.additive_combo.currentIndexChanged.connect(self._on_mode_changed)
         self.flat_combo.currentIndexChanged.connect(self._on_mode_changed)
@@ -541,6 +567,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._reset_standard_summary()
         # A new run (config/input change) allows one fresh map-creation offer.
         self._bpm_proposed = False
+        self._bpm_mismatch_prompted = False
+        self._bpm_no_db_prompted = False
 
     def _clear_batch_presentation(self) -> None:
         self._batch_items.clear()
@@ -705,6 +733,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._bpm_loaded = True
         self.bpm_root_edit.setText(self._bpm_root or "")
         self.bpm_browse_btn.setEnabled(True)
+        # P4.2.1: restore the single scientific BPM setting (detector K).
+        self._bpm_detector_k = float(summary.get("bpm_detector_k", 30.0))
+        self._sync_bpm_k_edit(self._bpm_detector_k)
         self._refresh_bpm_status_label()
         self.resize(self._settings.window_width, self._settings.window_height)
         self._apply_theme(self._settings.appearance_theme)
@@ -742,13 +773,14 @@ class MainWindow(QtWidgets.QMainWindow):
         if summary.get("status") == "PRESERVED":
             self._log("[settings] existing settings preserved (not overwritten).")
 
-    # -- Bad Pixel Database setting (single location; never scientific) ----
-    def _request_bpm_settings_save(self, root: str) -> None:
+    # -- Bad Pixel Database setting (location + the single detector K) -------
+    def _request_bpm_settings_save(self, root: str, detector_k: float | None = None) -> None:
         snapshot = service.OperationSnapshot(
             op_id=service.new_operation_id(), kind="save_bpm_settings",
             library_spec=None, request=None, policy=None, lights=(),
             config_dir=str(self._storage.user_config_path),
             bpm_root=root,
+            bpm_detector_k=detector_k if detector_k is not None else self._bpm_detector_k,
         )
         self._start_operation(snapshot)
 
@@ -759,6 +791,8 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             self._bpm_root = summary.get("root") if "root" in summary else self.bpm_root_edit.text().strip()
             self.bpm_root_edit.setText(self._bpm_root or "")
+            if "detector_k" in summary and summary.get("detector_k") is not None:
+                self._bpm_detector_k = float(summary["detector_k"])
         self._refresh_bpm_status_label()
 
     def _refresh_bpm_status_label(self) -> None:
@@ -766,13 +800,42 @@ class MainWindow(QtWidgets.QMainWindow):
             self.bpm_status_label.setText("")
             return
         if self._bpm_root:
-            self.bpm_status_label.setText(
-                f"Bad Pixel Database: {self._bpm_root} — compatible maps applied automatically"
-            )
+            self.bpm_status_label.setText(f"Bad Pixel Database: {self._bpm_root}")
         else:
-            self.bpm_status_label.setText(
-                "Bad Pixel Database: not configured — no map correction"
-            )
+            self.bpm_status_label.setText("No Bad Pixel Database configured")
+
+    def _sync_bpm_k_edit(self, value: float) -> None:
+        """Set the threshold spin box without triggering a persistence write."""
+        from PySide6 import QtCore
+
+        self.bpm_k_edit.blockSignals(True)
+        try:
+            self.bpm_k_edit.setValue(float(value))
+        finally:
+            self.bpm_k_edit.blockSignals(False)
+
+    def _on_bpm_k_changed(self, value: float) -> None:
+        """Persist a changed detector threshold calmly (reject invalid values)."""
+        from zecalibrator.api.v1 import _bpm
+
+        try:
+            k = _bpm.validate_detector_k(value)
+        except ValueError as exc:
+            self.bpm_k_note.setText(str(exc))
+            self.status_label.setText(f"Bad pixel detection threshold unchanged: {exc}")
+            self._sync_bpm_k_edit(self._bpm_detector_k)
+            return
+        self._bpm_detector_k = k
+        self.bpm_k_note.setText("")
+        # Persist via the existing BPM settings mechanism (root + K).
+        self._request_bpm_settings_save(self._bpm_root or "", detector_k=k)
+
+    def _on_bpm_k_reset(self) -> None:
+        """Reset the detector threshold to exactly the default (30.0)."""
+        self._bpm_detector_k = 30.0
+        self._sync_bpm_k_edit(30.0)
+        self.bpm_k_note.setText("")
+        self._request_bpm_settings_save(self._bpm_root or "", detector_k=30.0)
 
     def _on_browse_bpm_root(self) -> None:
         """Browse → validate/create the selected folder → persist the location."""
@@ -1626,22 +1689,41 @@ class MainWindow(QtWidgets.QMainWindow):
         return None
 
     def _check_bpm_proposal_then_export(self, request, destination) -> None:
-        """§3/§9: offer Bad Pixel Map creation at most once per run, then export.
+        """§3/§4/§9: BPM decision gate at Calibrate/Export, then export.
 
-        Uses the headless decision (``_bpm.bpm_creation_decision``): a compatible
-        map → no question (used automatically); no compatible map + a selected
-        Master Dark → one offer; no compatible map + no dark → a discreet note;
-        a corrupt base → a typed discreet note. Declining never raises an error
-        and never repeats per light.
+        Uses the headless decisions (``_bpm.bpm_no_database_decision`` +
+        ``_bpm.bpm_creation_decision``):
+
+        * no explicit database configured → offer Create/Select/Not now once per
+          run (§4);
+        * a compatible map whose K differs from the current setting → offer
+          Rebuild / Use existing / Cancel once per run (§3);
+        * a compatible map with matching K → no question, used automatically
+          (§6);
+        * no compatible map + a selected Master Dark → one creation offer (§5);
+        * no compatible map + no dark → a discreet note;
+        * a corrupt base → a typed discreet note.
+
+        Declining never raises an error and never repeats per light.
         """
         from zecalibrator.api.v1 import _bpm
 
         light = self._run_light_constraints()
-        if light is None or not self._bpm_root:
+        if light is None:
             self._start_export(request, destination)
             return
         storage = _bpm.storage_from_mapping(self._storage_paths_dict())
-        settings = _bpm.bpm_settings(self._bpm_root)
+        settings = _bpm.bpm_settings(self._bpm_root, detector_k=self._bpm_detector_k)
+
+        # §4: no explicit database configured → one prompt per run.
+        if not _bpm.bpm_no_database_decision(settings)["configured"]:
+            if not self._bpm_no_db_prompted:
+                self._bpm_no_db_prompted = True
+                self._offer_bpm_database_setup(request, destination)
+                return
+            self._start_export(request, destination)
+            return
+
         try:
             decision = _bpm.bpm_creation_decision(
                 storage, settings, light, dark_available=self._run_dark_available()
@@ -1651,6 +1733,10 @@ class MainWindow(QtWidgets.QMainWindow):
             self._start_export(request, destination)
             return
         action = decision["action"]
+        if action == "mismatch" and not self._bpm_mismatch_prompted:
+            self._bpm_mismatch_prompted = True
+            self._offer_bpm_mismatch(request, destination, decision)
+            return
         if action == "propose" and not self._bpm_proposed:
             self._bpm_proposed = True
             self._offer_bpm_creation(request, destination)
@@ -1662,6 +1748,104 @@ class MainWindow(QtWidgets.QMainWindow):
                 f"Bad Pixel Database is unavailable ({decision['reason_code']})."
             )
         self._start_export(request, destination)
+
+    def _offer_bpm_database_setup(self, request, destination) -> None:
+        """§4: no Bad Pixel Database configured — Create / Select / Not now."""
+        box = QtWidgets.QMessageBox(self)
+        box.setWindowTitle("Bad Pixel Database")
+        box.setIcon(QtWidgets.QMessageBox.Icon.Question)
+        box.setText("No Bad Pixel Database is configured for this camera.")
+        create_btn = box.addButton(
+            "Create new database", QtWidgets.QMessageBox.ButtonRole.AcceptRole
+        )
+        select_btn = box.addButton(
+            "Select existing database", QtWidgets.QMessageBox.ButtonRole.AcceptRole
+        )
+        box.addButton("Not now", QtWidgets.QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is create_btn:
+            self._choose_bpm_database(request, destination, create=True)
+        elif clicked is select_btn:
+            self._choose_bpm_database(request, destination, create=False)
+        else:
+            # Not now: normal calibration without BPM; never re-asked this run.
+            self.status_label.setText("Calibration continues without a Bad Pixel Database.")
+            self._start_export(request, destination)
+
+    def _choose_bpm_database(self, request, destination, *, create: bool) -> None:
+        """§4 folder chooser: create/select + validate + persist, then continue.
+
+        Cancelling the picker is calm and never launches a partly-configured BPM
+        path: it falls back to normal calibration without BPM.
+        """
+        from zecalibrator.api.v1 import _bpm
+
+        start = self._bpm_root or str(self._storage.user_data_path)
+        folder = QtWidgets.QFileDialog.getExistingDirectory(
+            self,
+            "Create Bad Pixel Database location" if create else "Select Bad Pixel Database",
+            start,
+        )
+        if not folder:
+            self.status_label.setText("Calibration continues without a Bad Pixel Database.")
+            self._start_export(request, destination)
+            return
+        path, error = _bpm.ensure_bpm_root(folder, create=create)
+        if error is not None:
+            QtWidgets.QMessageBox.warning(self, "Bad Pixel Database location", error)
+            return
+        self._bpm_root = path
+        self.bpm_root_edit.setText(path)
+        self._refresh_bpm_status_label()
+        self._request_bpm_settings_save(path, detector_k=self._bpm_detector_k)
+        # Continue the SAME normal BPM workflow: after Create/Select, if no
+        # compatible map exists and a selected Master Dark exists, offer creation
+        # (§4 "immediately offer map creation"); otherwise use the map silently.
+        self._check_bpm_proposal_then_export(request, destination)
+
+    def _offer_bpm_mismatch(self, request, destination, decision) -> None:
+        """§3: compatible map K differs from the current setting — one decision."""
+        map_k = decision.get("map_k")
+        setting_k = decision.get("setting_k")
+
+        def fmt(v):
+            return f"{float(v):g}"
+
+        has_dark = self._run_dark_available()
+        box = QtWidgets.QMessageBox(self)
+        box.setWindowTitle("Bad Pixel Map")
+        box.setIcon(QtWidgets.QMessageBox.Icon.Question)
+        box.setText(
+            f"The compatible Bad Pixel Map was created with threshold {fmt(map_k)}.\n"
+            f"The current threshold is {fmt(setting_k)}.\n"
+            "Rebuild the Bad Pixel Map with the current threshold?"
+        )
+        rebuild_btn = None
+        if has_dark:
+            rebuild_btn = box.addButton(
+                "Rebuild", QtWidgets.QMessageBox.ButtonRole.AcceptRole
+            )
+        use_btn = box.addButton(
+            "Use existing map", QtWidgets.QMessageBox.ButtonRole.AcceptRole
+        )
+        box.addButton("Cancel", QtWidgets.QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is rebuild_btn and has_dark:
+            # Rebuild: create a NEW immutable revision at the current K, promote
+            # it; the old revision stays intact/addressable. Then export.
+            self._request_bpm_map_creation(request, destination)
+            return
+        if clicked is use_btn:
+            # Use existing: keep that exact revision and its recorded K; never
+            # relabel as the current K. Export proceeds with the existing map.
+            self.status_label.setText("Using the existing Bad Pixel Map.")
+            self._start_export(request, destination)
+            return
+        # Cancel (or no rebuild available): do NOT launch the run, write no
+        # outputs/revision.
+        self.status_label.setText("Calibration cancelled.")
 
     def _offer_bpm_creation(self, request, destination) -> None:
         """The single "Create Bad Pixel Map" dialog (case C)."""
@@ -1695,6 +1879,7 @@ class MainWindow(QtWidgets.QMainWindow):
             library_spec=None, request=None, policy=None, lights=(),
             plan=plan, storage_paths=self._storage_paths_dict(),
             bpm_root=self._bpm_root,
+            bpm_detector_k=self._bpm_detector_k,
         )
         self._start_operation(snapshot)
 

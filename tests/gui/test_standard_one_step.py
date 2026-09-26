@@ -495,6 +495,12 @@ def test_export_does_not_require_manual_preflight(qapp, paths, tmp_path, monkeyp
         w._refresh_lights_list()
         w._library_spec = v1.LibrarySpec(root=fixture["root"], index_path=fixture["index"])
 
+        # BPM is out of scope here; stub the BPM decision dialogs so a fresh
+        # (unconfigured) database never blocks the one-step export.
+        w._offer_bpm_database_setup = lambda req, dst: w._start_export(req, dst)
+        w._offer_bpm_creation = lambda req, dst: w._start_export(req, dst)
+        w._offer_bpm_mismatch = lambda req, dst, dec: w._start_export(req, dst)
+
         out = tmp_path / "out"
         out.mkdir()
         # Standard export reads the visible Output-folder field (no modal chooser).

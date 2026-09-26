@@ -123,3 +123,32 @@ def test_corrupt_base_is_typed_error_never_propose(tmp_path):
     )
     assert decision["action"] == "error"
     assert decision["reason_code"] == "BASE_CORRUPTED"
+
+
+def test_matching_k_uses_map_without_question(tmp_path):
+    root = _base_with_site(tmp_path, [make_site(5, 5)])
+    decision = _bpm.bpm_creation_decision(
+        _storage(tmp_path), _settings(root), _light_constraints(), dark_available=True,
+    )
+    assert decision["action"] == "use"
+    assert decision["map_k"] == 30.0
+
+
+def test_k30_map_with_k20_setting_yields_mismatch_decision(tmp_path):
+    from zecalibrator.bpm.settings import BpmSettings
+
+    root = _base_with_site(tmp_path, [make_site(5, 5)])  # legacy -> K=30.0
+    settings = BpmSettings(bad_pixel_database_root=str(root), detector_k=20.0)
+    decision = _bpm.bpm_creation_decision(
+        _storage(tmp_path), settings, _light_constraints(), dark_available=True,
+    )
+    assert decision["action"] == "mismatch"
+    assert decision["map_k"] == 30.0
+    assert decision["setting_k"] == 20.0
+    assert decision["revision_id"]
+
+
+def test_no_database_decision_reflects_configured_root(tmp_path):
+    assert _bpm.bpm_no_database_decision(_bpm.default_bpm_settings())["configured"] is False
+    settings = _bpm.bpm_settings(str(tmp_path / "base"))
+    assert _bpm.bpm_no_database_decision(settings)["configured"] is True

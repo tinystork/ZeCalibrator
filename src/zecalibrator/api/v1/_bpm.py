@@ -23,7 +23,8 @@ zecalibrator.cli`` stays NumPy-free.
 
 User-facing terminology (§41) is "Bad Pixel Database" / "Bad Pixel Map" — never
 ``RTS`` / ``SensorProfile`` / ``PreparationPlan``. The scientific gate is never
-toggled here: there is no "force BPM" flag and no scientific setting.
+toggled here: there is no "force BPM" flag, and the ONLY scientific setting
+carried through here is the owner-authorized detector K (``bpm_settings``).
 """
 
 from __future__ import annotations
@@ -37,6 +38,7 @@ __all__ = [
     "bpm_application_status_line",
     "bpm_application_synthesis",
     "bpm_creation_decision",
+    "bpm_no_database_decision",
     "bpm_status_line",
     "bpm_settings",
     "calibrate_batch",
@@ -54,6 +56,7 @@ __all__ = [
     "storage_from_mapping",
     "synthesis_text",
     "validate_bpm_root",
+    "validate_detector_k",
 ]
 
 
@@ -101,12 +104,22 @@ def default_bpm_settings():
     return _bpm_settings_module()["default_settings"]()
 
 
-def bpm_settings(root: Optional[str] = None):
-    """Build a BPM settings snapshot with an optional configured root."""
+def validate_detector_k(value) -> float:
+    """Validate the single scientific BPM setting (detector K); raises ValueError."""
+    from zecalibrator.bpm.settings import validate_detector_k as _impl
+
+    return _impl(value)
+
+
+def bpm_settings(root: Optional[str] = None, detector_k: Optional[float] = None):
+    """Build a BPM settings snapshot with an optional configured root and K."""
     BpmSettings = _bpm_settings_module()["BpmSettings"]
-    if root is None or not str(root).strip():
-        return default_bpm_settings()
-    return BpmSettings(bad_pixel_database_root=str(root))
+    kwargs: dict = {}
+    if root is not None and str(root).strip():
+        kwargs["bad_pixel_database_root"] = str(root)
+    if detector_k is not None:
+        kwargs["detector_k"] = detector_k
+    return BpmSettings(**kwargs) if kwargs else default_bpm_settings()
 
 
 def default_bad_pixel_database_root(storage) -> Path:
@@ -305,7 +318,7 @@ def bpm_status_line(outcome, root_fallback=None) -> str:
     s = _synthesis(outcome, root_fallback)
     db = "selected" if s["database"] not in ("none", None) else "not configured"
     profile = "selected" if s["profile"] != "none" else "none"
-    correction = "applied" if s["reconstructed"] > 0 else "not required / preview disabled"
+    correction = "applied" if s["reconstructed"] > 0 else "not required"
     return (
         f"Bad Pixel Database: {db} · Profile: {profile} · "
         f"BPM correction: {correction}"
@@ -386,8 +399,12 @@ def bpm_creation_decision(storage, settings, light_constraints, *, dark_availabl
     combines it with whether a compatible Master Dark was selected for the run.
     Returns a small user-facing decision dict:
 
-    * ``{"action": "use"}`` — a compatible map exists → use it automatically,
+    * ``{"action": "use", "revision_id", "map_k"}`` — a compatible map exists
+      and its recorded K matches the current setting → use it automatically,
       never ask;
+    * ``{"action": "mismatch", "revision_id", "map_k", "setting_k"}`` — a
+      compatible map exists but its recorded K differs from the current
+      setting → ask whether to rebuild (once per run);
     * ``{"action": "propose"}`` — no compatible map and a Master Dark is
       available → offer to create one (at most once per run);
     * ``{"action": "unavailable"}`` — no compatible map and no Master Dark →
@@ -402,7 +419,16 @@ def bpm_creation_decision(storage, settings, light_constraints, *, dark_availabl
     root = resolve_bpm_root(storage, settings)
     resolution = resolve_bad_pixel_database(root, identity)
     if resolution.is_selected:
-        return {"action": "use", "reason_code": ""}
+        revision = resolution.revision
+        assert revision is not None
+        map_k = revision.effective_detector_k
+        setting_k = float(settings.detector_k)
+        if map_k == setting_k:
+            return {"action": "use", "reason_code": "", "revision_id": revision.revision_id, "map_k": map_k}
+        return {
+            "action": "mismatch", "reason_code": "",
+            "revision_id": revision.revision_id, "map_k": map_k, "setting_k": setting_k,
+        }
     if resolution.is_base_error:
         return {"action": "error", "reason_code": resolution.reason_code}
     if dark_available:
@@ -410,14 +436,26 @@ def bpm_creation_decision(storage, settings, light_constraints, *, dark_availabl
     return {"action": "unavailable", "reason_code": resolution.reason_code}
 
 
-def create_bpm_map_from_binding(storage, settings, binding, *, cancel=None):
+def bpm_no_database_decision(settings) -> dict:
+    """Fresh-camera decision: whether a Bad Pixel Database is configured (§4).
+
+    ``settings`` is a :class:`zecalibrator.bpm.settings.BpmSettings`; the product
+    prompts for a database exactly once per run when no explicit root is
+    configured. Returns ``{"configured": True|False, "root": ...}``.
+    """
+    root = settings.bad_pixel_database_root
+    return {"configured": bool(root and str(root).strip()), "root": root}
+
+
+def create_bpm_map_from_binding(storage, settings, binding, *, cancel=None, detector_k=None):
     """Create a Bad Pixel Map from an already-selected dark master binding.
 
     Decodes the binding's dark FITS (same decode path the calibration uses) and
     builds the :class:`SelectedDarkMaster` from the descriptor identity, then
     stores new immutable candidate+promoted revisions into the configured base
-    (``create_bad_pixel_map``). No master is fabricated: the dark is already
-    selected by the matcher.
+    (``create_bad_pixel_map``) at the supplied ``detector_k`` (defaults to the
+    current setting). No master is fabricated: the dark is already selected by
+    the matcher.
     """
     from zecalibrator.api.v1 import _io
     from zecalibrator.api.v1.calibration import _declaration_from_descriptor
@@ -448,4 +486,5 @@ def create_bpm_map_from_binding(storage, settings, binding, *, cancel=None):
         data=decoded.data, identity=identity,
         metadata={"master_type": "dark", "source": "selected_master_dark"},
     )
-    return create_bad_pixel_map(resolve_bpm_root(storage, settings), master)
+    k = detector_k if detector_k is not None else settings.detector_k
+    return create_bad_pixel_map(resolve_bpm_root(storage, settings), master, detector_k=k)

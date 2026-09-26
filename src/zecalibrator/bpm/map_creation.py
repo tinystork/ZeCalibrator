@@ -11,11 +11,11 @@ It NEVER:
 
 * reads a unit dark or builds a dark master (no median of darks) — it consumes
   an already-selected master (array + identity + metadata);
-* exposes ``K`` (or any threshold) to the user (GUI/CLI/setting) — ``K`` is an
-  **internal versioned constant**, not returned and not configurable (no grid
-  search, no research campaign);
 * mutates an existing revision — creation writes a NEW ``candidate`` revision
   then a NEW ``promoted`` revision; the previously-existing revisions remain;
+* exposes any scientific control beyond the single detector K (injected by the
+  caller as ``detector_k``, default 30.0) — no grid search, no research
+  campaign, no automatic retune;
 * imports ``research/*`` or any GUI — it is headless.
 """
 
@@ -30,6 +30,7 @@ import numpy as np
 from .errors import BpmError
 from .identity import SensorIdentity
 from .revision import Revision, SiteRecord, make_revision
+from .settings import DEFAULT_DETECTOR_K, validate_detector_k
 from .store import (
     BadPixelDatabase,
     STATE_MISSING,
@@ -46,10 +47,6 @@ from .vocabulary import (
 #: The map-creation product version (distinct from BPM schema / revision schema).
 MAP_CREATION_VERSION = "zecalibrator.bpm.map_creation.v1"
 
-# The detector threshold multiplier K. INTERNAL and versioned: never returned and
-# never exposed to any user surface (GUI/CLI/setting); no grid search, no new
-# research campaign (§4).
-_DETECTOR_K = 30.0
 # The MAD -> sigma scale factor of the detector recipe (per CFA plane). INTERNAL.
 _DETECTOR_MAD_SCALE = 1.4826
 
@@ -61,17 +58,19 @@ class MapCreationError(BpmError):
     """A map could not be created (base not openable, invalid input, …)."""
 
 
-def detect_site_positions(dark_master) -> tuple[tuple[int, int], ...]:
+def detect_site_positions(dark_master, *, detector_k=DEFAULT_DETECTOR_K) -> tuple[tuple[int, int], ...]:
     """Return the sorted sensor ``(y, x)`` positions detected by the exact P4 recipe.
 
     For each CFA plane ``(py, px)`` the sub-plane ``dark[py::2, px::2]`` is
-    thresholded against ``median + K * (MAD * 1.4826)`` (``K = 30.0``, internal),
-    where ``MAD = median(|sub - median(sub)|)``; a sub-plane coordinate ``(yy,
-    xx)`` strictly above the threshold maps to the sensor coordinate
+    thresholded against ``median + K * (MAD * 1.4826)`` (``K`` injected, default
+    30.0), where ``MAD = median(|sub - median(sub)|)``; a sub-plane coordinate
+    ``(yy, xx)`` strictly above the threshold maps to the sensor coordinate
     ``(2*yy + py, 2*xx + px)``.
 
-    Deterministic: the same master yields the same positions (sorted).
+    Deterministic: the same master yields the same positions (sorted). ``K``
+    applies ONLY to map creation/rebuild; it never alters reconstruction.
     """
+    k = validate_detector_k(detector_k)
     arr = np.asarray(dark_master)
     if arr.ndim != 2:
         raise MapCreationError(f"dark master must be a 2-D array, got shape {arr.shape}")
@@ -83,14 +82,14 @@ def detect_site_positions(dark_master) -> tuple[tuple[int, int], ...]:
         sub = arr[py::2, px::2]
         plane_med = float(np.median(sub))
         plane_mad = float(np.median(np.abs(sub - plane_med))) * _DETECTOR_MAD_SCALE
-        threshold = plane_med + _DETECTOR_K * plane_mad
+        threshold = plane_med + k * plane_mad
         ys, xs = np.nonzero(sub > threshold)
         for yy, xx in zip(ys, xs):
             positions.add((int(2 * yy + py), int(2 * xx + px)))
     return tuple(sorted(positions))
 
 
-def detect_sites(dark_master) -> tuple[SiteRecord, ...]:
+def detect_sites(dark_master, *, detector_k=DEFAULT_DETECTOR_K) -> tuple[SiteRecord, ...]:
     """Detect sites and wrap them with the v1 map policy.
 
     Every detected site is ``QUALIFIED`` (knowledge) and
@@ -104,7 +103,7 @@ def detect_sites(dark_master) -> tuple[SiteRecord, ...]:
             action_state=ACTION_STATE_ELIGIBLE_FOR_TARGETED_RECONSTRUCTION,
             knowledge_state=KNOWLEDGE_STATE_QUALIFIED,
         )
-        for pos in detect_site_positions(dark_master)
+        for pos in detect_site_positions(dark_master, detector_k=detector_k)
     )
 
 
@@ -166,14 +165,15 @@ def _open_or_create_database(root) -> BadPixelDatabase:
     )
 
 
-def create_bad_pixel_map(root, master: SelectedDarkMaster) -> MapCreationResult:
+def create_bad_pixel_map(root, master: SelectedDarkMaster, *, detector_k=DEFAULT_DETECTOR_K) -> MapCreationResult:
     """Create + store a map from ``master`` as NEW immutable revisions.
 
-    Detects sites with the exact P4 recipe, writes a NEW ``candidate`` revision
-    (state ``candidate``) then promotes it to a NEW ``promoted`` revision; the
-    previously-existing revisions remain untouched (no mutation). The promoted
-    revision becomes immediately selectable by the product lookup (it is the
-    latest promoted compatible revision).
+    Detects sites with the exact P4 recipe at the supplied ``detector_k``, writes
+    a NEW ``candidate`` revision (state ``candidate``) then promotes it to a NEW
+    ``promoted`` revision; the previously-existing revisions remain untouched (no
+    mutation). Both new revisions persist ``detector_k=<actual value>`` as
+    provenance. The promoted revision becomes immediately selectable by the
+    product lookup (it is the latest promoted compatible revision).
 
     ``root`` is the ``bad_pixel_database_root``; an absent base is created, a
     present base is opened, and a corrupt/invalid/incompatible base is refused
@@ -181,12 +181,14 @@ def create_bad_pixel_map(root, master: SelectedDarkMaster) -> MapCreationResult:
     """
     if not isinstance(master, SelectedDarkMaster):
         raise MapCreationError("master must be a SelectedDarkMaster")
+    k = validate_detector_k(detector_k)
     db = _open_or_create_database(root)
-    sites = detect_sites(master.data)
+    sites = detect_sites(master.data, detector_k=k)
     candidate = make_revision(
         state=REVISION_STATE_CANDIDATE,
         sensor_identity=master.identity,
         sites=sites,
+        detector_k=k,
     )
     db.add_revision(candidate)
     promoted = db.promote(candidate)

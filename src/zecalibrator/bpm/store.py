@@ -119,7 +119,7 @@ def _read_json(path: Path):
 
 def _revision_from_file(obj: dict, path: str, *, revision_id: Optional[str], sequence: Optional[int]) -> Revision:
     unknown = set(obj.keys()) - {
-        "schema_version", "revision_id", "state", "sequence", "sensor_identity", "sites", "integrity_digest",
+        "schema_version", "revision_id", "state", "sequence", "sensor_identity", "sites", "integrity_digest", "detector_k",
     }
     if unknown:
         raise BpmBaseInvalid(f"unknown key(s) in revision file {path}: {sorted(unknown)}", path=path)
@@ -130,6 +130,9 @@ def _revision_from_file(obj: dict, path: str, *, revision_id: Optional[str], seq
         )
     try:
         sites = tuple(site_record_from_dict(s) for s in obj["sites"])
+        detector_k = obj.get("detector_k")
+        if detector_k is not None and (isinstance(detector_k, bool) or not isinstance(detector_k, (int, float))):
+            raise BpmBaseInvalid(f"revision file {path} detector_k must be a number or absent", path=path)
         revision = Revision(
             revision_id=obj["revision_id"],
             state=obj["state"],
@@ -138,6 +141,7 @@ def _revision_from_file(obj: dict, path: str, *, revision_id: Optional[str], seq
             integrity_digest=obj["integrity_digest"],
             schema_version=obj["schema_version"],
             sequence=obj.get("sequence", 0),
+            detector_k=detector_k,
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise BpmBaseInvalid(f"malformed revision file {path}: {exc}", path=path) from exc

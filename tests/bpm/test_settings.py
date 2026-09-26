@@ -52,3 +52,52 @@ def test_roundtrip_and_missing_state(tmp_path):
     loaded = load_settings(config_dir)
     assert loaded.state == STATE_OK
     assert loaded.settings.bad_pixel_database_root == str(tmp_path / "my-base")
+
+
+def test_detector_k_default_is_30(tmp_path):
+    from zecalibrator.bpm.settings import DEFAULT_DETECTOR_K
+
+    assert DEFAULT_DETECTOR_K == 30.0
+    assert default_settings().detector_k == 30.0
+    # Absent field in a legacy settings file resolves to the default.
+    assert BpmSettings.from_dict({"schema_version": 1}).detector_k == 30.0
+
+
+def test_detector_k_persistence_and_restoration(tmp_path):
+    config_dir = tmp_path / "config"
+    settings = BpmSettings(
+        bad_pixel_database_root=str(tmp_path / "base"), detector_k=20.0,
+    )
+    save_settings(config_dir, settings)
+    loaded = load_settings(config_dir)
+    assert loaded.state == STATE_OK
+    assert loaded.settings.detector_k == 20.0
+    assert loaded.settings.bad_pixel_database_root == str(tmp_path / "base")
+
+
+def test_reset_default_restores_exactly_30(tmp_path):
+    # The owner-authorized "Reset default" must restore exactly 30.0.
+    assert default_settings().detector_k == 30.0
+    assert BpmSettings(detector_k=30.0).detector_k == 30.0
+    assert float(30.0) == 30.0
+
+
+def test_detector_k_validation_rejects_invalid_calmly():
+    import pytest
+
+    from zecalibrator.bpm.settings import DETECTOR_K_MAX, validate_detector_k
+
+    assert validate_detector_k(20.0) == 20.0
+    assert validate_detector_k("30") == 30.0
+    assert validate_detector_k(DETECTOR_K_MAX) == DETECTOR_K_MAX
+    for bad in (0.0, -1.0, -30.0, float("nan"), float("inf"), float("-inf"),
+                DETECTOR_K_MAX + 1.0, "abc", None):
+        with pytest.raises(ValueError):
+            validate_detector_k(bad)
+
+
+def test_detector_k_is_the_only_scientific_setting(tmp_path):
+    # The BpmSettings value object exposes exactly one scientific field: K.
+    fields = set(BpmSettings.__dataclass_fields__)
+    assert "detector_k" in fields
+    assert not ({"sigma", "radius", "duty_cycle", "epoch", "net_benefit"} & fields)
