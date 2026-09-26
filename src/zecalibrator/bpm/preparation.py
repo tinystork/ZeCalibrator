@@ -64,6 +64,7 @@ from .reconstruction import (
 )
 from .revision import Revision, action_eligible_sites
 from .vocabulary import (
+    ACTION_ELIGIBLE,
     OUTCOME_BASE_ERROR,
     OUTCOME_CALIBRATION_ONLY,
 )
@@ -120,6 +121,17 @@ class UnsupportedCfaError(PreparationError):
     """The run geometry has no Bayer CFA phase (same-CFA reconstruction requires one)."""
 
 
+class NonEligibleSiteError(PreparationError):
+    """A non-action-eligible site was supplied to a :class:`SitePlanEntry`.
+
+    The preparation plan admits **only** ``ACTION ELIGIBLE`` sites (mission §29):
+    a ``NO_ACTION_REQUIRED`` / ``ABSTAIN_*`` / ``REQUALIFY_*`` site is preserved
+    intact and must never reach reconstruction. This invariant is enforced **in
+    the type** — a contradictory entry is not constructible, not merely rejected
+    by a well-behaved caller.
+    """
+
+
 # ---------------------------------------------------------------------------
 # Frozen value objects
 # ---------------------------------------------------------------------------
@@ -163,7 +175,7 @@ class SitePlanEntry:
 
     site_id: str
     position: Tuple[int, int]  # (y, x)
-    action_state: str  # verbatim from the BPM SiteRecord
+    action_state: str  # verbatim from the BPM SiteRecord — MUST be ACTION ELIGIBLE
     knowledge_state: str  # verbatim from the BPM SiteRecord
     per_frame_donor_available: Tuple[bool, ...]  # assumed facts, per frame
     run_wide_applicability: str = field(init=False)
@@ -172,6 +184,14 @@ class SitePlanEntry:
     def __post_init__(self) -> None:
         if not isinstance(self.site_id, str) or not self.site_id:
             raise ValueError("site_id must be a non-empty string")
+        # §29 gate in the TYPE: only ACTION ELIGIBLE sites may reach
+        # reconstruction. The plan admits no other action state, so a
+        # non-eligible entry is not representable (rework F1).
+        if self.action_state != ACTION_ELIGIBLE:
+            raise NonEligibleSiteError(
+                f"site {self.site_id!r} has action_state {self.action_state!r}; "
+                f"only {ACTION_ELIGIBLE!r} may reach reconstruction"
+            )
         if (
             not isinstance(self.position, (tuple, list))
             or len(self.position) != 2
@@ -311,7 +331,12 @@ class PreparationPlan:
         return self._sites[tuple(position)]
 
     def eligible_sites(self) -> Tuple[SitePlanEntry, ...]:
-        """Return the sites that are run-wide ELIGIBLE (the reconstruction set)."""
+        """Return the sites that are run-wide ELIGIBLE (the reconstruction set).
+
+        The type-level §29 gate guarantees every entry has
+        ``action_state == ACTION_ELIGIBLE`` (see :class:`SitePlanEntry`), so the
+        run-wide filter below can only ever select eligible sites.
+        """
         return tuple(s for s in self.sites() if s.run_wide_applicability == RUN_WIDE_ELIGIBLE)
 
     def freeze(self) -> "PreparationPlan":
@@ -615,6 +640,7 @@ __all__ = [
     "CalibratedFrame",
     "DuplicateSiteError",
     "EmptyFramesError",
+    "NonEligibleSiteError",
     "PlanFrozenError",
     "PlanInvalidError",
     "PlanNotFrozenError",

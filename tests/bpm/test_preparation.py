@@ -12,6 +12,7 @@ from zecalibrator.bpm.preparation import (
     OUTCOME_CALIBRATION_ONLY,
     OUTCOME_PREPARED,
     CalibratedFrame,
+    NonEligibleSiteError,
     PlanFrozenError,
     PlanInvalidError,
     PlanNotFrozenError,
@@ -27,6 +28,7 @@ from zecalibrator.bpm.revision import make_revision
 from zecalibrator.bpm.vocabulary import (
     ACTION_STATE_ABSTAIN_CENSORED,
     ACTION_STATE_NO_ACTION_REQUIRED,
+    ACTION_STATE_REQUALIFY_ADDITIVE_CALIBRATION,
     REVISION_STATE_PROMOTED,
 )
 from zecalibrator.core.calibrate import CalibrationResult, FrameQuality
@@ -196,6 +198,62 @@ def test_non_action_eligible_sites_stay_intact():
     assert result.prepared_data[7, 7] == 7000.0
     # The eligible site was reconstructed from its ~100 donors.
     assert result.prepared_data[5, 5] == pytest.approx(100.0)
+
+
+def test_non_eligible_site_entry_is_refused_by_type():
+    # rework F1: the §29 gate is enforced IN THE TYPE. A NO_ACTION_REQUIRED
+    # site cannot even be represented as a plan entry, so the exported model API
+    # can never hand it to eligible_sites()/execute().
+    with pytest.raises(NonEligibleSiteError):
+        SitePlanEntry(
+            site_id="x", position=(10, 10),
+            action_state=ACTION_STATE_NO_ACTION_REQUIRED,
+            knowledge_state="KNOWN",
+            per_frame_donor_available=(True, True),
+        )
+
+
+def test_abstain_site_entry_is_refused_by_type():
+    with pytest.raises(NonEligibleSiteError):
+        SitePlanEntry(
+            site_id="x", position=(10, 10),
+            action_state=ACTION_STATE_ABSTAIN_CENSORED,
+            knowledge_state="KNOWN",
+            per_frame_donor_available=(True, True),
+        )
+
+
+def test_requalify_site_entry_is_refused_by_type():
+    with pytest.raises(NonEligibleSiteError):
+        SitePlanEntry(
+            site_id="x", position=(10, 10),
+            action_state=ACTION_STATE_REQUALIFY_ADDITIVE_CALIBRATION,
+            knowledge_state="KNOWN",
+            per_frame_donor_available=(True, True),
+        )
+
+
+def test_eligible_sites_never_contains_non_eligible_site():
+    # Through the exported model API: a mixed revision yields a plan whose
+    # eligible_sites() contains ONLY the ACTION ELIGIBLE site (the non-eligible
+    # site never enters the plan, and a hand-built non-eligible entry is refused
+    # at construction by the type gate above).
+    ident = make_identity(shape=SHAPE)
+    eligible = make_site(5, 5)
+    no_action = make_site(3, 3, action_state=ACTION_STATE_NO_ACTION_REQUIRED)
+    data = uniform(SHAPE, 100.0)
+    data[5, 5] = 9000.0
+    data[3, 3] = 8000.0
+    frame = make_frame("f0", data)
+
+    outcome = preflight(selected(ident, [eligible, no_action]), (frame,))
+    positions = {s.position for s in outcome.plan.eligible_sites()}
+    assert positions == {(5, 5)}
+    assert (3, 3) not in positions
+
+    result = execute(outcome.plan, (frame,))[0]
+    assert result.reconstructed_mask[5, 5] == 1
+    assert result.reconstructed_mask[3, 3] == 0
 
 
 # ---------------------------------------------------------------------------

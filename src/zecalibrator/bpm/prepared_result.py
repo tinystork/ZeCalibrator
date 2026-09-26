@@ -17,6 +17,13 @@ Mask semantics (documented and pinned by test):
   measurement is valid (``measurement_dq == 0``) **and** it was not reconstructed.
   This is exactly the population the operator admitted as donors.
 
+  **Note on naming (arbitrated):** this is the **donor-eligibility** population,
+  *not* the downstream "exploitable after reconstruction" population that the
+  ``usable`` term carries in the research lineage (P2I/P3C). A future consumer
+  must not conflate the two: here ``usable`` means "admissible as a reconstruction
+  donor", whereas the research lineage's ``usable`` means "trusted for downstream
+  reduction after the site was replaced".
+
 When nothing is prepared, ``prepared_data`` is bit-for-bit identical to
 ``calibration.data``, ``reconstructed_mask`` is all-zero and ``usable_mask`` is
 ``measurement_dq == 0`` (mission §80).
