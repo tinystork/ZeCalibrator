@@ -32,6 +32,15 @@ from .identity import (
     sensor_identity_from_light_constraints,
 )
 from .lookup import BpmResolution, ProvenanceNote, select_revision
+from .map_creation import (
+    MAP_CREATION_VERSION,
+    MapCreationError,
+    MapCreationResult,
+    SelectedDarkMaster,
+    create_bad_pixel_map,
+    detect_site_positions,
+    detect_sites,
+)
 from .preparation import (
     OUTCOME_PREPARED,
     PREPARATION_SCHEMA_VERSION,
@@ -119,6 +128,13 @@ __all__ = [
     "BpmSettings",
     "BpmWriteError",
     "CalibratedFrame",
+    "MAP_CREATION_VERSION",
+    "MapCreationError",
+    "MapCreationResult",
+    "SelectedDarkMaster",
+    "create_bad_pixel_map",
+    "detect_site_positions",
+    "detect_sites",
     "DEFAULT_OPERATOR",
     "DuplicateSiteError",
     "EmptyFramesError",
