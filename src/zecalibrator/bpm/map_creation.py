@@ -3,7 +3,7 @@
 This module implements the *creation* mechanism of a Bad Pixel Map from an
 **already-selected** dark master. It is the exact P4 detector recipe — per CFA
 plane median + ``MAD * 1.4826`` + threshold ``median + K * MAD`` with
-``K = 30.0`` — combined with the v1 map policy (every detected site is
+product-default ``K = 20.0`` — combined with the v1 map policy (every detected site is
 ``QUALIFIED`` + ``ELIGIBLE_FOR_TARGETED_RECONSTRUCTION``) and the existing
 immutable revision store.
 
@@ -14,7 +14,7 @@ It NEVER:
 * mutates an existing revision — creation writes a NEW ``candidate`` revision
   then a NEW ``promoted`` revision; the previously-existing revisions remain;
 * exposes any scientific control beyond the single detector K (injected by the
-  caller as ``detector_k``, default 30.0) — no grid search, no research
+  caller as ``detector_k``, default 20.0) — no grid search, no research
   campaign, no automatic retune;
 * imports ``research/*`` or any GUI — it is headless.
 """
@@ -63,7 +63,7 @@ def detect_site_positions(dark_master, *, detector_k=DEFAULT_DETECTOR_K) -> tupl
 
     For each CFA plane ``(py, px)`` the sub-plane ``dark[py::2, px::2]`` is
     thresholded against ``median + K * (MAD * 1.4826)`` (``K`` injected, default
-    30.0), where ``MAD = median(|sub - median(sub)|)``; a sub-plane coordinate
+    20.0), where ``MAD = median(|sub - median(sub)|)``; a sub-plane coordinate
     ``(yy, xx)`` strictly above the threshold maps to the sensor coordinate
     ``(2*yy + py, 2*xx + px)``.
 

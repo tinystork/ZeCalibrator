@@ -13,8 +13,9 @@ Two settings exist:
 * ``bad_pixel_database_root`` — the Bad Pixel Database location (a path, not
   scientific).
 * ``detector_k`` — the **single** scientific BPM setting (owner decision,
-  2026-09-26): the detector threshold multiplier ``K`` used **only** when
-  CREATING/REBUILDING an immutable Bad Pixel Map revision. Default ``30.0``.
+  ratified by the 2026-09-27 Windows/M74 A/B witness): the detector threshold
+  multiplier ``K`` used **only** when CREATING/REBUILDING an immutable Bad
+  Pixel Map revision. Product default ``20.0``.
   No other scientific control (no sigma, no radius, no duty cycle, no
   reconstruction operator, no per-frame threshold, no automatic retune) is
   exposed.
@@ -39,8 +40,14 @@ BPM_SETTINGS_FILENAME = "bpm_settings.json"
 #: The default base subdirectory name under ``StoragePaths.user_data_path``.
 BPM_DEFAULT_DIRNAME = "bad_pixel_database"
 
-#: The default detector threshold multiplier K (median + K * MAD * 1.4826).
-DEFAULT_DETECTOR_K = 30.0
+#: Product default detector threshold multiplier K, ratified by the real-data
+#: Windows/M74 A/B witness (median + K * MAD * 1.4826).
+DEFAULT_DETECTOR_K = 20.0
+
+#: Historical effective K for P4.2 revisions that predate detector-K provenance.
+#: This MUST remain distinct from the product default: a missing revision field
+#: means the map was created under the old K=30 behaviour, never the new default.
+LEGACY_DETECTOR_K = 30.0
 
 #: A conservative upper bound on the detector K setting. Values beyond this are
 #: rejected calmly (never silently clamped); it is far above the default and
@@ -79,11 +86,11 @@ def resolved_detector_k(revision) -> float:
     """Return a revision's effective detector K.
 
     A revision with no recorded ``detector_k`` (a legacy P4.2 revision) resolves
-    explicitly and compatibly to :data:`DEFAULT_DETECTOR_K` (30.0) — never a
-    silent fiction that it was created with a different K.
+    explicitly and compatibly to :data:`LEGACY_DETECTOR_K` (30.0) — never the
+    current product default and never a silent relabeling as K=20.
     """
     k = getattr(revision, "detector_k", None)
-    return DEFAULT_DETECTOR_K if k is None else float(k)
+    return LEGACY_DETECTOR_K if k is None else float(k)
 
 
 @dataclass(frozen=True)
@@ -233,6 +240,7 @@ __all__ = [
     "BpmSettingsLoad",
     "DEFAULT_DETECTOR_K",
     "DETECTOR_K_MAX",
+    "LEGACY_DETECTOR_K",
     "STATE_MALFORMED",
     "STATE_MISSING",
     "STATE_OK",

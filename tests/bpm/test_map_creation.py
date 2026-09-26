@@ -60,7 +60,7 @@ def _reference_positions(dark) -> list[tuple[int, int]]:
 
     Literally re-derives the recipe rather than calling the module under test.
     """
-    return _reference_positions_k(dark, 30.0)
+    return _reference_positions_k(dark, 20.0)
 
 
 def _reference_positions_k(dark, k: float) -> list[tuple[int, int]]:
@@ -88,7 +88,7 @@ def _master(identity=None, *, hot=(), shape=SHAPE, cfa_phase=CFA):
 
 
 # ---------------------------------------------------------------------------
-# §1 detection recipe (K=30, MAD*1.4826 per plane) — exact reproduction.
+# §1 detection recipe (default K=20, MAD*1.4826 per plane) — exact reproduction.
 # ---------------------------------------------------------------------------
 def test_detection_matches_reference_exactly():
     hot = [(0, 0), (0, 1), (1, 0), (1, 1), (7, 5), (15, 14)]
@@ -123,9 +123,9 @@ def test_lower_k_detects_more_candidates():
     assert k40 <= k20  # K20 detects a superset of K40
 
 
-def test_create_map_with_selected_k_records_provenance(tmp_path):
+def test_create_map_with_default_k20_records_provenance(tmp_path):
     root = tmp_path / "base"
-    result = create_bad_pixel_map(root, _master(hot=[(2, 2)]), detector_k=20.0)
+    result = create_bad_pixel_map(root, _master(hot=[(2, 2)]))
     assert result.candidate.detector_k == 20.0
     assert result.promoted.detector_k == 20.0
     assert result.promoted.effective_detector_k == 20.0
@@ -138,6 +138,15 @@ def test_create_map_with_selected_k_records_provenance(tmp_path):
     promoted = [r for r in load.database.revisions() if r.state == "promoted"][0]
     assert promoted.detector_k == 20.0
     assert promoted.effective_detector_k == 20.0
+
+
+def test_explicit_k30_map_remains_k30(tmp_path):
+    result = create_bad_pixel_map(
+        tmp_path / "base-k30", _master(hot=[(2, 2)]), detector_k=30.0,
+    )
+    assert result.candidate.detector_k == 30.0
+    assert result.promoted.detector_k == 30.0
+    assert result.promoted.effective_detector_k == 30.0
 
 
 def test_legacy_revision_without_detector_k_resolves_as_30(tmp_path):
@@ -176,11 +185,11 @@ def test_detection_handles_no_hot_pixels():
     assert detect_site_positions(dark) == ()
 
 
-def test_k_default_is_30_and_only_k_is_injectable():
-    # The single scientific BPM setting: detector K (default 30.0). The MAD scale
+def test_k_default_is_20_and_only_k_is_injectable():
+    # The single scientific BPM setting: detector K (default 20.0). The MAD scale
     # stays internal. No other scientific control (sigma/radius/duty cycle) is a
     # parameter.
-    assert mc.DEFAULT_DETECTOR_K == 30.0
+    assert mc.DEFAULT_DETECTOR_K == 20.0
     assert mc._DETECTOR_MAD_SCALE == 1.4826
     assert "_DETECTOR_MAD_SCALE" not in mc.__all__
     for fn in (detect_site_positions, detect_sites, create_bad_pixel_map):

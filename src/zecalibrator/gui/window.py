@@ -25,6 +25,7 @@ from pathlib import Path
 from PySide6 import QtCore, QtGui, QtWidgets
 
 import zecalibrator.api.v1 as v1
+from zecalibrator.api.v1 import _bpm as bpm_api
 from zecalibrator.gui import identity, presentation, service, theme
 from zecalibrator.gui.settings import (
     STATE_MALFORMED,
@@ -36,6 +37,7 @@ from zecalibrator.gui.worker import WorkerController
 from zecalibrator.storage import StoragePaths
 
 _SYNTH_ONLY_LABEL = "Qualification: SYNTH-BASE-1 synthetic-only. No real-camera claim."
+_DEFAULT_BPM_DETECTOR_K = bpm_api.default_detector_k()
 
 # Truthful human active-status labels per operation kind (progress counters are
 # phase-local and never a global percentage; these labels stay until terminal).
@@ -88,7 +90,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._bpm_settings_state = None
         self._bpm_loaded = False
         self._bpm_saved = False
-        self._bpm_detector_k = 30.0
+        self._bpm_detector_k = _DEFAULT_BPM_DETECTOR_K
 
         self._lights: list[_LightEntry] = []
         self._library_spec: v1.LibrarySpec | None = None
@@ -396,11 +398,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.bpm_k_edit.setRange(0.01, 1000.0)
         self.bpm_k_edit.setDecimals(1)
         self.bpm_k_edit.setSingleStep(1.0)
-        self.bpm_k_edit.setValue(30.0)
+        self.bpm_k_edit.setValue(_DEFAULT_BPM_DETECTOR_K)
         self.bpm_k_edit.setToolTip("Lower values detect more candidate bad pixels.")
         bpm_layout.addWidget(self.bpm_k_edit, 0, 1)
         self.bpm_k_reset_btn = QtWidgets.QPushButton("Reset default")
-        self.bpm_k_reset_btn.setToolTip("Restore the default threshold (30.0).")
+        self.bpm_k_reset_btn.setToolTip(
+            f"Restore the default threshold ({_DEFAULT_BPM_DETECTOR_K:.1f})."
+        )
         bpm_layout.addWidget(self.bpm_k_reset_btn, 0, 2)
         self.bpm_k_note = QtWidgets.QLabel("")
         self.bpm_k_note.setStyleSheet("color: gray;")
@@ -740,7 +744,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.bpm_root_edit.setText(self._bpm_root or "")
         self.bpm_browse_btn.setEnabled(True)
         # P4.2.1: restore the single scientific BPM setting (detector K).
-        self._bpm_detector_k = float(summary.get("bpm_detector_k", 30.0))
+        self._bpm_detector_k = float(
+            summary.get("bpm_detector_k", _DEFAULT_BPM_DETECTOR_K)
+        )
         self._sync_bpm_k_edit(self._bpm_detector_k)
         self._refresh_bpm_status_label()
         self.resize(self._settings.window_width, self._settings.window_height)
@@ -840,11 +846,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self._request_bpm_settings_save(self._bpm_root or "", detector_k=k)
 
     def _on_bpm_k_reset(self) -> None:
-        """Reset the detector threshold to exactly the default (30.0)."""
-        self._bpm_detector_k = 30.0
-        self._sync_bpm_k_edit(30.0)
+        """Reset the detector threshold to the ratified product default."""
+        self._bpm_detector_k = _DEFAULT_BPM_DETECTOR_K
+        self._sync_bpm_k_edit(_DEFAULT_BPM_DETECTOR_K)
         self.bpm_k_note.setText("")
-        self._request_bpm_settings_save(self._bpm_root or "", detector_k=30.0)
+        self._request_bpm_settings_save(
+            self._bpm_root or "", detector_k=_DEFAULT_BPM_DETECTOR_K
+        )
 
     def _on_browse_bpm_root(self) -> None:
         """Browse → validate/create the selected folder → persist the location."""

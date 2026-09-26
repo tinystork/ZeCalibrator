@@ -61,8 +61,11 @@ def make_site(y, x, action_state=ACTION_STATE_ELIGIBLE_FOR_TARGETED_RECONSTRUCTI
     return SiteRecord(position=(y, x), action_state=action_state, knowledge_state=knowledge_state)
 
 
-def make_rev(identity, *, state=REVISION_STATE_PROMOTED, sites=(), sequence=0):
-    return make_revision(state=state, sensor_identity=identity, sites=sites, sequence=sequence)
+def make_rev(identity, *, state=REVISION_STATE_PROMOTED, sites=(), sequence=0, detector_k=None):
+    return make_revision(
+        state=state, sensor_identity=identity, sites=sites, sequence=sequence,
+        detector_k=detector_k,
+    )
 
 
 @pytest.fixture

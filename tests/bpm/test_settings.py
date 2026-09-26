@@ -54,32 +54,33 @@ def test_roundtrip_and_missing_state(tmp_path):
     assert loaded.settings.bad_pixel_database_root == str(tmp_path / "my-base")
 
 
-def test_detector_k_default_is_30(tmp_path):
-    from zecalibrator.bpm.settings import DEFAULT_DETECTOR_K
+def test_detector_k_default_is_20_but_legacy_is_30(tmp_path):
+    from zecalibrator.bpm.settings import DEFAULT_DETECTOR_K, LEGACY_DETECTOR_K
 
-    assert DEFAULT_DETECTOR_K == 30.0
-    assert default_settings().detector_k == 30.0
-    # Absent field in a legacy settings file resolves to the default.
-    assert BpmSettings.from_dict({"schema_version": 1}).detector_k == 30.0
+    assert DEFAULT_DETECTOR_K == 20.0
+    assert LEGACY_DETECTOR_K == 30.0
+    assert default_settings().detector_k == 20.0
+    # Missing K in a SETTINGS file means a fresh/default setting. This differs
+    # intentionally from a historical REVISION with missing K provenance.
+    assert BpmSettings.from_dict({"schema_version": 1}).detector_k == 20.0
 
 
 def test_detector_k_persistence_and_restoration(tmp_path):
     config_dir = tmp_path / "config"
     settings = BpmSettings(
-        bad_pixel_database_root=str(tmp_path / "base"), detector_k=20.0,
+        bad_pixel_database_root=str(tmp_path / "base"), detector_k=15.0,
     )
     save_settings(config_dir, settings)
     loaded = load_settings(config_dir)
     assert loaded.state == STATE_OK
-    assert loaded.settings.detector_k == 20.0
+    assert loaded.settings.detector_k == 15.0
     assert loaded.settings.bad_pixel_database_root == str(tmp_path / "base")
 
 
-def test_reset_default_restores_exactly_30(tmp_path):
-    # The owner-authorized "Reset default" must restore exactly 30.0.
-    assert default_settings().detector_k == 30.0
-    assert BpmSettings(detector_k=30.0).detector_k == 30.0
-    assert float(30.0) == 30.0
+def test_reset_default_restores_exactly_20(tmp_path):
+    # The owner-ratified "Reset default" must restore exactly 20.0.
+    assert default_settings().detector_k == 20.0
+    assert BpmSettings(detector_k=20.0).detector_k == 20.0
 
 
 def test_detector_k_validation_rejects_invalid_calmly():

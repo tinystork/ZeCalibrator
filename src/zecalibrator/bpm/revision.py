@@ -23,7 +23,7 @@ from zecalibrator.core.digests import canonical_json, sha256_hex
 
 from .errors import BpmBaseCorrupted
 from .identity import SensorIdentity
-from .settings import DEFAULT_DETECTOR_K, resolved_detector_k
+from .settings import LEGACY_DETECTOR_K, resolved_detector_k
 from .vocabulary import (
     ACTION_STATE_LADDER,
     BPM_SCHEMA_VERSION,
@@ -109,7 +109,7 @@ class Revision:
     ``detector_k`` records the detector threshold multiplier ``K`` actually used
     to create this revision's map (provenance, part of the integrity digest). A
     revision created by P4.2 without this field carries ``detector_k=None`` and
-    resolves compatibly to :data:`DEFAULT_DETECTOR_K` (30.0) via
+    resolves compatibly to :data:`LEGACY_DETECTOR_K` (30.0) via
     :func:`zecalibrator.bpm.settings.resolved_detector_k`.
     """
 
@@ -146,7 +146,7 @@ class Revision:
 
     @property
     def effective_detector_k(self) -> float:
-        """The detector K this revision was created with (legacy None -> 30.0)."""
+        """The detector K used to create this map (legacy None -> K=30.0)."""
         return resolved_detector_k(self)
 
     def verify(self) -> None:

@@ -58,7 +58,9 @@ def _settings(root=None) -> BpmSettings:
     return BpmSettings() if root is None else BpmSettings(bad_pixel_database_root=str(root))
 
 
-def _base_with_site(tmp_path, sites, *, detector_instance_id="SYNTH-DET-0001"):
+def _base_with_site(
+    tmp_path, sites, *, detector_instance_id="SYNTH-DET-0001", detector_k=20.0,
+):
     root = tmp_path / "base"
     db = create_bad_pixel_database(root)
     ident = make_identity(
@@ -66,7 +68,10 @@ def _base_with_site(tmp_path, sites, *, detector_instance_id="SYNTH-DET-0001"):
         detector_instance_id=detector_instance_id, detector_model=DET_MODEL,
         gain=100, offset=50, readout_mode="MODE_A", adc_mode="MODE_16",
     )
-    db.add_revision(make_rev(ident, state=REVISION_STATE_PROMOTED, sites=sites, sequence=1))
+    db.add_revision(make_rev(
+        ident, state=REVISION_STATE_PROMOTED, sites=sites, sequence=1,
+        detector_k=detector_k,
+    ))
     return root
 
 
@@ -131,13 +136,15 @@ def test_matching_k_uses_map_without_question(tmp_path):
         _storage(tmp_path), _settings(root), _light_constraints(), dark_available=True,
     )
     assert decision["action"] == "use"
-    assert decision["map_k"] == 30.0
+    assert decision["map_k"] == 20.0
 
 
 def test_k30_map_with_k20_setting_yields_mismatch_decision(tmp_path):
     from zecalibrator.bpm.settings import BpmSettings
 
-    root = _base_with_site(tmp_path, [make_site(5, 5)])  # legacy -> K=30.0
+    root = _base_with_site(
+        tmp_path, [make_site(5, 5)], detector_k=None,
+    )  # historical missing provenance -> K=30.0
     settings = BpmSettings(bad_pixel_database_root=str(root), detector_k=20.0)
     decision = _bpm.bpm_creation_decision(
         _storage(tmp_path), settings, _light_constraints(), dark_available=True,

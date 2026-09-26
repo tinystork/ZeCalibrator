@@ -45,6 +45,7 @@ __all__ = [
     "calibrate_frame",
     "create_bpm_map_from_binding",
     "default_bad_pixel_database_root",
+    "default_detector_k",
     "default_bpm_settings",
     "ensure_bpm_root",
     "load_bpm_settings",
@@ -102,6 +103,11 @@ def save_bpm_settings(config_dir, settings) -> None:
 def default_bpm_settings():
     """The default BPM settings snapshot (no configured root)."""
     return _bpm_settings_module()["default_settings"]()
+
+
+def default_detector_k() -> float:
+    """Return the ratified product-default detector K through this private facade."""
+    return float(default_bpm_settings().detector_k)
 
 
 def validate_detector_k(value) -> float:

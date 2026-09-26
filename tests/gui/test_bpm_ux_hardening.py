@@ -1,6 +1,6 @@
 """P4.2.1 BPM UX-hardening GUI tests: detector-K setting + §3/§4 decision flows.
 
-Covers: the Advanced-tab "Bad pixel detection threshold" setting (default 30.0,
+Covers: the Advanced-tab "Bad pixel detection threshold" setting (default 20.0,
 persistence/restoration, Reset default, calm validation), the §3 rebuild-vs-use
 decision (once per run; Rebuild/Use existing/Cancel), the §4 no-database
 Create/Select/Not now flows, folder-picker cancellation safety, and the §7
@@ -122,26 +122,26 @@ def _prep(qapp, monkeypatch, tmp_path, decision):
 # ---------------------------------------------------------------------------
 # §1 detector-K setting widget
 # ---------------------------------------------------------------------------
-def test_bpm_threshold_widget_default_is_30(qapp, paths):
+def test_bpm_threshold_widget_default_is_20(qapp, paths):
     w = MainWindow(paths)
     try:
         assert w.bpm_k_edit is not None
         assert w.bpm_k_reset_btn is not None
-        assert w.bpm_k_edit.value() == 30.0
+        assert w.bpm_k_edit.value() == 20.0
         assert w.bpm_k_edit.toolTip() == "Lower values detect more candidate bad pixels."
     finally:
         _close(w)
 
 
-def test_bpm_threshold_reset_default_restores_30(qapp, paths):
+def test_bpm_threshold_reset_default_restores_20(qapp, paths):
     w = MainWindow(paths)
     try:
         assert _pump(lambda: w._bpm_loaded and not w._controller.is_active)
         w.bpm_k_edit.setValue(45.0)
         w._bpm_detector_k = 45.0
         w._on_bpm_k_reset()
-        assert w._bpm_detector_k == 30.0
-        assert w.bpm_k_edit.value() == 30.0
+        assert w._bpm_detector_k == 20.0
+        assert w.bpm_k_edit.value() == 20.0
     finally:
         _close(w)
 
@@ -152,13 +152,13 @@ def test_bpm_threshold_loads_from_settings(qapp, tmp_path):
     paths = resolve_paths(base=str(tmp_path))
     _bpm.save_bpm_settings(
         paths.user_config_path,
-        _bpm.bpm_settings(str(tmp_path / "base"), detector_k=20.0),
+        _bpm.bpm_settings(str(tmp_path / "base"), detector_k=15.0),
     )
     w = MainWindow(paths)
     try:
         assert _pump(lambda: w._bpm_loaded and not w._controller.is_active)
-        assert w._bpm_detector_k == 20.0
-        assert w.bpm_k_edit.value() == 20.0
+        assert w._bpm_detector_k == 15.0
+        assert w.bpm_k_edit.value() == 15.0
     finally:
         _close(w)
 
@@ -462,7 +462,7 @@ def test_no_db_select_existing_lookup_automatic(qapp, monkeypatch, tmp_path):
     )
     # After Select, lookup finds a compatible map -> use automatically.
     monkeypatch.setattr(_bpm, "bpm_creation_decision",
-                        lambda *a, dark_available=False, **k: {"action": "use", "reason_code": "", "map_k": 30.0})
+                        lambda *a, dark_available=False, **k: {"action": "use", "reason_code": "", "map_k": 20.0})
     exports = []
     w._start_export = lambda request, destination: exports.append((request, destination))
     w._offer_bpm_creation = lambda request, destination: None
@@ -608,6 +608,6 @@ def test_fresh_db_onboarding_serializes_save_then_create_then_export(qapp, monke
         assert loaded.state == "OPENED", loaded.reason_code
         promoted = [r for r in loaded.database.revisions() if r.state == "promoted"]
         assert promoted, "expected a promoted revision after map creation"
-        assert promoted[-1].detector_k == 30.0
+        assert promoted[-1].detector_k == 20.0
     finally:
         _close(w)
