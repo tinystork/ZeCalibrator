@@ -45,6 +45,7 @@ from zecalibrator.bpm.preparation import (
     OUTCOME_PREPARED,
     CalibratedFrame,
     PreparedCalibrationResult,
+    PreparationError,
     PreparationOutcome,
     PreparationPlan,
     execute,
@@ -193,6 +194,110 @@ def apply_bpm_run_wide(
     )
 
 
+class BpmRunWideSeam:
+    """Batch-level run-wide BPM application seam (LOT 3).
+
+    The ordinary batch path calibrates every frame then hands the whole run to
+    this seam, which accumulates the post-calibration CFA frames (:meth:`record`),
+    resolves the base once, and applies the frozen run-wide plan
+    (:meth:`finalize`). This is the **two-time** structure made explicit at the
+    batch boundary: calibrate-all -> freeze -> execute -> per-frame corrected
+    CFA.
+
+    The seam is duck-typed and opaque to the batch generator: it is called with
+    the *engine* ``CalibrationResult`` (``zecalibrator.core.calibrate``) and the
+    run's ``LightConstraints`` (from which the BPM sensor identity is projected).
+    When a compatible map is selected, :meth:`prepared` returns the per-frame
+    :class:`PreparedCalibrationResult` (whose ``prepared_data`` replaces the
+    ordinary calibration output for writing); otherwise the run is
+    ``CALIBRATION_ONLY`` / ``BASE_ERROR`` and ``prepared`` returns ``None`` (the
+    ordinary output is written unchanged).
+
+    A contained failure (an invalid run geometry / non-Bayer CFA / a frozen-plan
+    contradiction) never turns a successful calibration batch into a failure:
+    :meth:`finalize` records the error and leaves ``prepared`` returning
+    ``None``, so the ordinary outputs are preserved.
+    """
+
+    __slots__ = ("storage", "settings", "operator", "run_id", "_frames",
+                 "_by_id", "_identity", "outcome", "error")
+
+    def __init__(
+        self,
+        storage: StoragePaths,
+        settings: BpmSettings,
+        *,
+        operator: ReconstructionOperator = DEFAULT_OPERATOR,
+        run_id: Optional[str] = None,
+    ) -> None:
+        self.storage = storage
+        self.settings = settings
+        self.operator = operator
+        self.run_id = run_id
+        self._frames: list = []
+        self._by_id: dict = {}
+        self._identity: Optional[SensorIdentity] = None
+        self.outcome: Optional[BpmApplicationOutcome] = None
+        self.error: Optional[str] = None
+
+    @property
+    def has_frames(self) -> bool:
+        return bool(self._frames)
+
+    def record(self, frame_id: str, calibration, light_constraints) -> None:
+        """Accumulate one calibrated frame + its BPM selection identity.
+
+        ``calibration`` is the engine :class:`CalibrationResult` (float32 CFA +
+        uint16 DQ); ``light_constraints`` is the run's
+        :class:`~zecalibrator.core.descriptors.LightConstraints`, from which the
+        sensor identity is projected (reusing the normative liaison — no
+        parallel simplified identity). The identity is captured once from the
+        first frame (one run = one camera).
+        """
+        from zecalibrator.bpm.identity import sensor_identity_from_light_constraints
+
+        if self._identity is None:
+            self._identity = sensor_identity_from_light_constraints(light_constraints)
+        self._frames.append(CalibratedFrame(frame_id=frame_id, calibration=calibration))
+
+    def finalize(self) -> Optional[BpmApplicationOutcome]:
+        """Apply the frozen run-wide plan over the accumulated frames (once).
+
+        Returns the typed :class:`BpmApplicationOutcome` (``PREPARED`` /
+        ``CALIBRATION_ONLY`` / ``BASE_ERROR``). A contained preparation failure
+        (invalid run geometry, non-Bayer CFA, plan contradiction) is recorded on
+        ``self.error`` and ``self.outcome`` stays ``None`` — the caller keeps
+        writing ordinary outputs (never degrades a successful calibration).
+        """
+        if self._identity is None or not self._frames:
+            return None
+        try:
+            self.outcome = apply_bpm_run_wide(
+                storage=self.storage,
+                settings=self.settings,
+                identity=self._identity,
+                frames=tuple(self._frames),
+                operator=self.operator,
+                run_id=self.run_id,
+            )
+        except (PreparationError, ValueError) as exc:
+            self.error = str(exc)
+            self.outcome = None
+            return None
+        if self.outcome.results is not None:
+            for frame, result in zip(self._frames, self.outcome.results):
+                self._by_id[frame.frame_id] = result
+        return self.outcome
+
+    def prepared(self, frame_id: str) -> Optional[PreparedCalibrationResult]:
+        """Return the corrected per-frame result for ``frame_id``, or ``None``.
+
+        ``None`` means the run is calibration-only (or the frame was not
+        prepared), so the ordinary calibration output is written unchanged.
+        """
+        return self._by_id.get(frame_id)
+
+
 def synthesis_lines(
     outcome: BpmApplicationOutcome,
     *,
@@ -200,8 +305,16 @@ def synthesis_lines(
 ) -> list[str]:
     """§11 run synthesis. The word ``applied`` is STRICTLY conditional on
     ``reconstructed_total > 0`` (P4.1 invariant preserved). No alarming message
-    when the run is confined to calibration-only.
+    when the run is confined to calibration-only (or the application was
+    contained, ``outcome is None``).
     """
+    if outcome is None:
+        return [
+            f"Bad Pixel Map: {map_origin}",
+            "Bad pixels: 0",
+            "BPM correction: none",
+            "Reconstructed sites: 0",
+        ]
     correction = "applied" if outcome.reconstructed_total > 0 else "none"
     return [
         f"Bad Pixel Map: {map_origin}",
@@ -213,6 +326,7 @@ def synthesis_lines(
 
 __all__ = [
     "BpmApplicationOutcome",
+    "BpmRunWideSeam",
     "apply_bpm_run_wide",
     "apply_resolution_run_wide",
     "synthesis_lines",

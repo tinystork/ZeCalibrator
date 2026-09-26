@@ -95,40 +95,65 @@ def _validate_batch_args(frames, request, library, policy, options):
     return options
 
 
-def _process_one(idx, frame, request, library, policy, destination, token, plan_schema_holder=None, slot=None, bpm_preview=None):
-    """Process one frame into a :class:`BatchItem` (raises on cancellation).
+@dataclasses.dataclass(frozen=True)
+class _CalibratedOne:
+    """Internal staging of one frame's calibrated result (before output writing).
 
-    ``plan_schema_holder`` is an optional mutable mapping; when a plan is
-    resolved, its ``provenance_schema`` (the plan/provenance-projection schema,
-    ``plan.versions.provenance_schema``) is recorded so the batch manifest can
-    mirror it (single source of truth = the plan's ``VersionSet``).
+    ``result`` carries the successful v1 ``CalibrationResult`` (``None`` for a
+    terminal FAILED/SKIPPED disposition); ``plan`` is the resolved
+    :class:`CalibrationPlan` on success. This decouples "calibrate" from "write
+    output" so the run-wide BPM application can intervene between the two.
+    """
 
-    ``slot`` is the batch-local single-slot prepared-context holder threaded
-    through from ``_batch_generator`` (see ``_PreparedContextSlot``); ``None``
-    disables reuse.
+    index: int
+    disposition: str
+    input_identity: object
+    plan_id: Optional[str]
+    result: Optional[CalibrationResult]
+    plan: Optional[object]
+    warnings: tuple
+    reason_code: Optional[str]
+    reason_details: str
+    composition: Optional[Mapping]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "warnings", tuple(self.warnings))
+
+
+def _calibrate_one(idx, frame, request, library, policy, token, plan_schema_holder=None, slot=None, bpm_preview=None, run_wide=None, frame_id=None):
+    """Calibrate one frame into a :class:`_CalibratedOne` (raises on cancellation).
+
+    Mirrors the former ``_process_one`` exactly (same inspection/resolution/
+    calibration science, statuses, reason codes, warnings) but stops before the
+    transactional output write. When ``run_wide`` (a run-wide BPM seam) is
+    supplied, the successful engine calibration + run light-constraints are
+    recorded into it for the later frozen-plan application.
     """
     try:
         inspection_result, decoded_light = _decode_and_inspect(frame, token=token, obs=None)
     except OperationCancelled:
         raise
     except InvalidRequestError as exc:
-        return BatchItem(
+        return _CalibratedOne(
             index=idx, disposition="FAILED", input_identity=None, plan_id=None,
-            reason_code="INVALID_SOURCE", reason_details=str(exc),
+            result=None, plan=None, warnings=(), reason_code="INVALID_SOURCE",
+            reason_details=str(exc), composition=None,
         )
     except Exception as exc:  # noqa: BLE001 - per-item operational failure
-        return BatchItem(
+        return _CalibratedOne(
             index=idx, disposition="FAILED", input_identity=None, plan_id=None,
-            reason_code="INSPECT_ERROR", reason_details=str(exc),
+            result=None, plan=None, warnings=(), reason_code="INSPECT_ERROR",
+            reason_details=str(exc), composition=None,
         )
 
     if inspection_result.operation_status == "CANCELLED":
         raise OperationCancelled()
     if inspection_result.operation_status == "FAILED":
-        return BatchItem(
+        return _CalibratedOne(
             index=idx, disposition="FAILED", input_identity=None, plan_id=None,
+            result=None, plan=None, warnings=(),
             reason_code=inspection_result.reason_code or "INSPECT_FAILED",
-            reason_details=inspection_result.details,
+            reason_details=inspection_result.details, composition=None,
         )
     inspection = inspection_result.inspection
 
@@ -138,10 +163,12 @@ def _process_one(idx, frame, request, library, policy, destination, token, plan_
         # FITS at inspect (FAILED) and ``ArrayFrameSource`` requires a raw
         # domain, so this branch has no live witness today; it is retained for
         # the frozen status set (ARCHITECTURE §3.3).
-        return BatchItem(
+        return _CalibratedOne(
             index=idx, disposition="SKIPPED", input_identity=inspection.identity,
-            plan_id=None, reason_code="NON_RAW_DOMAIN",
+            plan_id=None, result=None, plan=None, warnings=(),
+            reason_code="NON_RAW_DOMAIN",
             reason_details=f"domain_finding={inspection.domain_finding}",
+            composition=None,
         )
 
     try:
@@ -151,29 +178,33 @@ def _process_one(idx, frame, request, library, policy, destination, token, plan_
     except OperationCancelled:
         raise
     except LibraryClosedError as exc:
-        return BatchItem(
+        return _CalibratedOne(
             index=idx, disposition="FAILED", input_identity=inspection.identity,
-            plan_id=None, reason_code="LIBRARY_CLOSED", reason_details=str(exc),
+            plan_id=None, result=None, plan=None, warnings=(),
+            reason_code="LIBRARY_CLOSED", reason_details=str(exc), composition=None,
         )
     except Exception as exc:  # noqa: BLE001
-        return BatchItem(
+        return _CalibratedOne(
             index=idx, disposition="FAILED", input_identity=inspection.identity,
-            plan_id=None, reason_code="RESOLVE_ERROR", reason_details=str(exc),
+            plan_id=None, result=None, plan=None, warnings=(),
+            reason_code="RESOLVE_ERROR", reason_details=str(exc), composition=None,
         )
 
     if resolve_result.operation_status == "CANCELLED":
         raise OperationCancelled()
     if resolve_result.operation_status == "FAILED":
-        return BatchItem(
+        return _CalibratedOne(
             index=idx, disposition="FAILED", input_identity=inspection.identity,
-            plan_id=None, reason_code=resolve_result.reason_code or "RESOLVE_FAILED",
-            reason_details=resolve_result.details,
+            plan_id=None, result=None, plan=None, warnings=(),
+            reason_code=resolve_result.reason_code or "RESOLVE_FAILED",
+            reason_details=resolve_result.details, composition=None,
         )
     if resolve_result.outcome != "MATCHED" or resolve_result.plan is None:
-        return BatchItem(
+        return _CalibratedOne(
             index=idx, disposition="FAILED", input_identity=inspection.identity,
-            plan_id=None, reason_code=resolve_result.outcome or "NO_MATCH",
-            reason_details=resolve_result.details,
+            plan_id=None, result=None, plan=None, warnings=(),
+            reason_code=resolve_result.outcome or "NO_MATCH",
+            reason_details=resolve_result.details, composition=None,
         )
     plan = resolve_result.plan
     if plan_schema_holder is not None:
@@ -184,16 +215,17 @@ def _process_one(idx, frame, request, library, policy, destination, token, plan_
     except OperationCancelled:
         raise
     except InvalidRequestError as exc:
-        return BatchItem(
+        return _CalibratedOne(
             index=idx, disposition="FAILED", input_identity=inspection.identity,
-            plan_id=plan.plan_id, reason_code="PLAN_SOURCE_MISMATCH",
-            reason_details=str(exc),
+            plan_id=plan.plan_id, result=None, plan=None, warnings=(),
+            reason_code="PLAN_SOURCE_MISMATCH", reason_details=str(exc),
+            composition=None,
         )
     except Exception as exc:  # noqa: BLE001
-        return BatchItem(
+        return _CalibratedOne(
             index=idx, disposition="FAILED", input_identity=inspection.identity,
-            plan_id=plan.plan_id, reason_code="CALIBRATE_ERROR",
-            reason_details=str(exc),
+            plan_id=plan.plan_id, result=None, plan=None, warnings=(),
+            reason_code="CALIBRATE_ERROR", reason_details=str(exc), composition=None,
         )
 
     if result.status == "CANCELLED":
@@ -202,61 +234,107 @@ def _process_one(idx, frame, request, library, policy, destination, token, plan_
     disposition = batch_disposition(result.status)
 
     if result.status == "FAILED":
-        return BatchItem(
+        return _CalibratedOne(
             index=idx, disposition="FAILED", input_identity=inspection.identity,
-            plan_id=plan.plan_id, reason_code=result.reason_code,
-            warnings=result.warnings,
+            plan_id=plan.plan_id, result=None, plan=plan, warnings=result.warnings,
+            reason_code=result.reason_code, reason_details="", composition=None,
         )
 
-    if destination is None:
-        return BatchItem(
-            index=idx, disposition=disposition, input_identity=inspection.identity,
-            plan_id=plan.plan_id, result=result, output=None,
-            warnings=result.warnings,
-            composition=dict(plan.composition.to_dict()) if plan.composition is not None else None,
-        )
+    # LOT 3: record the successful engine calibration into the run-wide seam
+    # (the two-time structure: calibrate-all -> freeze -> execute).
+    if run_wide is not None:
+        run_wide.record(frame_id, result._engine, plan.light_constraints)
 
-    try:
-        output = _write_output(result, inspection.identity, plan.plan_id, destination, token)
-    except OperationCancelled:
-        raise
-    except NoClobberViolation as exc:
-        return BatchItem(
-            index=idx, disposition="FAILED", input_identity=inspection.identity,
-            plan_id=plan.plan_id, reason_code="OUTPUT_COLLISION",
-            reason_details=str(exc), warnings=result.warnings,
-        )
-    except Exception as exc:  # noqa: BLE001
-        return BatchItem(
-            index=idx, disposition="FAILED", input_identity=inspection.identity,
-            plan_id=plan.plan_id, reason_code="OUTPUT_ERROR",
-            reason_details=str(exc), warnings=result.warnings,
-        )
-    return BatchItem(
+    return _CalibratedOne(
         index=idx, disposition=disposition, input_identity=inspection.identity,
-        plan_id=plan.plan_id, result=None, output=output,
-        warnings=result.warnings,
+        plan_id=plan.plan_id, result=result, plan=plan, warnings=result.warnings,
+        reason_code=None, reason_details="",
         composition=dict(plan.composition.to_dict()) if plan.composition is not None else None,
     )
 
 
-def _write_output(result, input_identity, plan_id, destination, token, replace_existing=False):
+def _materialize_one(one: "_CalibratedOne", destination, token, replace_existing=False, prepared=None):
+    """Build the final :class:`BatchItem` from a :class:`_CalibratedOne`.
+
+    For a successful standalone run, the transactional output is written here;
+    ``prepared`` (a :class:`PreparedCalibrationResult`) substitutes the BPM-
+    corrected CFA when the run-wide application prepared this frame (its
+    ``prepared_data`` / ``measurement_dq`` replace the ordinary arrays).
+    """
+    if one.result is None:
+        return BatchItem(
+            index=one.index, disposition=one.disposition,
+            input_identity=one.input_identity, plan_id=one.plan_id,
+            reason_code=one.reason_code, reason_details=one.reason_details,
+            warnings=one.warnings, composition=one.composition,
+        )
+    result = one.result
+    if destination is None:
+        return BatchItem(
+            index=one.index, disposition=one.disposition,
+            input_identity=one.input_identity, plan_id=one.plan_id,
+            result=result, warnings=one.warnings, composition=one.composition,
+        )
+    try:
+        output = _write_output(
+            result, one.input_identity, one.plan_id, destination, token,
+            replace_existing=replace_existing, prepared=prepared,
+        )
+    except OperationCancelled:
+        raise
+    except NoClobberViolation as exc:
+        return BatchItem(
+            index=one.index, disposition="FAILED",
+            input_identity=one.input_identity, plan_id=one.plan_id,
+            reason_code="OUTPUT_COLLISION", reason_details=str(exc),
+            warnings=one.warnings,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return BatchItem(
+            index=one.index, disposition="FAILED",
+            input_identity=one.input_identity, plan_id=one.plan_id,
+            reason_code="OUTPUT_ERROR", reason_details=str(exc),
+            warnings=one.warnings,
+        )
+    return BatchItem(
+        index=one.index, disposition=one.disposition,
+        input_identity=one.input_identity, plan_id=one.plan_id,
+        result=None, output=output, warnings=one.warnings,
+        composition=one.composition,
+    )
+
+
+def _process_one(idx, frame, request, library, policy, destination, token, plan_schema_holder=None, slot=None, bpm_preview=None):
+    """Process one frame into a :class:`BatchItem` (single-pass convenience)."""
+    one = _calibrate_one(
+        idx, frame, request, library, policy, token,
+        plan_schema_holder=plan_schema_holder, slot=slot, bpm_preview=bpm_preview,
+        frame_id=frame_display_id(frame),
+    )
+    return _materialize_one(one, destination, token)
+
+
+def _write_output(result, input_identity, plan_id, destination, token, replace_existing=False, prepared=None):
     # The destination path is derived through the SAME helper the auto-route
     # collision pre-check uses, so the pre-checked path and the written path can
     # never drift (the writer recomputes the identical path internally).
     _output_path_for(input_identity, plan_id, destination)
     plan = result.provenance.plan
+    # LOT 3: a prepared (BPM-corrected) frame writes its corrected CFA + DQ;
+    # otherwise the ordinary calibration arrays are written unchanged.
+    data = result.data if prepared is None else prepared.prepared_data
+    mask = result.mask if prepared is None else prepared.measurement_dq
     header_fields = build_output_header_fields(
         light_constraints=plan.light_constraints,
-        science_shape=result.data.shape,
+        science_shape=data.shape,
         status=result.status,
         plan_id=plan_id,
         provenance_schema=plan.versions.provenance_schema,
         composition=plan.composition,
     )
     record = write_standalone_output(
-        result.data,
-        result.mask,
+        data,
+        mask,
         result.provenance.to_dict(),
         input_identity=_identity_to_dict(input_identity),
         plan_id=plan_id,
@@ -291,10 +369,11 @@ def _output_path_for(input_identity, plan_id, destination) -> str:
     return os.path.join(os.fspath(destination), output_filename(logical_id))
 
 
-def _batch_generator(frames, request, library, policy, options, token, obs, bpm_preview=None):
+def _batch_generator(frames, request, library, policy, options, token, obs, bpm_preview=None, bpm_run_wide=None):
     total = len(frames)
     batch_id = options.batch_id or new_batch_id()
     destination = os.fspath(options.destination) if options.destination is not None else None
+    run_wide = bpm_run_wide is not None
 
     manifest_inputs = []
     manifest_items = []
@@ -304,18 +383,43 @@ def _batch_generator(frames, request, library, policy, options, token, obs, bpm_
 
     emit_batch_progress(obs, "batch_start", 0, total)
     try:
-        for idx, frame in enumerate(frames):
-            token.raise_if_cancelled()
-            frame_id = frame_display_id(frame)
-            emit_batch_progress(obs, "frame_start", idx, total, frame_id=frame_id)
+        if run_wide:
+            # LOT 3 two-time structure: calibrate every frame first (freezing
+            # nothing yet), then apply the run-wide BPM plan once, then write.
+            staged: list = []
+            for idx, frame in enumerate(frames):
+                token.raise_if_cancelled()
+                frame_id = frame_display_id(frame)
+                emit_batch_progress(obs, "frame_start", idx, total, frame_id=frame_id)
+                one = _calibrate_one(
+                    idx, frame, request, library, policy, token,
+                    plan_schema_holder, slot=context_slot, bpm_preview=bpm_preview,
+                    run_wide=bpm_run_wide, frame_id=frame_id,
+                )
+                staged.append((frame_id, one))
+                emit_batch_progress(obs, "frame_complete", idx + 1, total, frame_id=frame_id)
+            # Apply the frozen run-wide plan over the whole run (once).
+            bpm_run_wide.finalize()
+            for frame_id, one in staged:
+                token.raise_if_cancelled()
+                prepared = bpm_run_wide.prepared(frame_id) if one.result is not None else None
+                item = _materialize_one(one, destination, token, prepared=prepared)
+                manifest_inputs.append({"index": one.index, "identity": _identity_to_dict(item.input_identity)})
+                manifest_items.append(item.to_dict())
+                yield item
+        else:
+            for idx, frame in enumerate(frames):
+                token.raise_if_cancelled()
+                frame_id = frame_display_id(frame)
+                emit_batch_progress(obs, "frame_start", idx, total, frame_id=frame_id)
 
-            item = _process_one(idx, frame, request, library, policy, destination, token, plan_schema_holder, slot=context_slot, bpm_preview=bpm_preview)
+                item = _process_one(idx, frame, request, library, policy, destination, token, plan_schema_holder, slot=context_slot, bpm_preview=bpm_preview)
 
-            manifest_inputs.append({"index": idx, "identity": _identity_to_dict(item.input_identity)})
-            manifest_items.append(item.to_dict())
+                manifest_inputs.append({"index": idx, "identity": _identity_to_dict(item.input_identity)})
+                manifest_items.append(item.to_dict())
 
-            emit_batch_progress(obs, "frame_complete", idx + 1, total, frame_id=frame_id)
-            yield item
+                emit_batch_progress(obs, "frame_complete", idx + 1, total, frame_id=frame_id)
+                yield item
 
         emit_batch_progress(obs, "complete", total, total)
     except OperationCancelled:

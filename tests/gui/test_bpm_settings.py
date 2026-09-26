@@ -93,8 +93,9 @@ def test_bpm_status_label_reflects_configuration(qapp, paths):
         assert "not configured" in w.bpm_status_label.text()
         w._bpm_root = "/some/base"
         w._refresh_bpm_status_label()
-        assert "preview only" in w.bpm_status_label.text()
-        assert "disabled" in w.bpm_status_label.text()
+        # LOT 3: the correction is now applied automatically (not "preview only").
+        assert "applied automatically" in w.bpm_status_label.text()
+        assert "preview only" not in w.bpm_status_label.text()
     finally:
         _close(w)
 

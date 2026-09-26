@@ -900,7 +900,7 @@ class OperationSnapshot:
     """
 
     op_id: str
-    kind: str  # open_library | index_library | preflight | calibrate_in_memory | export | load_declaration | load_roi | scan_masters | load_ledger | confirm_evidence | build_managed_library
+    kind: str  # open_library | index_library | preflight | calibrate_in_memory | export | load_declaration | load_roi | scan_masters | load_ledger | confirm_evidence | build_managed_library | create_bpm_map | load_settings | save_settings | save_bpm_settings
     library_spec: Optional["v1.LibrarySpec"]
     request: Optional["v1.CalibrationRequest"]
     policy: Optional["v1.MatchPolicy"]

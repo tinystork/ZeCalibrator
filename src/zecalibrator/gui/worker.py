@@ -419,6 +419,8 @@ class _OperationWorker(QtCore.QObject):
             return self._confirm_evidence(snap)
         if snap.kind == "build_managed_library":
             return self._build_managed_library(snap)
+        if snap.kind == "create_bpm_map":
+            return self._create_bpm_map(snap, token, progress)
         raise RuntimeError(f"unknown operation kind {snap.kind!r}")
 
     def _open_library(self, snap, token, progress) -> dict:
@@ -637,11 +639,11 @@ class _OperationWorker(QtCore.QObject):
         items = []
         cancelled = False
         manifest_error = None
-        seam, bpm_root = self._bpm_context(snap)
+        run_wide, bpm_root = self._bpm_run_wide_context(snap)
         try:
             for item in _bpm.calibrate_batch(
                 frames, snap.request, handle, snap.policy, options,
-                cancel=token, progress=progress, seam=seam,
+                cancel=token, progress=progress, run_wide=run_wide,
             ):
                 d = item.to_dict()
                 items.append(d)
@@ -699,7 +701,7 @@ class _OperationWorker(QtCore.QObject):
             "total_inputs": len(snap.lights),
             "input_displays": [light.display_name for light in snap.lights],
             "bpm_status": (
-                _bpm.bpm_status_line(seam.outcome if seam is not None else None, bpm_root)
+                _bpm.bpm_application_status_line(run_wide.outcome, map_origin="selected")
                 if bpm_root is not None else None
             ),
         }
@@ -729,7 +731,7 @@ class _OperationWorker(QtCore.QObject):
         items = []
         cancelled = False
         manifest_error = None
-        seam, bpm_root = self._bpm_context(snap)
+        run_wide, bpm_root = self._bpm_run_wide_context(snap)
 
         def collision_decision(planned_path: str) -> str:
             """Ask the GUI once per batch; block the worker thread (bounded)."""
@@ -759,7 +761,7 @@ class _OperationWorker(QtCore.QObject):
         try:
             for item in _bpm.auto_route_batch(
                 frames, handle, snap.policy, options, cancel=token, progress=progress,
-                collision_decision=collision_decision, seam=seam,
+                collision_decision=collision_decision, run_wide=run_wide,
             ):
                 d = item.to_dict()
                 items.append(d)
@@ -817,9 +819,44 @@ class _OperationWorker(QtCore.QObject):
             "total_inputs": len(snap.lights),
             "input_displays": [light.display_name for light in snap.lights],
             "bpm_status": (
-                _bpm.bpm_status_line(seam.outcome if seam is not None else None, bpm_root)
+                _bpm.bpm_application_status_line(run_wide.outcome, map_origin="selected")
                 if bpm_root is not None else None
             ),
+        }
+
+    def _create_bpm_map(self, snap, token, progress) -> dict:
+        """Create a Bad Pixel Map from the run's already-selected dark master.
+
+        Reached only after the human accepted the "Create Bad Pixel Map" offer
+        (§9 case C). Decodes the selected dark binding and stores new immutable
+        candidate+promoted revisions into the configured Bad Pixel Database —
+        never fabricates a master and never re-runs matching.
+        """
+        plan = snap.plan
+        if plan is None or "dark" not in plan.masters:
+            return {
+                "kind": "create_bpm_map", "status": "FAILED",
+                "reason_code": "NO_DARK",
+                "details": "no selected dark master to create a Bad Pixel Map from",
+            }
+        storage = _bpm.storage_from_mapping(snap.storage_paths)
+        settings = _bpm.bpm_settings(snap.bpm_root)
+        try:
+            result = _bpm.create_bpm_map_from_binding(
+                storage, settings, plan.masters["dark"], cancel=token
+            )
+        except Exception as exc:  # noqa: BLE001 - typed creation failure
+            return {
+                "kind": "create_bpm_map", "status": "FAILED",
+                "reason_code": "MAP_CREATION_FAILED",
+                "details": f"{type(exc).__name__}: {exc}",
+            }
+        return {
+            "kind": "create_bpm_map",
+            "status": "COMPLETED",
+            "root": str(_bpm.resolve_bpm_root(storage, settings)),
+            "revision_id": result.promoted.revision_id,
+            "site_count": result.site_count,
         }
 
     def _load_declaration(self, snap) -> dict:
@@ -847,9 +884,9 @@ class _OperationWorker(QtCore.QObject):
     def _bpm_context(self, snap):
         """Build the BPM preview seam + root string for an operation, or None.
 
-        The seam is the safe orchestrator front door (§3/§35/§74); building it
-        here (from the injected ``storage_paths`` + optional root override) keeps
-        the worker on the one-chain path and never reaches ``apply_preparation``.
+        The seam is the safe P4.1 orchestrator front door (§3/§35/§74), kept for
+        single-frame observation (the in-memory calibrate path); it never
+        reaches ``apply_preparation``.
         """
         if not snap.storage_paths:
             return None, None
@@ -858,6 +895,24 @@ class _OperationWorker(QtCore.QObject):
         seam = _bpm.make_bpm_seam(storage, settings, frame_id=snap.batch_id or snap.op_id)
         root = str(_bpm.resolve_bpm_root(storage, settings))
         return seam, root
+
+    def _bpm_run_wide_context(self, snap):
+        """Build the LOT 3 batch-level run-wide BPM application seam (or None).
+
+        The authorized calibration path: the batch generator accumulates every
+        calibrated frame, ``finalize`` applies the frozen run-wide plan once and
+        the corrected CFA is written. Without a compatible map the run stays
+        CALIBRATION_ONLY / BASE_ERROR (ordinary outputs unchanged).
+        """
+        if not snap.storage_paths:
+            return None, None
+        storage = _bpm.storage_from_mapping(snap.storage_paths)
+        settings = _bpm.bpm_settings(snap.bpm_root)
+        run_wide = _bpm.make_bpm_run_wide_seam(
+            storage, settings, run_id=snap.batch_id or snap.op_id
+        )
+        root = str(_bpm.resolve_bpm_root(storage, settings))
+        return run_wide, root
 
     def _load_settings(self, snap) -> dict:
         result = settings_mod.load_settings(Path(snap.config_dir))

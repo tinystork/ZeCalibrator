@@ -34,15 +34,19 @@ from typing import Optional, Tuple
 __all__ = [
     "apply_bpm_run_wide",
     "auto_route_batch",
+    "bpm_application_status_line",
     "bpm_application_synthesis",
+    "bpm_creation_decision",
     "bpm_status_line",
     "bpm_settings",
     "calibrate_batch",
     "calibrate_frame",
+    "create_bpm_map_from_binding",
     "default_bad_pixel_database_root",
     "default_bpm_settings",
     "ensure_bpm_root",
     "load_bpm_settings",
+    "make_bpm_run_wide_seam",
     "make_bpm_seam",
     "resolve_bpm_root",
     "resolve_storage_paths",
@@ -220,8 +224,12 @@ def calibrate_frame(source, plan, options=None, *, cancel=None, progress=None, s
     return _calibrate_frame_impl(source, plan, options, token=token, obs=obs, slot=None, bpm_preview=seam)
 
 
-def calibrate_batch(frames, request, library, policy, options=None, *, cancel=None, progress=None, seam=None):
-    """``calibrate_batch`` + an optional ``BpmPreviewSeam`` (additive only)."""
+def calibrate_batch(frames, request, library, policy, options=None, *, cancel=None, progress=None, seam=None, run_wide=None):
+    """``calibrate_batch`` + optional preview/run-wide BPM seams (additive only).
+
+    ``seam`` is the inert P4.1 preview seam (observation only); ``run_wide`` is
+    the LOT 3 batch-level run-wide application seam (the authorized path).
+    """
     from zecalibrator.api.v1 import _io
     from zecalibrator.api.v1.batch import (
         BATCH_OPERATION_ID,
@@ -241,17 +249,20 @@ def calibrate_batch(frames, request, library, policy, options=None, *, cancel=No
 
     token = cancel if cancel is not None else CancellationToken()
     obs = _io.normalize_progress(progress, BATCH_OPERATION_ID)
-    return _batch_generator(frame_list, request, library, policy, options, token, obs, bpm_preview=seam)
+    return _batch_generator(
+        frame_list, request, library, policy, options, token, obs,
+        bpm_preview=seam, bpm_run_wide=run_wide,
+    )
 
 
-def auto_route_batch(frames, library, policy, options=None, *, cancel=None, progress=None, collision_decision=None, seam=None):
-    """``auto_route_batch`` + an optional ``BpmPreviewSeam`` (additive only)."""
+def auto_route_batch(frames, library, policy, options=None, *, cancel=None, progress=None, collision_decision=None, seam=None, run_wide=None):
+    """``auto_route_batch`` + optional preview/run-wide BPM seams (additive only)."""
     from zecalibrator.api.v1._auto_route import auto_route_batch as _impl
 
     return _impl(
         frames, library, policy, options,
         cancel=cancel, progress=progress, collision_decision=collision_decision,
-        bpm_preview=seam,
+        bpm_preview=seam, bpm_run_wide=run_wide,
     )
 
 
@@ -335,3 +346,106 @@ def bpm_application_synthesis(outcome, *, map_origin="selected") -> list:
     from zecalibrator.application.bpm_application import synthesis_lines
 
     return synthesis_lines(outcome, map_origin=map_origin)
+
+
+def make_bpm_run_wide_seam(storage, settings, run_id=None):
+    """Build the batch-level run-wide BPM application seam (LOT 3).
+
+    Thin bridge to :class:`~zecalibrator.application.bpm_application.BpmRunWideSeam`:
+    the batch generator accumulates every calibrated frame through ``record``,
+    ``finalize`` applies the frozen run-wide plan once, and ``prepared`` hands
+    back the per-frame corrected CFA for output writing. When no compatible map
+    exists the run stays CALIBRATION_ONLY / BASE_ERROR and ordinary outputs are
+    written unchanged.
+    """
+    from zecalibrator.application.bpm_application import BpmRunWideSeam
+    from zecalibrator.bpm.reconstruction import DEFAULT_OPERATOR
+
+    return BpmRunWideSeam(storage, settings, operator=DEFAULT_OPERATOR, run_id=run_id)
+
+
+def bpm_application_status_line(outcome, *, map_origin="selected") -> str:
+    """§40 discrete GUI status line for the run-wide application outcome.
+
+    User terminology ("Bad Pixel Map" / "Bad Pixel Database"); the word
+    ``applied`` is STRICTLY conditional on ``reconstructed_total > 0``.
+    """
+    if outcome is None:
+        return f"Bad Pixel Map: {map_origin} · BPM correction: none"
+    correction = "applied" if outcome.reconstructed_total > 0 else "none"
+    return (
+        f"Bad Pixel Map: {map_origin} · Bad pixels: {outcome.bad_pixel_count} · "
+        f"BPM correction: {correction} · Reconstructed sites: {outcome.reconstructed_sites}"
+    )
+
+
+def bpm_creation_decision(storage, settings, light_constraints, *, dark_available=False) -> dict:
+    """Map-creation decision for one run's camera identity (§3/§9).
+
+    Resolves the Bad Pixel Database against the run's sensor identity and
+    combines it with whether a compatible Master Dark was selected for the run.
+    Returns a small user-facing decision dict:
+
+    * ``{"action": "use"}`` — a compatible map exists → use it automatically,
+      never ask;
+    * ``{"action": "propose"}`` — no compatible map and a Master Dark is
+      available → offer to create one (at most once per run);
+    * ``{"action": "unavailable"}`` — no compatible map and no Master Dark →
+      never offer an impossible creation;
+    * ``{"action": "error"}`` — the base is corrupt/invalid/incompatible → a
+      typed, discreet note; never offer a creation into a corrupt base.
+    """
+    from zecalibrator.bpm.identity import sensor_identity_from_light_constraints
+    from zecalibrator.bpm.store import resolve_bad_pixel_database
+
+    identity = sensor_identity_from_light_constraints(light_constraints)
+    root = resolve_bpm_root(storage, settings)
+    resolution = resolve_bad_pixel_database(root, identity)
+    if resolution.is_selected:
+        return {"action": "use", "reason_code": ""}
+    if resolution.is_base_error:
+        return {"action": "error", "reason_code": resolution.reason_code}
+    if dark_available:
+        return {"action": "propose", "reason_code": resolution.reason_code}
+    return {"action": "unavailable", "reason_code": resolution.reason_code}
+
+
+def create_bpm_map_from_binding(storage, settings, binding, *, cancel=None):
+    """Create a Bad Pixel Map from an already-selected dark master binding.
+
+    Decodes the binding's dark FITS (same decode path the calibration uses) and
+    builds the :class:`SelectedDarkMaster` from the descriptor identity, then
+    stores new immutable candidate+promoted revisions into the configured base
+    (``create_bad_pixel_map``). No master is fabricated: the dark is already
+    selected by the matcher.
+    """
+    from zecalibrator.api.v1 import _io
+    from zecalibrator.api.v1.calibration import _declaration_from_descriptor
+    from zecalibrator.application.cancellation import CancellationToken
+    from zecalibrator.bpm.identity import ReadoutContext, SensorIdentity
+    from zecalibrator.bpm.map_creation import SelectedDarkMaster, create_bad_pixel_map
+
+    token = cancel or CancellationToken()
+    desc = binding.role_descriptor
+    if desc.master_type != "dark":
+        raise ValueError(f"binding is a {desc.master_type!r}, not a dark master")
+    locator = binding.locators[0]
+    data = _io.read_bytes(locator.path, cancel=token)
+    declaration = _declaration_from_descriptor(desc)
+    decoded = _io.decode_fits_from_bytes(
+        data, locator.hdu, declaration, cancel=token, progress=None,
+        admission="master", role="dark", flat_form=None,
+    )
+    identity = SensorIdentity(
+        detector=desc.detector,
+        geometry=desc.geometry,
+        readout=ReadoutContext(
+            gain=desc.acquisition.gain, offset=desc.acquisition.offset,
+            readout_mode=desc.acquisition.readout_mode, adc_mode=desc.acquisition.adc_mode,
+        ),
+    )
+    master = SelectedDarkMaster(
+        data=decoded.data, identity=identity,
+        metadata={"master_type": "dark", "source": "selected_master_dark"},
+    )
+    return create_bad_pixel_map(resolve_bpm_root(storage, settings), master)

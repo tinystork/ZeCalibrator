@@ -49,6 +49,7 @@ def auto_route_batch(
     progress=None,
     collision_decision=None,
     bpm_preview=None,
+    bpm_run_wide=None,
 ):
     """Auto-route batch: per light, inspect -> auto-route -> calibrate -> write.
 
@@ -59,7 +60,7 @@ def auto_route_batch(
     is reported as a ``FAILED`` item (never silently routed).
     """
     from zecalibrator import _version
-    from zecalibrator.api.v1.batch import _write_output
+    from zecalibrator.api.v1.batch import _CalibratedOne, _materialize_one, _write_output
     from zecalibrator.api.v1.calibration import _calibrate_frame_impl, _PreparedContextSlot
     from zecalibrator.api.v1.frames import _decode_and_inspect
     from zecalibrator.api.v1.models import (
@@ -108,34 +109,42 @@ def auto_route_batch(
     cancelled = False
     decided_policy = None
     context_slot = _PreparedContextSlot()
+    run_wide = bpm_run_wide is not None
 
-    def _process(idx, frame):
-        nonlocal cancelled
+    def _process(idx, frame, frame_id):
         nonlocal decided_policy
+        replace_existing = False
         try:
             inspection_result, decoded_light = _decode_and_inspect(frame, token=token, obs=None)
         except OperationCancelled:
             raise
         except InvalidRequestError as exc:
-            return BatchItem(index=idx, disposition="FAILED", input_identity=None,
-                             plan_id=None, reason_code="INVALID_SOURCE", reason_details=str(exc))
+            return _CalibratedOne(index=idx, disposition="FAILED", input_identity=None,
+                                  plan_id=None, result=None, plan=None, warnings=(),
+                                  reason_code="INVALID_SOURCE", reason_details=str(exc),
+                                  composition=None), replace_existing
         except Exception as exc:  # noqa: BLE001
-            return BatchItem(index=idx, disposition="FAILED", input_identity=None,
-                             plan_id=None, reason_code="INSPECT_ERROR", reason_details=str(exc))
+            return _CalibratedOne(index=idx, disposition="FAILED", input_identity=None,
+                                  plan_id=None, result=None, plan=None, warnings=(),
+                                  reason_code="INSPECT_ERROR", reason_details=str(exc),
+                                  composition=None), replace_existing
         if inspection_result.operation_status == "CANCELLED":
             raise OperationCancelled()
         if inspection_result.operation_status == "FAILED":
-            return BatchItem(index=idx, disposition="FAILED", input_identity=None,
-                             plan_id=None,
-                             reason_code=inspection_result.reason_code or "INSPECT_FAILED",
-                             reason_details=inspection_result.details)
+            return _CalibratedOne(index=idx, disposition="FAILED", input_identity=None,
+                                  plan_id=None, result=None, plan=None, warnings=(),
+                                  reason_code=inspection_result.reason_code or "INSPECT_FAILED",
+                                  reason_details=inspection_result.details,
+                                  composition=None), replace_existing
         inspection = inspection_result.inspection
 
         if inspection.domain_finding != "raw":
-            return BatchItem(index=idx, disposition="SKIPPED",
-                             input_identity=inspection.identity, plan_id=None,
-                             reason_code="NON_RAW_DOMAIN",
-                             reason_details=f"domain_finding={inspection.domain_finding}")
+            return _CalibratedOne(index=idx, disposition="SKIPPED",
+                                  input_identity=inspection.identity, plan_id=None,
+                                  result=None, plan=None, warnings=(),
+                                  reason_code="NON_RAW_DOMAIN",
+                                  reason_details=f"domain_finding={inspection.domain_finding}",
+                                  composition=None), replace_existing
 
         try:
             light = light_constraints_from_sensor_metadata(inspection.metadata)
@@ -143,19 +152,21 @@ def auto_route_batch(
         except OperationCancelled:
             raise
         except Exception as exc:  # noqa: BLE001
-            return BatchItem(index=idx, disposition="FAILED",
-                             input_identity=inspection.identity, plan_id=None,
-                             reason_code="RESOLVE_ERROR", reason_details=str(exc))
+            return _CalibratedOne(index=idx, disposition="FAILED",
+                                  input_identity=inspection.identity, plan_id=None,
+                                  result=None, plan=None, warnings=(),
+                                  reason_code="RESOLVE_ERROR", reason_details=str(exc),
+                                  composition=None), replace_existing
 
         plan = resolution.plan
         if plan is None:
-            return BatchItem(
-                index=idx, disposition="FAILED", input_identity=inspection.identity,
-                plan_id=None, reason_code=_AUTO_ROUTE_TO_MATCH[resolution.outcome],
-                reason_details="; ".join(r.code for r in resolution.reasons),
-            )
+            return _CalibratedOne(index=idx, disposition="FAILED",
+                                  input_identity=inspection.identity, plan_id=None,
+                                  result=None, plan=None, warnings=(),
+                                  reason_code=_AUTO_ROUTE_TO_MATCH[resolution.outcome],
+                                  reason_details="; ".join(r.code for r in resolution.reasons),
+                                  composition=None), replace_existing
 
-        replace_existing = False
         if destination is not None and collision_decision is not None:
             planned = _batch._output_path_for(inspection.identity, plan.plan_id, destination)
             if os.path.exists(planned):
@@ -163,12 +174,12 @@ def auto_route_batch(
                     decided_policy = collision_decision(planned)
                 policy_value = decided_policy
                 if policy_value == "skip":
-                    return BatchItem(
-                        index=idx, disposition="SKIPPED",
-                        input_identity=inspection.identity, plan_id=plan.plan_id,
-                        reason_code="DESTINATION_EXISTS",
-                        reason_details=f"output already exists: {planned}",
-                    )
+                    return _CalibratedOne(index=idx, disposition="SKIPPED",
+                                          input_identity=inspection.identity,
+                                          plan_id=plan.plan_id, result=None, plan=plan,
+                                          warnings=(), reason_code="DESTINATION_EXISTS",
+                                          reason_details=f"output already exists: {planned}",
+                                          composition=None), replace_existing
                 if policy_value != "overwrite":
                     # "cancel" or any malformed/garbled decision fails safe to
                     # cancel (overwrite/skip are never selected implicitly).
@@ -181,61 +192,73 @@ def auto_route_batch(
         except OperationCancelled:
             raise
         except InvalidRequestError as exc:
-            return BatchItem(index=idx, disposition="FAILED",
-                             input_identity=inspection.identity, plan_id=plan.plan_id,
-                             reason_code="PLAN_SOURCE_MISMATCH", reason_details=str(exc))
+            return _CalibratedOne(index=idx, disposition="FAILED",
+                                  input_identity=inspection.identity, plan_id=plan.plan_id,
+                                  result=None, plan=plan, warnings=(),
+                                  reason_code="PLAN_SOURCE_MISMATCH", reason_details=str(exc),
+                                  composition=None), replace_existing
         except Exception as exc:  # noqa: BLE001
-            return BatchItem(index=idx, disposition="FAILED",
-                             input_identity=inspection.identity, plan_id=plan.plan_id,
-                             reason_code="CALIBRATE_ERROR", reason_details=str(exc))
+            return _CalibratedOne(index=idx, disposition="FAILED",
+                                  input_identity=inspection.identity, plan_id=plan.plan_id,
+                                  result=None, plan=plan, warnings=(),
+                                  reason_code="CALIBRATE_ERROR", reason_details=str(exc),
+                                  composition=None), replace_existing
 
         if result.status == "CANCELLED":
             raise OperationCancelled()
 
         disposition = batch_disposition(result.status)
         if result.status == "FAILED":
-            return BatchItem(index=idx, disposition="FAILED",
-                             input_identity=inspection.identity, plan_id=plan.plan_id,
-                             reason_code=result.reason_code, warnings=result.warnings)
+            return _CalibratedOne(index=idx, disposition="FAILED",
+                                  input_identity=inspection.identity, plan_id=plan.plan_id,
+                                  result=None, plan=plan, warnings=result.warnings,
+                                  reason_code=result.reason_code, reason_details="",
+                                  composition=None), replace_existing
 
-        if destination is None:
-            return BatchItem(index=idx, disposition=disposition,
-                             input_identity=inspection.identity, plan_id=plan.plan_id,
-                             result=result, output=None, warnings=result.warnings,
-                             composition=dict(plan.composition.to_dict()) if plan.composition is not None else None)
+        # LOT 3: record the successful engine calibration into the run-wide seam.
+        if bpm_run_wide is not None:
+            bpm_run_wide.record(frame_id, result._engine, plan.light_constraints)
 
-        try:
-            output = _write_output(result, inspection.identity, plan.plan_id, destination, token, replace_existing=replace_existing)
-        except OperationCancelled:
-            raise
-        except NoClobberViolation as exc:
-            return BatchItem(index=idx, disposition="FAILED",
-                             input_identity=inspection.identity, plan_id=plan.plan_id,
-                             reason_code="OUTPUT_COLLISION", reason_details=str(exc),
-                             warnings=result.warnings)
-        except Exception as exc:  # noqa: BLE001
-            return BatchItem(index=idx, disposition="FAILED",
-                             input_identity=inspection.identity, plan_id=plan.plan_id,
-                             reason_code="OUTPUT_ERROR", reason_details=str(exc),
-                             warnings=result.warnings)
-        return BatchItem(index=idx, disposition=disposition,
-                         input_identity=inspection.identity, plan_id=plan.plan_id,
-                         result=None, output=output, warnings=result.warnings,
-                         composition=dict(plan.composition.to_dict()) if plan.composition is not None else None)
+        return _CalibratedOne(index=idx, disposition=disposition,
+                              input_identity=inspection.identity, plan_id=plan.plan_id,
+                              result=result, plan=plan, warnings=result.warnings,
+                              reason_code=None, reason_details="",
+                              composition=dict(plan.composition.to_dict()) if plan.composition is not None else None), replace_existing
 
     emit_batch_progress(obs, "batch_start", 0, total)
     try:
-        for idx, frame in enumerate(frame_list):
-            token.raise_if_cancelled()
-            frame_id = frame_display_id(frame)
-            emit_batch_progress(obs, "frame_start", idx, total, frame_id=frame_id)
+        if run_wide:
+            # LOT 3 two-time structure: calibrate every frame first, then apply
+            # the run-wide BPM plan once, then write corrected outputs.
+            staged: list = []
+            for idx, frame in enumerate(frame_list):
+                token.raise_if_cancelled()
+                frame_id = frame_display_id(frame)
+                emit_batch_progress(obs, "frame_start", idx, total, frame_id=frame_id)
+                one, replace_existing = _process(idx, frame, frame_id)
+                staged.append((frame_id, one, replace_existing))
+                emit_batch_progress(obs, "frame_complete", idx + 1, total, frame_id=frame_id)
+            bpm_run_wide.finalize()
+            for frame_id, one, replace_existing in staged:
+                token.raise_if_cancelled()
+                prepared = bpm_run_wide.prepared(frame_id) if one.result is not None else None
+                item = _materialize_one(one, destination, token, replace_existing=replace_existing, prepared=prepared)
+                manifest_inputs.append({"index": one.index, "identity": _identity_to_dict(item.input_identity)})
+                manifest_items.append(item.to_dict())
+                yield item
+        else:
+            for idx, frame in enumerate(frame_list):
+                token.raise_if_cancelled()
+                frame_id = frame_display_id(frame)
+                emit_batch_progress(obs, "frame_start", idx, total, frame_id=frame_id)
 
-            item = _process(idx, frame)
+                one, replace_existing = _process(idx, frame, frame_id)
+                item = _materialize_one(one, destination, token, replace_existing=replace_existing)
 
-            manifest_inputs.append({"index": idx, "identity": _identity_to_dict(item.input_identity)})
-            manifest_items.append(item.to_dict())
-            emit_batch_progress(obs, "frame_complete", idx + 1, total, frame_id=frame_id)
-            yield item
+                manifest_inputs.append({"index": one.index, "identity": _identity_to_dict(item.input_identity)})
+                manifest_items.append(item.to_dict())
+                emit_batch_progress(obs, "frame_complete", idx + 1, total, frame_id=frame_id)
+                yield item
 
         emit_batch_progress(obs, "complete", total, total)
     except OperationCancelled:

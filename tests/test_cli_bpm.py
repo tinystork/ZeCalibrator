@@ -105,14 +105,13 @@ def test_calibrate_emits_bpm_synthesis_to_stderr(tmp_path):
     # stdout stays scriptable JSON.
     data = json.loads(proc.stdout)
     assert data["status"] == "COMPLETED"
-    # §50 synthesis on stderr (never corrupts stdout JSON).
+    # LOT 3 §11 run synthesis on stderr (never corrupts stdout JSON).
     lines = proc.stderr.splitlines()
     assert "Bad Pixel Database:" in proc.stderr
-    assert "Sensor profile:" in proc.stderr
-    assert "Eligible sites: 0" in proc.stderr
-    assert "BPM scientific application: disabled" in proc.stderr
+    assert "Bad Pixel Map: selected" in proc.stderr
+    assert "Bad pixels: 0" in proc.stderr
+    assert "BPM correction: none" in proc.stderr
     assert "Reconstructed sites: 0" in proc.stderr
-    assert "Result mode: calibration-only" in proc.stderr
     # §51: no alarming "ERROR: BPM failed" when everything is fine.
     assert "ERROR: BPM failed" not in proc.stderr
 

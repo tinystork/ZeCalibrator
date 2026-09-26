@@ -321,14 +321,17 @@ def _cmd_calibrate(args, token) -> int:
         bpm_settings = _bpm.bpm_settings(args.bad_pixel_db)
     else:
         bpm_settings = _bpm.load_bpm_settings(storage.user_config_path).settings
-    seam = _bpm.make_bpm_seam(storage, bpm_settings, frame_id=batch_id)
+    # LOT 3: the normal path uses the batch run-wide BPM application seam (the
+    # frozen plan), not the inert P4.1 preview seam. Without a compatible map
+    # the run stays CALIBRATION_ONLY (ordinary outputs, unchanged).
+    run_wide = _bpm.make_bpm_run_wide_seam(storage, bpm_settings, run_id=batch_id)
 
     items = []
     cancelled = False
     manifest_error = None
     try:
         for item in _bpm.calibrate_batch(
-            frames, request, library, v1.default_match_policy(), options, cancel=token, seam=seam
+            frames, request, library, v1.default_match_policy(), options, cancel=token, run_wide=run_wide
         ):
             items.append(item.to_dict())
     except v1.OperationCancelled:
@@ -357,8 +360,10 @@ def _cmd_calibrate(args, token) -> int:
         if args.destination is not None
         else None
     )
-    # §50 log synthesis (stderr, so the JSON on stdout stays scriptable).
-    _emit_bpm_synthesis(seam.outcome, str(_bpm.resolve_bpm_root(storage, bpm_settings)))
+    # §11 run synthesis (stderr, so the JSON on stdout stays scriptable).
+    _emit_bpm_application_synthesis(
+        run_wide.outcome, str(_bpm.resolve_bpm_root(storage, bpm_settings))
+    )
     _emit({"status": batch_status, "items": items, "manifest": manifest})
     return 3 if batch_status == "PARTIAL" else 0
 
@@ -415,9 +420,16 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _emit_bpm_synthesis(outcome, root_fallback: str) -> None:
-    """§50: write the six-line Bad Pixel Database synthesis to stderr."""
-    for line in _bpm.synthesis_text(outcome, root_fallback):
+def _emit_bpm_application_synthesis(outcome, root_fallback: str) -> None:
+    """§11: write the Bad Pixel Map run synthesis to stderr.
+
+    The leading ``Bad Pixel Database`` line reports the resolved location (so the
+    ``--bad-pixel-db`` override / persisted setting is visible); the four §11
+    lines follow. The word ``applied`` appears only when
+    ``reconstructed_total > 0``.
+    """
+    sys.stderr.write(f"Bad Pixel Database: {root_fallback}\n")
+    for line in _bpm.bpm_application_synthesis(outcome, map_origin="selected"):
         sys.stderr.write(line + "\n")
 
 

@@ -125,6 +125,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._export_after_preflight: bool = False
         self._preflight_is_standard: bool = False
         self._standard_route_generation: int = -1
+        # LOT 3: map-creation proposal state (one offer per run, §9 E).
+        self._bpm_proposed = False
+        self._pending_bpm_export = None
 
         self._build_ui()
         self._wire_controller()
@@ -536,6 +539,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._in_memory_result = None
         self._clear_batch_presentation()
         self._reset_standard_summary()
+        # A new run (config/input change) allows one fresh map-creation offer.
+        self._bpm_proposed = False
 
     def _clear_batch_presentation(self) -> None:
         self._batch_items.clear()
@@ -762,11 +767,11 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         if self._bpm_root:
             self.bpm_status_label.setText(
-                f"Bad Pixel Database: {self._bpm_root} — preview only (BPM correction disabled)"
+                f"Bad Pixel Database: {self._bpm_root} — compatible maps applied automatically"
             )
         else:
             self.bpm_status_label.setText(
-                "Bad Pixel Database: not configured — preview disabled"
+                "Bad Pixel Database: not configured — no map correction"
             )
 
     def _on_browse_bpm_root(self) -> None:
@@ -1582,7 +1587,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if error is not None:
             QtWidgets.QMessageBox.warning(self, "Output folder", error)
             return
-        self._start_export(None, destination)
+        self._check_bpm_proposal_then_export(None, destination)
 
     def _prompt_destination_and_export(self, request) -> None:
         # Advanced path only (kept unchanged): the modal destination chooser.
@@ -1597,7 +1602,115 @@ class MainWindow(QtWidgets.QMainWindow):
             last_output_dir=destination,
             window_width=self.width(), window_height=self.height(),
         )
+        self._check_bpm_proposal_then_export(request, destination)
+
+    def _run_light_constraints(self):
+        """The run's light constraints from the first resolved plan (or None)."""
+        for plan in self._plans.values():
+            if plan is not None:
+                return plan.light_constraints
+        return None
+
+    def _run_dark_available(self) -> bool:
+        """True when any resolved plan binds a (compatible) dark master."""
+        return any(
+            plan is not None and "dark" in plan.masters
+            for plan in self._plans.values()
+        )
+
+    def _run_dark_plan(self):
+        """The first resolved plan that binds a dark master (or None)."""
+        for plan in self._plans.values():
+            if plan is not None and "dark" in plan.masters:
+                return plan
+        return None
+
+    def _check_bpm_proposal_then_export(self, request, destination) -> None:
+        """§3/§9: offer Bad Pixel Map creation at most once per run, then export.
+
+        Uses the headless decision (``_bpm.bpm_creation_decision``): a compatible
+        map → no question (used automatically); no compatible map + a selected
+        Master Dark → one offer; no compatible map + no dark → a discreet note;
+        a corrupt base → a typed discreet note. Declining never raises an error
+        and never repeats per light.
+        """
+        from zecalibrator.api.v1 import _bpm
+
+        light = self._run_light_constraints()
+        if light is None or not self._bpm_root:
+            self._start_export(request, destination)
+            return
+        storage = _bpm.storage_from_mapping(self._storage_paths_dict())
+        settings = _bpm.bpm_settings(self._bpm_root)
+        try:
+            decision = _bpm.bpm_creation_decision(
+                storage, settings, light, dark_available=self._run_dark_available()
+            )
+        except Exception as exc:  # noqa: BLE001 - a failed check never blocks calibration
+            self._log(f"[bpm] map check unavailable: {exc}")
+            self._start_export(request, destination)
+            return
+        action = decision["action"]
+        if action == "propose" and not self._bpm_proposed:
+            self._bpm_proposed = True
+            self._offer_bpm_creation(request, destination)
+            return
+        if action == "unavailable":
+            self._log("No compatible Bad Pixel Map is available for this camera.")
+        elif action == "error":
+            self._log(
+                f"Bad Pixel Database is unavailable ({decision['reason_code']})."
+            )
         self._start_export(request, destination)
+
+    def _offer_bpm_creation(self, request, destination) -> None:
+        """The single "Create Bad Pixel Map" dialog (case C)."""
+        box = QtWidgets.QMessageBox(self)
+        box.setWindowTitle("Bad Pixel Map")
+        box.setIcon(QtWidgets.QMessageBox.Icon.Question)
+        box.setText(
+            "No compatible Bad Pixel Map was found for this camera.\n"
+            "Create one from the selected Master Dark?"
+        )
+        create_btn = box.addButton(
+            "Create Bad Pixel Map", QtWidgets.QMessageBox.ButtonRole.AcceptRole
+        )
+        box.addButton("Not now", QtWidgets.QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        if box.clickedButton() is create_btn:
+            self._request_bpm_map_creation(request, destination)
+        else:
+            # Declined: normal calibration, no error, never re-asked this run.
+            self.status_label.setText("Calibration continues without a Bad Pixel Map.")
+            self._start_export(request, destination)
+
+    def _request_bpm_map_creation(self, request, destination) -> None:
+        plan = self._run_dark_plan()
+        if plan is None:
+            self._start_export(request, destination)
+            return
+        self._pending_bpm_export = (request, destination)
+        snapshot = service.OperationSnapshot(
+            op_id=service.new_operation_id(), kind="create_bpm_map",
+            library_spec=None, request=None, policy=None, lights=(),
+            plan=plan, storage_paths=self._storage_paths_dict(),
+            bpm_root=self._bpm_root,
+        )
+        self._start_operation(snapshot)
+
+    def _handle_bpm_map_created(self, summary: dict) -> None:
+        if summary.get("status") == "COMPLETED":
+            self._log(
+                f"Bad Pixel Map created ({summary.get('site_count', 0)} sites; "
+                f"revision {summary.get('revision_id')})."
+            )
+            self.status_label.setText("Bad Pixel Map created.")
+        else:
+            self._log(
+                f"Bad Pixel Map creation failed: {summary.get('reason_code')} "
+                f"{summary.get('details')}"
+            )
+            self.status_label.setText("Bad Pixel Map creation failed.")
 
     def _start_export(self, request, destination) -> None:
         selected = self._selected_rows()
@@ -1749,6 +1862,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._handle_confirm_evidence(summary)
         elif kind == "build_managed_library":
             self._handle_build_managed(summary)
+        elif kind == "create_bpm_map":
+            self._handle_bpm_map_created(summary)
         self.progress_bar.setRange(0, 1)
         if status in ("COMPLETED", "OPENED"):
             self.progress_bar.setValue(1)
@@ -1988,6 +2103,12 @@ class MainWindow(QtWidgets.QMainWindow):
         elif self._export_after_preflight:
             self._export_after_preflight = False
             self._continue_export_after_preflight()
+        elif self._pending_bpm_export is not None:
+            # After the map-creation op ended, resume the pending export (the
+            # freshly created map is now found automatically).
+            request, destination = self._pending_bpm_export
+            self._pending_bpm_export = None
+            self._start_export(request, destination)
 
     # ------------------------------------------------- detail rendering
     def _on_preflight_selection_changed(self, current_row: int, *_args) -> None:
