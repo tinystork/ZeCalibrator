@@ -32,7 +32,9 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 __all__ = [
+    "apply_bpm_run_wide",
     "auto_route_batch",
+    "bpm_application_synthesis",
     "bpm_status_line",
     "bpm_settings",
     "calibrate_batch",
@@ -297,3 +299,39 @@ def bpm_status_line(outcome, root_fallback=None) -> str:
         f"Bad Pixel Database: {db} · Profile: {profile} · "
         f"BPM correction: {correction}"
     )
+
+
+def apply_bpm_run_wide(
+    *,
+    storage,
+    settings,
+    identity,
+    frames,
+    operator=None,
+    run_id=None,
+):
+    """Batch-level run-wide BPM application (LOT 2), reached through the facade.
+
+    Thin bridge to :mod:`zecalibrator.application.bpm_application`: resolves the
+    base from storage/settings, resolves a compatible promoted revision against
+    ``identity``, then preflights (freezes) and executes the run-wide plan over
+    the supplied post-calibration ``frames``. The P4.1 preview seam is untouched.
+    """
+    from zecalibrator.application.bpm_application import apply_bpm_run_wide as _impl
+    from zecalibrator.bpm.reconstruction import DEFAULT_OPERATOR
+
+    return _impl(
+        storage=storage,
+        settings=settings,
+        identity=identity,
+        frames=frames,
+        operator=operator if operator is not None else DEFAULT_OPERATOR,
+        run_id=run_id,
+    )
+
+
+def bpm_application_synthesis(outcome, *, map_origin="selected") -> list:
+    """§11 run synthesis (application outcome); ``applied`` gated on reconstructed > 0."""
+    from zecalibrator.application.bpm_application import synthesis_lines
+
+    return synthesis_lines(outcome, map_origin=map_origin)
