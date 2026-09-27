@@ -57,3 +57,34 @@ def test_declaration_carries_both_gain_fields():
     decl = masters.build_declaration("src", "id", "1", candidates)
     assert decl.gain == 120.0
     assert abs(decl.gain_e_per_adu - 1.00224268436432) < 1e-9
+
+
+# ---------------------------------------------------------------------------
+# C14 — roi_origin (CFA-only pair) was never decoded
+# ---------------------------------------------------------------------------
+def test_roi_origin_decoded_from_xorgsubf_yorgsubf():
+    cards = [("XORGSUBF", 0), ("YORGSUBF", 0), ("BAYERPAT", "RGGB")]
+    candidates, conflicts = masters.detect_header_candidates(cards)
+    assert conflicts == {}
+    assert candidates["roi_origin"].value == (0, 0)  # (oy, ox) = (y, x)
+
+
+def test_roi_origin_nonzero_order():
+    cards = [("XORGSUBF", 4), ("YORGSUBF", 8)]
+    candidates, _ = masters.detect_header_candidates(cards)
+    assert candidates["roi_origin"].value == (8, 4)  # (oy, ox)
+
+
+def test_roi_origin_absent_not_invented():
+    cards = [("BAYERPAT", "RGGB")]
+    candidates, conflicts = masters.detect_header_candidates(cards)
+    assert "roi_origin" not in candidates
+    assert conflicts == {}
+
+
+def test_roi_origin_conflict_detected():
+    cards = [("XORGSUBF", 0), ("YORGSUBF", 0), ("XORGSUBF", 4), ("YORGSUBF", 8)]
+    candidates, conflicts = masters.detect_header_candidates(cards)
+    assert "roi_origin" not in candidates
+    assert "roi_origin" in conflicts
+    assert len(conflicts["roi_origin"]) == 2

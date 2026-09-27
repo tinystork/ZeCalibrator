@@ -176,6 +176,37 @@ def detect_header_candidates(cards):
                 origin_field=bin_origins[0], confirmed_by=None, version="1",
             )
 
+    # roi_origin: XORGSUBF+YORGSUBF pair -> (oy, ox) = (y, x), like binning.
+    # (C14) The CFA-only roi_origin was never decoded: XORGSUBF/YORGSUBF are a
+    # standard FITS pair mapped in the canonical model but absent here, so every
+    # Bayer master was refused MISSING_REQUIRED_FIELDS despite carrying both cards.
+    roi_values: list = []
+    roi_origins: list = []
+    x_roi = by_keyword.get("XORGSUBF")
+    y_roi = by_keyword.get("YORGSUBF")
+    if x_roi and y_roi:
+        for xraw, yraw in zip(x_roi, y_roi):
+            try:
+                x = int(float(xraw))
+                y = int(float(yraw))
+            except (TypeError, ValueError):
+                continue
+            roi_values.append((y, x))
+            roi_origins.append("XORGSUBF+YORGSUBF")
+    if roi_values:
+        distinct = [v for i, v in enumerate(roi_values) if v not in roi_values[:i]]
+        if len(distinct) > 1:
+            conflicts["roi_origin"] = tuple(
+                EvidenceFact(field="roi_origin", value=value, origin_type="fits_header",
+                                origin_field=origin, confirmed_by=None, version="1")
+                for value, origin in zip(roi_values, roi_origins)
+            )
+        else:
+            candidates["roi_origin"] = EvidenceFact(
+                field="roi_origin", value=distinct[0], origin_type="fits_header",
+                origin_field=roi_origins[0], confirmed_by=None, version="1",
+            )
+
     return candidates, conflicts
 
 
