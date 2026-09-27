@@ -545,6 +545,18 @@ def _default_revision(imports) -> str:
     return sha256_hex(payload.encode("utf-8"))[:16]
 
 
+def _scan_failure_details(diagnostics) -> str:
+    """Sanitize structured scan diagnostics into a human-readable, traceback-free
+    failure description (no raw traceback ever reaches the GUI)."""
+    parts = []
+    for d in diagnostics:
+        if hasattr(d, "path") and hasattr(d, "reason"):
+            parts.append(f"{d.path}: {d.reason}")
+        else:
+            parts.append(str(d))
+    return "; ".join(parts) if parts else "indexing failed"
+
+
 def _fits_shape(source: FilesystemSource, path: str, hdu) -> tuple:
     cards = source.read_header(path, hdu=hdu)
     header = {c.keyword: c.value for c in cards}
@@ -867,11 +879,18 @@ def index_library(
 
     status = result.status
     _io.emit_progress(obs, INDEX_OPERATION_ID, "complete", 2, 2)
+    reason_code = None
+    details = ""
+    if status == "FAILED":
+        reason_code = "INDEX_FAILED"
+        details = _scan_failure_details(result.diagnostics)
     return IndexLibraryResult(
         operation_status=status,
         revision=result.revision if status == "COMPLETED" else None,
         candidate_count=result.candidate_count,
         diagnostics=result.diagnostics,
+        reason_code=reason_code,
+        details=details,
     )
 
 

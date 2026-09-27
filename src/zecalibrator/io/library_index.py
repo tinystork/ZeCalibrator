@@ -184,34 +184,79 @@ class LibraryIndex:
         return self._conn
 
     # -- publish -------------------------------------------------------------
+    def _insert_entries(self, conn: sqlite3.Connection, revision: str, entries: Mapping[str, Sequence[Candidate]]) -> None:
+        """Insert all candidate entries for ``revision`` (no revision row)."""
+        for role, cands in entries.items():
+            for c in cands:
+                locators = [{"path": l.path, "hdu": l.hdu} for l in c.locators]
+                mask_loc = {"path": c.mask_locator.path} if c.mask_locator is not None else None
+                conn.execute(
+                    "INSERT INTO entries(revision, role, candidate_id, snapshot_json, locators_json, mask_locator_json, acquired_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        revision,
+                        role,
+                        c.candidate_id,
+                        _json_dumps(dict(c.descriptor_snapshot.to_dict())),
+                        _json_dumps(locators),
+                        _json_dumps(mask_loc) if mask_loc is not None else None,
+                        getattr(c, "acquired_at", None),
+                    ),
+                )
+
+    def _has_revision(self, revision: str) -> bool:
+        conn = self._require_conn()
+        row = conn.execute("SELECT 1 FROM revisions WHERE revision = ?", (revision,)).fetchone()
+        return row is not None
+
     def publish_revision(self, revision: str, entries: Mapping[str, Sequence[Candidate]]) -> None:
-        """Transactionally publish a new revision (one serialized writer)."""
+        """Transactionally publish a new revision (one serialized writer).
+
+        First-publish only: publishing a revision label that already exists
+        raises (the ``revisions`` primary key collision is deliberate). Use
+        :meth:`republish_revision` to replace an existing revision.
+        """
         if not isinstance(revision, str) or not revision:
             raise ValueError("revision must be a non-empty string")
         conn = self._require_conn()
         with self._writer_lock:
             conn.execute("BEGIN IMMEDIATE")
             try:
-                row = conn.execute("SELECT COALESCE(MAX(ordinal), 0) + 1 FROM revisions").fetchone()
-                ordinal = int(row[0])
+                ordinal = int(conn.execute("SELECT COALESCE(MAX(ordinal), 0) + 1 FROM revisions").fetchone()[0])
                 conn.execute("INSERT INTO revisions(revision, ordinal) VALUES (?, ?)", (revision, ordinal))
-                for role, cands in entries.items():
-                    for c in cands:
-                        locators = [{"path": l.path, "hdu": l.hdu} for l in c.locators]
-                        mask_loc = {"path": c.mask_locator.path} if c.mask_locator is not None else None
-                        conn.execute(
-                            "INSERT INTO entries(revision, role, candidate_id, snapshot_json, locators_json, mask_locator_json, acquired_at) "
-                            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                            (
-                                revision,
-                                role,
-                                c.candidate_id,
-                                _json_dumps(dict(c.descriptor_snapshot.to_dict())),
-                                _json_dumps(locators),
-                                _json_dumps(mask_loc) if mask_loc is not None else None,
-                                getattr(c, "acquired_at", None),
-                            ),
-                        )
+                self._insert_entries(conn, revision, entries)
+                conn.execute("COMMIT")
+            except Exception:
+                try:
+                    conn.execute("ROLLBACK")
+                except sqlite3.OperationalError:
+                    pass
+                raise
+
+    def republish_revision(self, revision: str, entries: Mapping[str, Sequence[Candidate]]) -> None:
+        """Transactionally replace an existing revision (one ``BEGIN IMMEDIATE``).
+
+        Deletes the existing ``entries`` + ``revisions`` rows for ``revision`` and
+        reinserts the freshly built entries under the same label with the next
+        latest ordinal, so the revision becomes current for ``load_snapshot()``
+        while remaining exactly one row named ``revision``. A failure rolls back
+        atomically, preserving the previous usable state. Raises
+        :class:`LibraryIndexError` when the revision does not exist (first
+        publish must use :meth:`publish_revision`).
+        """
+        if not isinstance(revision, str) or not revision:
+            raise ValueError("revision must be a non-empty string")
+        conn = self._require_conn()
+        with self._writer_lock:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                if not self._has_revision(revision):
+                    raise LibraryIndexError(f"cannot republish unknown revision: {revision}")
+                conn.execute("DELETE FROM entries WHERE revision = ?", (revision,))
+                conn.execute("DELETE FROM revisions WHERE revision = ?", (revision,))
+                ordinal = int(conn.execute("SELECT COALESCE(MAX(ordinal), 0) + 1 FROM revisions").fetchone()[0])
+                conn.execute("INSERT INTO revisions(revision, ordinal) VALUES (?, ?)", (revision, ordinal))
+                self._insert_entries(conn, revision, entries)
                 conn.execute("COMMIT")
             except Exception:
                 try:
@@ -353,7 +398,10 @@ class LibraryIndex:
             return ScanResult(status="CANCELLED", revision=None, diagnostics=tuple(diagnostics), candidate_count=count)
 
         try:
-            self.publish_revision(revision, by_role)
+            if self._has_revision(revision):
+                self.republish_revision(revision, by_role)
+            else:
+                self.publish_revision(revision, by_role)
         except Exception as exc:  # noqa: BLE001
             return ScanResult(status="FAILED", revision=None, diagnostics=tuple(diagnostics) + (_diag(revision, f"publish: {exc}"),), candidate_count=count)
 
