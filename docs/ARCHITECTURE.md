@@ -46,7 +46,7 @@ unsupported/unadvertised until a future gate.
 | distribution | `ZeCalibrator` | |
 | product_id / package | `zecalibrator` | |
 | public module | `zecalibrator.api.v1` | |
-| product version target | `0.0.4` | |
+| product version target | `0.0.5` | |
 | public API version target | `1.0` | independent of product version |
 | consumer compatibility range | `>=1,<2` + capabilities | |
 | provenance schema | `zecalibrator.provenance.v2` | |
