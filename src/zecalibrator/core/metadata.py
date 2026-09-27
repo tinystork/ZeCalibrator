@@ -592,6 +592,7 @@ class ImportDeclaration:
     detector_instance_id: Optional[str] = None
     detector_model: Optional[str] = None
     gain: Optional[float] = None
+    gain_e_per_adu: Optional[float] = None
     offset: Optional[float] = None
     readout_mode: Optional[str] = None
     adc_mode: Optional[str] = None
