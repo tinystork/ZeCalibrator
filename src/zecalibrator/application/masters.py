@@ -31,6 +31,7 @@ EVIDENCE_SOURCE_MAP: Mapping[str, Tuple[str, ...]] = {
     "temperature_setpoint_c": ("SET-TEMP",),
     "gain": ("GAIN",),
     "gain_e_per_adu": ("EGAIN",),
+    "orientation": ("ORIENTATION",),
     "offset": ("OFFSET", "PEDESTAL"),
     "readout_mode": ("READOUTM", "READMODE"),
     "adc_mode": ("ADCMODE",),
@@ -74,6 +75,8 @@ def _coerce_evidence_value(field: str, raw):
         return None
     if field == "cfa_phase":
         return "mono" if s.upper() == "MONO" else s.upper()
+    if field == "orientation":
+        return s.lower()
     return s
 
 

@@ -69,12 +69,36 @@ _FITS_SUFFIXES = (".fits", ".fit", ".fts")
 
 
 @dataclass(frozen=True)
+class SessionDeclaration:
+    """Explicit user-provided session-level acquisition facts (fallback-only).
+
+    A fact declared here is applied **only** when the master's own header carries
+    no exploitable evidence for it — the file's evidence always wins.  For
+    ``orientation``, ``"identity"`` means "the masters use the same sensor
+    orientation as the lights" (asserted by the user, never invented by the
+    library).  Without a declaration the current behaviour is unchanged: a
+    missing orientation on a Bayer master is refused, never silently defaulted.
+    """
+
+    orientation: Optional[str] = None  # "identity" (v1) — fallback only
+
+    def __post_init__(self) -> None:
+        if self.orientation is not None and self.orientation != "identity":
+            raise ValueError(
+                f"SessionDeclaration.orientation must be 'identity' (v1), got {self.orientation!r}"
+            )
+
+
+@dataclass(frozen=True)
 class MasterAdmission:
     """One admitted master: identified role + content identity + retained evidence.
 
     ``evidence`` holds the header-derived :class:`EvidenceFact` values that were
     retained for this master (origin ``fits_header``); the :class:`ImportDeclaration`
     is the canonical scientific-fact representation built from them.
+    ``orientation_source`` is ``"header"`` when the orientation came from the
+    master's own header, ``"declared"`` when it fell back to the session
+    declaration, or ``""`` when orientation is not applicable/absent.
     """
 
     role: str  # bias | dark | flat | flat_dark
@@ -84,6 +108,7 @@ class MasterAdmission:
     hdu: Union[int, str]
     declaration: ImportDeclaration
     evidence: Mapping[str, EvidenceFact]
+    orientation_source: str = ""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "evidence", MappingProxyType(dict(self.evidence)))
@@ -121,6 +146,7 @@ class SessionLibraryResult:
     rejected: tuple = ()
     counts_by_role: Mapping[str, int] = MappingProxyType({})
     warnings: tuple = ()
+    declaration: Optional["SessionDeclaration"] = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "admissions", tuple(self.admissions))
@@ -337,6 +363,7 @@ def open_session_library(
     options: Optional[ExecutionOptions] = None,
     cancel=None,
     progress=None,
+    declaration: Optional[SessionDeclaration] = None,
 ) -> SessionLibraryResult:
     """Admit a top-level folder of masters into a usable :class:`SessionLibrary`.
 
@@ -346,6 +373,11 @@ def open_session_library(
     matching-blocking fact is present. A refused master yields a structured
     :class:`RejectionDiagnostic` and never invalidates the rest (C3a: zero
     admissible masters returns ``handle=None`` — not an exception).
+
+    ``declaration`` supplies **fallback-only** session facts (e.g. ``orientation``
+    for Bayer masters): a fact is applied only when the master's own header has
+    no exploitable evidence for it, and it is always reported on the result so a
+    resume can never silently change the hypothesis.
 
     ``policy``/``options`` default to :func:`default_match_policy` /
     :class:`ExecutionOptions`. Cancellation is honoured at every stage and returns
@@ -362,6 +394,8 @@ def open_session_library(
         raise InvalidRequestError("policy must be a MatchPolicy or None")
     if options is not None and not isinstance(options, ExecutionOptions):
         raise InvalidRequestError("options must be an ExecutionOptions or None")
+    if declaration is not None and not isinstance(declaration, SessionDeclaration):
+        raise InvalidRequestError("declaration must be a SessionDeclaration or None")
 
     token = cancel or CancellationToken()
     obs = _io.normalize_progress(progress, OPERATION_ID)
@@ -417,10 +451,28 @@ def open_session_library(
             continue
 
         identity = f"session-library-{role}"
-        declaration = build_declaration(
+        # C15: orientation fallback (header evidence wins; else user declaration).
+        extra: dict = {}
+        orientation_source = ""
+        if "orientation" in candidates:
+            if candidates["orientation"].value != "identity":
+                rejected.append(RejectionDiagnostic(
+                    path=path, reason_code="INCOMPATIBLE",
+                    detail=(
+                        f"orientation {candidates['orientation'].value!r} is not "
+                        "supported (v1 supports 'identity' only)"
+                    ),
+                ))
+                continue
+            orientation_source = "header"
+        elif declaration is not None and declaration.orientation is not None:
+            extra["orientation"] = declaration.orientation
+            orientation_source = "declared"
+        declaration_obj = build_declaration(
             SESSION_LIBRARY_CONTRACT_SOURCE, identity, "1", candidates,
+            extra=extra or None,
         )
-        status, reasons = master_evidence_status(role, declaration)
+        status, reasons = master_evidence_status(role, declaration_obj)
         if status != "ready":
             code = "MISSING_REQUIRED_FIELDS"
             if role == "flat":
@@ -446,7 +498,7 @@ def open_session_library(
             role=role,
             content_sha256=ident.content_sha256,
             size_bytes=ident.size_bytes,
-            declaration=declaration,
+            declaration=declaration_obj,
             hdu=0,
             bias_state=None,
             flat_form=None,
@@ -458,8 +510,8 @@ def open_session_library(
         records.append(record)
         admissions.append(MasterAdmission(
             role=role, path=path, content_sha256=ident.content_sha256,
-            size_bytes=ident.size_bytes, hdu=0, declaration=declaration,
-            evidence=candidates,
+            size_bytes=ident.size_bytes, hdu=0, declaration=declaration_obj,
+            evidence=candidates, orientation_source=orientation_source,
         ))
 
     fingerprint = managed_fingerprint(records)
@@ -497,6 +549,7 @@ def open_session_library(
         rejected=tuple(rejected),
         counts_by_role=counts,
         warnings=tuple(warnings),
+        declaration=declaration,
     )
 
 
@@ -504,6 +557,7 @@ __all__ = [
     "MasterAdmission",
     "RejectionDiagnostic",
     "RouteResolution",
+    "SessionDeclaration",
     "SessionLibrary",
     "SessionLibraryResult",
     "open_session_library",
