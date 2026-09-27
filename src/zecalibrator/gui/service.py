@@ -25,9 +25,9 @@ from typing import Mapping, Optional, Tuple, Union
 
 import zecalibrator.api.v1 as v1
 
-# Re-exported shared admission/role logic (moved to api.v1._admission);
+# Re-exported shared admission/role logic (now in zecalibrator.application.masters);
 # kept here for backward compatibility with the GUI surface.
-from zecalibrator.api.v1._admission import (
+from zecalibrator.application.masters import (
     EVIDENCE_SOURCE_MAP,
     _BINNING_SCALAR_KEYWORDS,
     _BINNING_PAIR_KEYWORDS,

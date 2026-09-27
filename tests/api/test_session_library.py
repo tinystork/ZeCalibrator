@@ -238,12 +238,22 @@ def test_calibrate_in_memory_and_master_reuse_C1_Sa(tmp_path):
     h.calibrate(light60, plan)
     h.calibrate(light60, plan)
     assert h.context_preparation_count == 1
+    assert res.context_preparations == 1  # RW-2: visible on the result too
 
     # A second distinct plan (180s) prepares once more.
     light180 = _light(folder + "/light_180s.fits")
     plan180 = h.resolve_light(light180).plan
     h.calibrate(light180, plan180)
     assert h.context_preparation_count == 2
+    assert res.context_preparations == 2
+
+
+def test_context_preparations_defaults_to_zero_before_calibration_RW2(tmp_path):
+    folder = _master_folder(tmp_path)
+    res = v1.open_session_library(folder)
+    # Before any calibration, the exposed counter is 0 (no prepared context yet).
+    assert res.context_preparations == 0
+    assert res.handle.context_preparation_count == 0
 
 
 def test_calibrate_foreign_plan_refused_C1(tmp_path):

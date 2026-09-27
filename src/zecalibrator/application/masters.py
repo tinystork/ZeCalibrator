@@ -1,14 +1,16 @@
-"""Shared master-admission + role-identification logic (P7-M3B).
+"""Application-layer master-admission + role-identification logic (P7-M3B).
 
-Moved out of ``zecalibrator.gui.service`` (P7-M3B rework) into this non-GUI,
-Qt-free module so the public session-library API (:func:`open_session_library`)
-can perform admission + role identification without importing the GUI package.
+Relocated out of the ``api/v1`` facade (formerly a private ``api/v1`` helper)
+into the ``application`` layer so that **no importer depends on a private ``_``
+module inside the public API package**: the GUI (``zecalibrator.gui.service``)
+and the public session-library facade (``zecalibrator.api.v1.session``) both
+import this logic from here, keeping the layering ``api.v1 -> application ->
+core/io``.
 
 ``zecalibrator.gui.service`` re-exports these names unchanged for backward
-compatibility (its public surface is preserved). This module imports only the
-public ``zecalibrator.api.v1`` value objects plus the standard library — never
-Qt, never ``zecalibrator.core``/``application`` internals except the filesystem
-source adapter.
+compatibility (its public surface is preserved). This module is Qt-free and
+imports only the standard library, ``zecalibrator.core`` value objects and the
+filesystem source adapter — never ``api.v1``, never Qt/ZeAlfie/ZSSS.
 """
 
 from __future__ import annotations
@@ -19,7 +21,8 @@ from typing import Mapping, Optional, Tuple, Union
 
 from zecalibrator.io.master_source import FilesystemSource
 
-from .models import EvidenceFact, ImportDeclaration, ManagedMasterRecord
+from zecalibrator.core.managed import EvidenceFact, ManagedMasterRecord
+from zecalibrator.core.metadata import ImportDeclaration
 
 
 EVIDENCE_SOURCE_MAP: Mapping[str, Tuple[str, ...]] = {

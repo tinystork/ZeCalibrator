@@ -7,9 +7,10 @@ prepared masters across lights (never reloading them per light).
 
 This module is the public entry point for the ZSSS « folder -> library -> route
 by light -> in-memory calibration » flow. It imports only ``zecalibrator.api.v1``
-value objects, the shared admission logic (:mod:`._admission`), the existing
-private auto-route resolver (``._auto_route``) and the existing private
-calibration execution seam (``.calibration``) — never Qt/ZeAlfie/ZSSS.
+value objects, the application-layer admission logic
+(:mod:`zecalibrator.application.masters`), the existing private auto-route
+resolver (``._auto_route``) and the existing private calibration execution seam
+(``.calibration``) — never Qt/ZeAlfie/ZSSS.
 """
 
 from __future__ import annotations
@@ -29,7 +30,7 @@ from zecalibrator.application.library import (
 from zecalibrator.io.master_source import FilesystemSource
 
 from . import _io
-from ._admission import (
+from zecalibrator.application.masters import (
     build_declaration,
     detect_header_candidates,
     detect_imagetyp_role,
@@ -105,6 +106,12 @@ class SessionLibraryResult:
     is a completed, informative result — never a raised error. ``rejected`` names
     every refused master with a structured reason; the rest of the library is
     never invalidated by a refusal.
+
+    ``context_preparations`` exposes the §18 audit counter (see also
+    :attr:`SessionLibrary.context_preparation_count`): the number of master-context
+    preparations performed so far. It grows by exactly one per *distinct*
+    calibrated plan, so a consumer can verify that the masters are **not**
+    reloaded per light (reusing one plan across N lights keeps it at 1).
     """
 
     operation_status: str  # "COMPLETED" | "CANCELLED"
@@ -120,6 +127,16 @@ class SessionLibraryResult:
         object.__setattr__(self, "rejected", tuple(self.rejected))
         object.__setattr__(self, "counts_by_role", MappingProxyType(dict(self.counts_by_role)))
         object.__setattr__(self, "warnings", tuple(self.warnings))
+
+    @property
+    def context_preparations(self) -> int:
+        """Number of master-context preparations so far (S-a / §18 audit).
+
+        Delegates to the live counter on the handle (``0`` when there is no
+        handle). One preparation per distinct calibrated plan; reusing the same
+        plan across lights never re-prepares.
+        """
+        return self.handle.context_preparation_count if self.handle is not None else 0
 
 
 @dataclass(frozen=True)
@@ -189,6 +206,14 @@ class SessionLibrary:
     lights (no per-light master reload — see :attr:`context_preparation_count`).
     A ``plan`` passed to ``calibrate`` must originate from ``resolve_light`` of
     this same session (C1): a foreign plan raises :class:`PlanSourceMismatchError`.
+
+    **Fingerprint scope (RW-3):** :attr:`fingerprint` is computed with
+    :func:`zecalibrator.api.v1.managed_fingerprint` over records built by the
+    session admission with **fixed** structural values (``dq_state="no_source_dq"``,
+    ``bias_state=None``, ``flat_form=None``). A *curated* managed index that
+    carries richer states may therefore produce a **different** fingerprint for
+    the same folder. The fingerprint is reliable for freeze/resume **as long as a
+    single ingestion path is used** — ZSSS uses only :func:`open_session_library`.
     """
 
     def __init__(self, *, fingerprint: str, snapshot: LibrarySnapshot,
@@ -325,6 +350,11 @@ def open_session_library(
     ``policy``/``options`` default to :func:`default_match_policy` /
     :class:`ExecutionOptions`. Cancellation is honoured at every stage and returns
     a ``CANCELLED`` result (C3b); a partially-built session is never promoted.
+
+    ``fingerprint`` is derived from :func:`zecalibrator.api.v1.managed_fingerprint`
+    over records admitted with **fixed** structural values (``dq_state="no_source_dq"``,
+    ``bias_state=None``, ``flat_form=None``); see :class:`SessionLibrary` for the
+    consequence (single-ingestion-path assumption for freeze/resume, RW-3).
     """
     if not isinstance(root, (str, os.PathLike)) or str(root) == "":
         raise InvalidRequestError("root must be a non-empty path")

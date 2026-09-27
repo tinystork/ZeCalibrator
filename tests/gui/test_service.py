@@ -342,11 +342,23 @@ def test_scan_folder_inputs_recursive_admits_regular_files_only(tmp_path):
 # ---------------------------------------------------------------------------
 def test_gui_modules_never_import_private_paths():
     gui_dir = Path(__file__).resolve().parents[2] / "src" / "zecalibrator" / "gui"
+    # RW-1: the shared master-admission logic was relocated from a private api.v1
+    # helper to the application layer (``zecalibrator/application/masters.py``);
+    # the GUI service layer re-uses it from there. That one bridge is allowed;
+    # every other lower-layer import remains forbidden.
     for py in sorted(gui_dir.glob("*.py")):
         src = py.read_text(encoding="utf-8")
-        for mod in ("zecalibrator.core", "zecalibrator.application", "zecalibrator.io", "zecalibrator.cli"):
+        for mod in ("zecalibrator.core", "zecalibrator.io", "zecalibrator.cli"):
             assert f"import {mod}" not in src, (py.name, mod)
             assert f"from {mod}" not in src, (py.name, mod)
+        # ``zecalibrator.application`` is allowed ONLY for the admission-logic
+        # module (RW-1); any other application submodule import stays forbidden.
+        for line in src.splitlines():
+            stripped = line.strip()
+            if stripped.startswith(("import zecalibrator.application", "from zecalibrator.application")):
+                assert stripped.startswith(
+                    "from zecalibrator.application.masters"
+                ), (py.name, stripped)
 
 
 def test_gui_import_is_qt_free():
