@@ -320,6 +320,27 @@ def detect_imagetyp_role(cards) -> Optional[str]:
     return roles[0] if len(roles) == 1 else None
 
 
+_STACKING_COUNT_KEYWORDS = ("STACKCNT", "NCOMBINE", "NFRAMES")
+
+
+def detect_stacking_proof(cards) -> bool:
+    """Return True when a stacking-count card proves a stacked master.
+
+    A stacked master carries a machine-readable stacking-count card
+    (``STACKCNT``, and by extension ``NCOMBINE``/``NFRAMES`` when present) with
+    a value >= 2.  A raw single frame carries no such card.  This is an
+    evidence-based master proof — never a filename/folder heuristic.
+    """
+    for kw, val in _iter_keyword_values(cards):
+        if kw in _STACKING_COUNT_KEYWORDS:
+            try:
+                if int(float(val)) >= 2:
+                    return True
+            except (TypeError, ValueError):
+                continue
+    return False
+
+
 def _master_calibrated_reason(role, flat_form, origin) -> Optional[str]:
     if role == "flat":
         if flat_form in ("corrected_unnormalized", "normalized_response"):
@@ -571,6 +592,8 @@ __all__ = [
     "_master_normalization_signals",
     "_iter_keyword_values",
     "detect_imagetyp_role",
+    "_STACKING_COUNT_KEYWORDS",
+    "detect_stacking_proof",
     "_master_calibrated_reason",
     "_master_normalized_reason",
     "master_incompatibility",

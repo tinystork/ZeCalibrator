@@ -34,10 +34,12 @@ from zecalibrator.application.masters import (
     build_declaration,
     detect_header_candidates,
     detect_imagetyp_role,
+    detect_stacking_proof,
     make_managed_record,
     master_evidence_status,
     master_incompatibility,
 )
+from zecalibrator.core.metadata import detect_producer
 from ._auto_route import _AUTO_ROUTE_TO_MATCH, resolve_route
 from .batch import _build_candidate
 from .calibration import _PreparedContextSlot, _calibrate_frame_impl
@@ -416,6 +418,26 @@ def open_session_library(
     warnings: list = []
     records: list = []
 
+    # C20: determine which producers (CREATOR-derived) stamp their masters with
+    # a stacking-count card.  A producer "stamps" when at least one
+    # identifiable-role file of that producer carries the proof.  Unknown
+    # producers ("generic") never trigger the NOT_A_MASTER refusal, so a library
+    # with no stacking proof anywhere is unchanged.
+    producers_stamping_masters: set = set()
+    for path in files:
+        try:
+            cards = source.read_header(path, hdu=0)
+        except Exception:  # noqa: BLE001
+            continue
+        card_pairs = [(c.keyword, c.value) for c in cards]
+        if detect_imagetyp_role(card_pairs) is None:
+            continue
+        producer = detect_producer(cards)
+        if producer == "generic":
+            continue
+        if detect_stacking_proof(card_pairs):
+            producers_stamping_masters.add(producer)
+
     for path in files:
         token.raise_if_cancelled()
         try:
@@ -439,6 +461,24 @@ def open_session_library(
         if incompat:
             rejected.append(RejectionDiagnostic(
                 path=path, reason_code="INCOMPATIBLE", detail="; ".join(incompat),
+            ))
+            continue
+
+        # C20: a producer that stamps its masters with a stacking-count card must
+        # not admit an identifiable-role file of the same producer that carries
+        # no such proof (a raw single frame, not a stacked master).
+        producer = detect_producer(cards)
+        if (
+            producer != "generic"
+            and producer in producers_stamping_masters
+            and not detect_stacking_proof(card_pairs)
+        ):
+            rejected.append(RejectionDiagnostic(
+                path=path, reason_code="NOT_A_MASTER",
+                detail=(
+                    f"producer {producer!r} stamps its masters with a "
+                    "stacking-count card; this file carries no stacking proof"
+                ),
             ))
             continue
 

@@ -493,8 +493,8 @@ def test_scope_api_v1_never_imports_research_p3b():
 
 
 def test_scope_no_capability_added():
-    # No capability was added: CAPABILITIES stays the frozen six, and research/p3b
-    # declares no capability / provides entry.
+    # The public capability surface is the frozen eight; research/p3b declares
+    # no capability / provides entry (the second half is the real assertion).
     from zecalibrator.api.v1._meta import CAPABILITIES
 
     assert CAPABILITIES == (
@@ -504,6 +504,8 @@ def test_scope_no_capability_added():
         "provenance",
         "cancel",
         "calibrate_batch",
+        "session_library",
+        "auto_route",
     )
 
     # research/p3b contributes nothing to the capability surface: no module
