@@ -15,6 +15,11 @@ The structural/scaling/checksum cards (``SIMPLE BITPIX NAXIS NAXIS1 NAXIS2
 EXTEND BSCALE BZERO BLANK CHECKSUM DATASUM``), ``EGAIN``, ``HISTORY``/``COMMENT``
 and any unknown/vendor card are **never** emitted here (and are never copied).
 ``BUNIT=ADU`` remains owned by the writer, exactly where it is set today.
+
+The evidence whitelist additionally preserves the acquisition pointing and pixel
+sampling facts ``RA``/``DEC``/``XPIXSZ``/``YPIXSZ`` verbatim (only when present
+with a single unambiguous value), because calibration does not invalidate them
+and a downstream plate-solver needs them as a pointing/scale hint.
 """
 
 from __future__ import annotations
@@ -29,7 +34,13 @@ _BAYER_PHASES = frozenset({"GRBG", "RGGB", "BGGR", "GBRG"})
 # Closed evidence whitelist (category B). Each is written verbatim only when
 # present with a single unambiguous value. ``OFFSET`` is handled separately
 # because its canonical value takes precedence when known.
-_EVIDENCE_WHITELIST = ("IMAGETYP", "DATE-OBS", "OBJECT", "FOCALLEN", "ROTATOR")
+#
+# ``RA``/``DEC`` (acquisition pointing) and ``XPIXSZ``/``YPIXSZ`` (pixel sampling)
+# are acquisition facts that calibration does not invalidate; they are kept so a
+# downstream solver can reconstruct a plate-scale / pointing hint without reading
+# the CALPROV provenance extension.
+_EVIDENCE_WHITELIST = ("IMAGETYP", "DATE-OBS", "OBJECT", "FOCALLEN", "ROTATOR",
+                     "RA", "DEC", "XPIXSZ", "YPIXSZ")
 
 _OFFSET_KEYWORD = "OFFSET"
 _HIERARCH_PREFIX = "HIERARCH "
