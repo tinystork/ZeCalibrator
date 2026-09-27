@@ -29,12 +29,22 @@ from zecalibrator.io.master_source import SourceError
 LibraryError = LibraryIndexError
 
 
+class PlanSourceMismatchError(InvalidRequestError):
+    """A calibration plan that did not originate from this session's ``resolve_light``.
+
+    Raised by :meth:`zecalibrator.api.v1.SessionLibrary.calibrate` when the
+    supplied ``plan`` was not issued by that same session (C1): a plan from
+    another library/session is refused — never silently calibrated.
+    """
+
+
 __all__ = [
     "DecodeError",
     "GeometryMismatchError",
     "InvalidRequestError",
     "LibraryClosedError",
     "LibraryError",
+    "PlanSourceMismatchError",
     "PrecisionRefusalError",
     "SourceError",
     "UnsupportedSchemaError",

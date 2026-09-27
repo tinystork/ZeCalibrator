@@ -11,7 +11,7 @@ from __future__ import annotations
 def test_api_version_literal():
     import zecalibrator.api.v1 as v1
 
-    assert v1.API_VERSION == "1.0"
+    assert v1.API_VERSION == "1.1"
 
 
 def test_api_version_independent_of_product_version():
@@ -19,7 +19,7 @@ def test_api_version_independent_of_product_version():
     import zecalibrator.api.v1 as v1
 
     assert v1.API_VERSION != zecalibrator.__version__
-    assert v1.API_VERSION == "1.0"
+    assert v1.API_VERSION == "1.1"
     assert zecalibrator.__version__ == "0.0.5"
 
 
@@ -28,7 +28,7 @@ def test_get_api_info_matches_static_surface():
     import zecalibrator.api.v1 as v1
 
     info = v1.get_api_info()
-    assert info.api_version == "1.0"
+    assert info.api_version == "1.1"
     assert info.product_version == zecalibrator.__version__
     assert info.capabilities == (
         "calibrate_frame",
@@ -37,6 +37,8 @@ def test_get_api_info_matches_static_surface():
         "provenance",
         "cancel",
         "calibrate_batch",
+        "session_library",
+        "auto_route",
     )
 
 
@@ -64,11 +66,12 @@ def test_cold_import_and_get_api_info_are_cheap():
         """
         import sys
         import zecalibrator.api.v1 as v1
-        assert v1.API_VERSION == "1.0"
+        assert v1.API_VERSION == "1.1"
         info = v1.get_api_info()
         assert info.capabilities == (
             "calibrate_frame", "calibration_library", "master_matching",
             "provenance", "cancel", "calibrate_batch",
+            "session_library", "auto_route",
         )
         for mod in ("numpy", "astropy", "sqlite3", "PySide6", "QtWidgets",
                     "QtCore", "zealfie", "seestar", "cupy"):

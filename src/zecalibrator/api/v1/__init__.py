@@ -4,6 +4,12 @@
 version, the science-contract version, the provenance schema, the library schema
 and the matching-policy version (ARCHITECTURE §2).
 
+**Additivity rule (D3):** under a ``1.x`` minor, the public contract may only
+**add** symbols, capabilities and value objects. Removing, renaming, or changing
+the semantics of any listed symbol requires a **major** bump and a HUMAN_GATE.
+Consumers negotiate by ``major`` + presence of capabilities, never by comparing
+product versions.
+
 ``__all__`` is the explicit public-symbol contract. Anything not listed is
 internal and may change. **Cold import and ``get_api_info()`` are cheap**: they
 import no NumPy/Astropy, no Qt/ZeAlfie/ZSSS/CuPy, no SQLite and no filesystem/
@@ -19,7 +25,7 @@ from zecalibrator import _version
 
 from ._meta import ApiInfo, CAPABILITIES, PROVENANCE_SCHEMA
 
-API_VERSION = "1.0"
+API_VERSION = "1.1"
 
 
 def get_api_info() -> ApiInfo:
@@ -42,6 +48,7 @@ _LAZY = {
     "UnsupportedSchemaError": ("errors", "UnsupportedSchemaError"),
     "SourceError": ("errors", "SourceError"),
     "LibraryClosedError": ("errors", "LibraryClosedError"),
+    "PlanSourceMismatchError": ("errors", "PlanSourceMismatchError"),
     # models
     "BATCH_MANIFEST_SCHEMA": ("models", "BATCH_MANIFEST_SCHEMA"),
     "BatchManifestError": ("batch", "BatchManifestError"),
@@ -126,6 +133,13 @@ _LAZY = {
     "inspect_frame": ("frames", "inspect_frame"),
     "open_library": ("library", "open_library"),
     "resolve_calibration": ("matching", "resolve_calibration"),
+    # session (C1: open_session_library + SessionLibrary)
+    "open_session_library": ("session", "open_session_library"),
+    "SessionLibrary": ("session", "SessionLibrary"),
+    "SessionLibraryResult": ("session", "SessionLibraryResult"),
+    "RouteResolution": ("session", "RouteResolution"),
+    "MasterAdmission": ("session", "MasterAdmission"),
+    "RejectionDiagnostic": ("session", "RejectionDiagnostic"),
     "validate_binding": ("matching", "validate_binding"),
     "validate_plan": ("matching", "validate_plan"),
     "calibrate_frame": ("calibration", "calibrate_frame"),
@@ -219,6 +233,7 @@ __all__ = [
     "MANAGED_LEDGER_SCHEMA",
     "ManagedMasterRecord",
     "MaskPayloadLocator",
+    "MasterAdmission",
     "MasterBinding",
     "MasterDescriptor",
     "MatchPolicy",
@@ -229,6 +244,7 @@ __all__ = [
     "OpenLibraryResult",
     "OperationCancelled",
     "OpticalIdentity",
+    "PlanSourceMismatchError",
     "PolicyParameters",
     "PrecisionInfo",
     "PrecisionRefusalError",
@@ -237,10 +253,14 @@ __all__ = [
     "ProgressObserver",
     "ProvenanceRecord",
     "Reason",
+    "RejectionDiagnostic",
     "RejectionRecord",
     "ResolveResult",
     "RoiExtentEvidence",
+    "RouteResolution",
     "SensorMetadata",
+    "SessionLibrary",
+    "SessionLibraryResult",
     "SourceError",
     "Tolerance",
     "UnsupportedSchemaError",
@@ -265,6 +285,7 @@ __all__ = [
     "ManagedLedgerLoad",
     "ManagedLibraryResult",
     "open_library",
+    "open_session_library",
     "resolve_calibration",
     "save_managed_ledger",
     "STATE_MALFORMED",

@@ -8,8 +8,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-#: The six implemented public capability identifiers (ARCHITECTURE §2).
+#: The eight implemented public capability identifiers (ARCHITECTURE §2).
 #: ``GPU`` / ``master_building`` are NOT advertised.
+#: ``session_library`` / ``auto_route`` are additive-minor (API 1.0 -> 1.1).
 CAPABILITIES: tuple[str, ...] = (
     "calibrate_frame",
     "calibration_library",
@@ -17,6 +18,8 @@ CAPABILITIES: tuple[str, ...] = (
     "provenance",
     "cancel",
     "calibrate_batch",
+    "session_library",
+    "auto_route",
 )
 
 PROVENANCE_SCHEMA = "zecalibrator.provenance.v1"

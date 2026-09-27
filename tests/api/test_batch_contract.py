@@ -493,5 +493,5 @@ def test_batch_api_surface_is_public_and_advertised():
     assert "index_library" not in v1.get_api_info().capabilities
     assert v1.get_api_info().capabilities == (
         "calibrate_frame", "calibration_library", "master_matching", "provenance", "cancel",
-        "calibrate_batch",
+        "calibrate_batch", "session_library", "auto_route",
     )

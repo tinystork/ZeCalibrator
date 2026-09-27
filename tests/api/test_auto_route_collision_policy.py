@@ -447,7 +447,7 @@ def test_collision_decision_none_preserves_today_behaviour(tmp_path):
 def test_capabilities_and_public_surface_frozen():
     assert v1.get_api_info().capabilities == (
         "calibrate_frame", "calibration_library", "master_matching", "provenance",
-        "cancel", "calibrate_batch",
+        "cancel", "calibrate_batch", "session_library", "auto_route",
     )
     # ``_auto_route`` / ``_output_path_for`` / overwrite primitive are NOT public.
     assert "auto_route_batch" not in v1.__all__

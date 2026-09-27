@@ -359,7 +359,7 @@ def test_get_api_info_static_surface():
     import zecalibrator
 
     info = get_api_info()
-    assert info.api_version == "1.0"
+    assert info.api_version == "1.1"
     assert info.product_version == zecalibrator.__version__
     assert info.capabilities == (
         "calibrate_frame",
@@ -368,6 +368,8 @@ def test_get_api_info_static_surface():
         "provenance",
         "cancel",
         "calibrate_batch",
+        "session_library",
+        "auto_route",
     )
 
 
@@ -843,7 +845,7 @@ def test_interop_provides_six_implemented_capabilities():
     assert len(data["provides"]) == 1
     entry = data["provides"][0]
     assert entry["api_module"] == "zecalibrator.api.v1"
-    assert entry["api_version"] == "1.0"
+    assert entry["api_version"] == "1.1"
     assert entry["capabilities"] == [
         "calibrate_frame",
         "calibration_library",
@@ -851,6 +853,8 @@ def test_interop_provides_six_implemented_capabilities():
         "provenance",
         "cancel",
         "calibrate_batch",
+        "session_library",
+        "auto_route",
     ]
     assert get_api_info().capabilities == tuple(entry["capabilities"])
 
