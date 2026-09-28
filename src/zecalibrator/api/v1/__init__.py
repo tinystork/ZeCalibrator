@@ -144,6 +144,8 @@ _LAZY = {
     "validate_binding": ("matching", "validate_binding"),
     "validate_plan": ("matching", "validate_plan"),
     "calibrate_frame": ("calibration", "calibrate_frame"),
+    # C26: canonical route-class key (header-only, additive in the 1.1 contract)
+    "light_route_key": ("_route_key", "light_route_key"),
     # managed (P7-M3B)
     "load_managed_ledger": ("managed", "load_managed_ledger"),
     "save_managed_ledger": ("managed", "save_managed_ledger"),
@@ -281,6 +283,7 @@ __all__ = [
     "index_library",
     "inspect_frame",
     "light_constraints_from_sensor_metadata",
+    "light_route_key",
     "load_managed_ledger",
     "managed_fingerprint",
     "managed_ledger_path",
