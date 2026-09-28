@@ -4,6 +4,12 @@ All notable changes to ZeCalibrator are documented in this file.
 
 ## [0.1.0] — 2026-09-28
 
+- **Flat admission aligned with the Standard contract (C24)**: `open_session_library`
+  no longer filters flats on `master_evidence_status` — the flat quality evidence
+  (R4) is now informational `needs_attention`, resolved as traced UNVERIFIED by the
+  single compatibility authority (Standard matcher) at route time. The necessary
+  fields tier (orientation, filter, …) stays an eliminatory refusal. No science added,
+  no tolerance extended to other fields.
 - **Public session-library API**: `open_session_library` / `SessionLibrary` /
   `SessionLibraryResult` (admission + role identification from a folder, in-memory
   calibration with master reuse, freeze/resume provenance).

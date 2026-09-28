@@ -118,15 +118,20 @@ def test_declaration_cannot_override_different_orientation(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# 5. R4 intact: a flat without quality evidence stays refused
+# 5. C24: flat quality (R4) is informational, not an admission filter
 # ---------------------------------------------------------------------------
-def test_r4_flat_still_refused_with_declaration(tmp_path):
+def test_r4_flat_admitted_with_needs_attention(tmp_path):
     _bayer_flat(tmp_path / "flat.fits")
     res = v1.open_session_library(
         str(tmp_path), declaration=v1.SessionDeclaration(orientation="identity")
     )
-    assert len(res.admissions) == 0
-    assert res.rejected[0].reason_code == "FLAT_QUALITY_EVIDENCE_INSUFFICIENT"
+    # C24: flat is ADMITTED (indexed); R4 quality evidence is informational
+    # needs_attention, resolved as traced UNVERIFIED by the Standard matcher at
+    # route time (never silently converted to qualified).
+    assert len(res.admissions) == 1
+    adm = res.admissions[0]
+    assert adm.role == "flat"
+    assert any("flat quality evidence" in r for r in adm.needs_attention)
 
 
 # ---------------------------------------------------------------------------

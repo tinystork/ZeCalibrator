@@ -135,18 +135,20 @@ def test_get_api_info_cold_import_stays_cheap():
 # ---------------------------------------------------------------------------
 # open_session_library — admission + role identification
 # ---------------------------------------------------------------------------
-def test_open_admits_dark_bias_rejects_flat(tmp_path):
+def test_open_admits_dark_bias_and_flat_with_needs_attention(tmp_path):
     folder = _master_folder(tmp_path)
     res = v1.open_session_library(folder)
     assert res.operation_status == "COMPLETED"
     assert res.handle is not None
-    assert dict(res.counts_by_role) == {"dark": 2, "bias": 1}
+    # C24: flat is now ADMITTED (indexed), not refused — the Standard matcher
+    # resolves its missing quality evidence as UNVERIFIED at route time.
+    assert dict(res.counts_by_role) == {"dark": 2, "bias": 1, "flat": 1}
     roles = {a.role for a in res.admissions}
-    assert roles == {"dark", "bias"}
-    # flat refused with structured diagnostic, never invalidating the rest.
-    flat_rejections = [r for r in res.rejected if r.path.endswith("flat.fits")]
-    assert flat_rejections
-    assert flat_rejections[0].reason_code == "FLAT_QUALITY_EVIDENCE_INSUFFICIENT"
+    assert roles == {"dark", "bias", "flat"}
+    # flat carries informational needs_attention (never an ingestion filter).
+    flat_admissions = [a for a in res.admissions if a.role == "flat"]
+    assert flat_admissions
+    assert any("flat quality evidence" in r for r in flat_admissions[0].needs_attention)
     # lights have no IMAGETYP role -> AMBIGUOUS_ROLE
     light_rejections = [r for r in res.rejected if "light" in r.path]
     assert all(r.reason_code == "AMBIGUOUS_ROLE" for r in light_rejections)
@@ -193,16 +195,34 @@ def test_resolve_light_routes_distinct_plans(tmp_path):
     assert rr60.operation_status == "COMPLETED"
     assert rr60.outcome == "MATCHED"
     assert rr60.plan is not None
-    assert list(rr60.plan.masters.keys()) == ["dark"]
+    # C24: the flat is now applied (dark + flat), not refused.
+    assert list(rr60.plan.masters.keys()) == ["dark", "flat"]
 
     rr180 = h.resolve_light(_light(folder + "/light_180s.fits"))
     assert rr180.operation_status == "COMPLETED"
     assert rr180.outcome == "MATCHED"
     assert rr180.plan is not None
-    assert list(rr180.plan.masters.keys()) == ["dark"]
+    assert list(rr180.plan.masters.keys()) == ["dark", "flat"]
 
     # Distinct routes: each light binds its own exposure-matched dark.
     assert rr60.plan.plan_id != rr180.plan.plan_id
+
+
+def test_resolve_light_flat_applied_with_unverified_evidence(tmp_path):
+    # C24: the admitted flat (needs_attention at admission) is resolved by the
+    # Standard matcher with flat_mode=apply, and its missing R4 facts are
+    # exposed as traced UNVERIFIED (never converted to qualified).
+    folder = _master_folder(tmp_path)
+    res = v1.open_session_library(folder)
+    h = res.handle
+    rr = h.resolve_light(_light(folder + "/light_60s.fits"))
+    assert rr.outcome == "MATCHED"
+    assert "flat" in rr.plan.masters
+    fields = {u.field for u in rr.unverified}
+    assert "validity_evidence.saturation_limit_known" in fields
+    assert "validity_evidence.illumination" in fields
+    assert "validity_evidence.exposure_quality" in fields
+    assert "validity_evidence.valid_normalization_count" in fields
 
 
 def test_resolve_light_no_match_without_masters(tmp_path):

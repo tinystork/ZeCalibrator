@@ -39,6 +39,7 @@ from zecalibrator.application.masters import (
     make_managed_record,
     master_evidence_status,
     master_incompatibility,
+    missing_required_fields,
 )
 from zecalibrator.core.metadata import detect_producer
 from ._auto_route import _AUTO_ROUTE_TO_MATCH, resolve_route
@@ -112,9 +113,14 @@ class MasterAdmission:
     declaration: ImportDeclaration
     evidence: Mapping[str, EvidenceFact]
     orientation_source: str = ""
+    # C24: informational evidence gaps for this master (e.g. missing orientation
+    # or, for flats, missing quality evidence).  These are NEVER an admission
+    # filter; the Standard matcher resolves them as traced UNVERIFIED.
+    needs_attention: tuple = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "evidence", MappingProxyType(dict(self.evidence)))
+        object.__setattr__(self, "needs_attention", tuple(self.needs_attention))
 
 
 @dataclass(frozen=True)
@@ -528,15 +534,24 @@ def open_session_library(
             SESSION_LIBRARY_CONTRACT_SOURCE, identity, "1", candidates,
             extra=extra or None,
         )
-        status, reasons = master_evidence_status(role, declaration_obj)
-        if status != "ready":
-            code = "MISSING_REQUIRED_FIELDS"
-            if role == "flat":
-                code = "FLAT_QUALITY_EVIDENCE_INSUFFICIENT"
+        # C24: the necessary-fields tier (orientation, etc.) is PRESERVED as an
+        # eliminatory refusal (R3C / C15).  Standard tolerances are NOT extended
+        # to it (mission: "ne pas étendre les tolérances Standard aux autres
+        # champs à l'occasion de ce correctif").
+        missing = missing_required_fields(role, declaration_obj)
+        if missing:
             rejected.append(RejectionDiagnostic(
-                path=path, reason_code=code, detail="; ".join(reasons),
+                path=path, reason_code="MISSING_REQUIRED_FIELDS", detail="; ".join(missing),
             ))
             continue
+
+        # C24: flat quality (R4) is NO LONGER an admission filter.  It becomes
+        # informational needs_attention; the single compatibility authority (the
+        # Standard matcher) resolves it as traced UNVERIFIED at route time,
+        # aligning the public session path with the standalone managed-library
+        # path (R3D-D "ADMISSION != COMPATIBILITY").
+        status, reasons = master_evidence_status(role, declaration_obj)
+        needs_attention = tuple(reasons) if status != "ready" else ()
 
         try:
             from zecalibrator.core.plans import FitsFileLocator
@@ -568,6 +583,7 @@ def open_session_library(
             role=role, path=path, content_sha256=ident.content_sha256,
             size_bytes=ident.size_bytes, hdu=0, declaration=declaration_obj,
             evidence=candidates, orientation_source=orientation_source,
+            needs_attention=needs_attention,
         ))
 
     fingerprint = managed_fingerprint(records)
