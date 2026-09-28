@@ -34,6 +34,7 @@ from zecalibrator.application.masters import (
     build_declaration,
     detect_header_candidates,
     detect_imagetyp_role,
+    detect_stacking_conflict,
     detect_stacking_proof,
     make_managed_record,
     master_evidence_status,
@@ -418,11 +419,14 @@ def open_session_library(
     warnings: list = []
     records: list = []
 
-    # C20: determine which producers (CREATOR-derived) stamp their masters with
-    # a stacking-count card.  A producer "stamps" when at least one
-    # identifiable-role file of that producer carries the proof.  Unknown
-    # producers ("generic") never trigger the NOT_A_MASTER refusal, so a library
-    # with no stacking proof anywhere is unchanged.
+    # C20/C20b: determine which producers (CREATOR-derived) stamp their masters
+    # with a stacking-count card, **within THIS library only**.  A producer
+    # "stamps" when at least one identifiable-role file of that producer carries
+    # the proof (family of stacking-count cards, any one >= 2).  This is a
+    # library-local observation: no global learning, no persistent memory, no
+    # inter-library cache.  Unknown producers ("generic") never trigger the
+    # NOT_A_MASTER refusal, so a library with no stacking proof anywhere is
+    # unchanged.
     producers_stamping_masters: set = set()
     for path in files:
         try:
@@ -461,6 +465,18 @@ def open_session_library(
         if incompat:
             rejected.append(RejectionDiagnostic(
                 path=path, reason_code="INCOMPATIBLE", detail="; ".join(incompat),
+            ))
+            continue
+
+        # C20b: two stacking-count cards that contradict each other (one >= 2 and
+        # another present but < 2) => conservative refusal, never a guess.
+        if detect_stacking_conflict(card_pairs):
+            rejected.append(RejectionDiagnostic(
+                path=path, reason_code="CONFLICTING_STACK_COUNT",
+                detail=(
+                    "contradictory stacking-count cards (one >= 2 and another "
+                    "< 2); refusing admission (never a guess)"
+                ),
             ))
             continue
 

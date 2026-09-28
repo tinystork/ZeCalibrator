@@ -324,12 +324,12 @@ _STACKING_COUNT_KEYWORDS = ("STACKCNT", "NCOMBINE", "NFRAMES")
 
 
 def detect_stacking_proof(cards) -> bool:
-    """Return True when a stacking-count card proves a stacked master.
+    """Return True when a recognised stacking-count card proves a stacked master.
 
-    A stacked master carries a machine-readable stacking-count card
-    (``STACKCNT``, and by extension ``NCOMBINE``/``NFRAMES`` when present) with
-    a value >= 2.  A raw single frame carries no such card.  This is an
-    evidence-based master proof — never a filename/folder heuristic.
+    The proof is a *family* of stacking-count cards (``STACKCNT``,
+    ``NCOMBINE``, ``NFRAMES``): no card is mandatory, and any one card carrying
+    a value >= 2 satisfies the proof.  A raw single frame carries no such card.
+    This is an evidence-based master proof — never a filename/folder heuristic.
     """
     for kw, val in _iter_keyword_values(cards):
         if kw in _STACKING_COUNT_KEYWORDS:
@@ -339,6 +339,29 @@ def detect_stacking_proof(cards) -> bool:
             except (TypeError, ValueError):
                 continue
     return False
+
+
+def detect_stacking_conflict(cards) -> bool:
+    """Return True when two recognised stacking-count cards contradict each other.
+
+    A conflict is declared when one recognised card carries >= 2 ("stacked")
+    while another recognised card is present with < 2 ("single").  Cards that
+    agree (all >= 2, or all < 2) never conflict; a single card never conflicts.
+    Conservative: a conflict is reported, never a guess.
+    """
+    has_proof = False
+    has_below = False
+    for kw, val in _iter_keyword_values(cards):
+        if kw in _STACKING_COUNT_KEYWORDS:
+            try:
+                n = int(float(val))
+            except (TypeError, ValueError):
+                continue
+            if n >= 2:
+                has_proof = True
+            else:
+                has_below = True
+    return has_proof and has_below
 
 
 def _master_calibrated_reason(role, flat_form, origin) -> Optional[str]:
@@ -594,6 +617,7 @@ __all__ = [
     "detect_imagetyp_role",
     "_STACKING_COUNT_KEYWORDS",
     "detect_stacking_proof",
+    "detect_stacking_conflict",
     "_master_calibrated_reason",
     "_master_normalized_reason",
     "master_incompatibility",
