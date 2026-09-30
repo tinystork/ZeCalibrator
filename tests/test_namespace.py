@@ -45,6 +45,28 @@ def test_installed_package_metadata_matches_version_literal():
     assert installed == zecalibrator.__version__ == "0.1.1"
 
 
+def test_workflow_smoke_version_contract():
+    """Mirror of the CI unrelated-CWD smoke version assertion (literal-free).
+
+    The GitHub Actions smoke asserts
+    ``importlib.metadata.version("ZeCalibrator") == zecalibrator.__version__``
+    and checks the public API version separately. This test pins that
+    distribution/package agreement contract without embedding a
+    release-specific literal, so it cannot drift when the product version
+    changes. Skips when the distribution is not installed (e.g. a bare
+    ``PYTHONPATH=src`` run).
+    """
+    import zecalibrator
+    import zecalibrator._version as v
+
+    try:
+        installed = metadata.version("ZeCalibrator")
+    except metadata.PackageNotFoundError:  # pragma: no cover - depends on the env
+        pytest.skip("ZeCalibrator distribution metadata is not installed")
+
+    assert installed == zecalibrator.__version__ == v.__version__
+
+
 def test_clean_import_has_no_optional_heavy_dependencies():
     code = textwrap.dedent(
         """
