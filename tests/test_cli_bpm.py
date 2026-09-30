@@ -180,9 +180,10 @@ def test_isolated_storage_windows_branch_uses_localappdata_override(tmp_path):
     overrides, config_dir = _isolated_storage(tmp_path, platform="win32")
     assert overrides == {"WIN_PD_OVERRIDE_LOCAL_APPDATA": str(tmp_path / "localappdata")}
     # Non-roaming PlatformDirs(appname, appauthor, roaming=False) config root:
-    # <LOCALAPPDATA>\ZeSoftware\ZeCalibrator — never a live Windows user path.
+    # <LOCALAPPDATA>\ZeSoftware\ZeCalibrator — exactly the injected tmp-root
+    # layout, so the subprocess can never reach a live user's config path.
     assert config_dir == tmp_path / "localappdata" / "ZeSoftware" / "ZeCalibrator"
-    assert "Users" not in str(config_dir)
+    assert config_dir.is_relative_to(tmp_path)
 
 
 def test_isolated_storage_posix_branch_uses_xdg(tmp_path):
