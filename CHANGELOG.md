@@ -2,13 +2,22 @@
 
 All notable changes to ZeCalibrator are documented in this file.
 
-## [0.1.0] — 2026-09-28
+## [0.1.1] — 2026-09-30
 
 - **Canonical route-class key (C26)**: new public ``light_route_key(light)`` in the
   ``1.1`` contract (additive, no capability/version bump). Returns a deterministic,
   conservative, header-only class key that includes every fact the matcher consumes
   for compatibility + ranking (geometry/detector/acquisition/optical + the ``DATE-OBS``
   civil day), with no tolerance — so ZSSS never recomputes an approximate key.
+- **ZSSS installed-runtime integration / provenance qualification**: ZeCalibrator 0.1.1
+  is the version ZeSeestarStacker 8.6.1 consumes as an installed runtime; calibration
+  provenance (provider, library fingerprint, plan map, orientation declaration) is
+  qualified at the API 1.1 surface. No new API major; no Windows physical test claimed.
+
+**API version**: 1.1 (unchanged).
+
+## [0.1.0] — 2026-09-28
+
 - **Flat admission aligned with the Standard contract (C24)**: `open_session_library`
   no longer filters flats on `master_evidence_status` — the flat quality evidence
   (R4) is now informational `needs_attention`, resolved as traced UNVERIFIED by the
