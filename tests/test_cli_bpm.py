@@ -36,14 +36,45 @@ DECL = dict(
 ROI = dict(extent=[4, 4], source="synthetic_fixture", identity="SYNTH-BASE-1", version="1.0")
 
 
+def _isolated_storage(tmp_path, *, platform=None):
+    """Isolate ZeCalibrator's platformdirs roots for CLI subprocesses.
+
+    Returns ``(env_overrides, config_dir)``:
+
+    * ``env_overrides`` — the platform-specific environment variables that
+      redirect the non-roaming ``PlatformDirs(appname="ZeCalibrator",
+      appauthor="ZeSoftware", version=None, roaming=False)`` roots into
+      ``tmp_path`` so a subprocess can never read/write a live user's config
+      or data.
+    * ``config_dir`` — the exact ``user_config_path`` the CLI resolves under
+      those overrides, where ``bpm_settings.json`` must be written.
+
+    ``platform`` is injectable for pure tests of the Windows branch on Linux;
+    it defaults to ``sys.platform``.
+    """
+    platform = sys.platform if platform is None else platform
+    if platform == "win32":
+        # Non-roaming (roaming=False) config/data roots resolve under
+        # CSIDL_LOCAL_APPDATA. platformdirs honours WIN_PD_OVERRIDE_LOCAL_APPDATA
+        # as a portable override for that root (checked before ctypes/registry),
+        # so no runner user path is hardcoded.
+        local = tmp_path / "localappdata"
+        return {"WIN_PD_OVERRIDE_LOCAL_APPDATA": str(local)}, local / "ZeSoftware" / "ZeCalibrator"
+    # POSIX (Linux/macOS): XDG config/data roots; appauthor is not used.
+    return {
+        "XDG_CONFIG_HOME": str(tmp_path / "xdg-config"),
+        "XDG_DATA_HOME": str(tmp_path / "xdg-data"),
+    }, tmp_path / "xdg-config" / "ZeCalibrator"
+
+
 def _env(tmp_path):
     env = dict(os.environ)
     env["PYTHONPATH"] = _SRC + os.pathsep + env.get("PYTHONPATH", "")
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     # Redirect ZeCalibrator's platformdirs config/data roots into the tmp dir
     # so the CLI reads the persisted BPM setting from an isolated location.
-    env["XDG_CONFIG_HOME"] = str(tmp_path / "xdg-config")
-    env["XDG_DATA_HOME"] = str(tmp_path / "xdg-data")
+    overrides, _config_dir = _isolated_storage(tmp_path)
+    env.update(overrides)
     return env
 
 
@@ -131,8 +162,8 @@ def test_calibrate_persisted_config_is_automatic(tmp_path):
     light, decl, roi, index = _setup_library(tmp_path)
     outdir = tmp_path / "out"
     outdir.mkdir()
-    # Persist the setting where the CLI resolves it (platformdirs under XDG).
-    config_dir = tmp_path / "xdg-config" / "ZeCalibrator"
+    # Persist the setting where the CLI resolves it (platformdirs config root).
+    _, config_dir = _isolated_storage(tmp_path)
     config_dir.mkdir(parents=True, exist_ok=True)
     base = tmp_path / "persisted-base"
     base.mkdir()
@@ -143,6 +174,24 @@ def test_calibrate_persisted_config_is_automatic(tmp_path):
     proc = _calibrate(tmp_path, light, decl, roi, index, outdir)
     assert proc.returncode == 0, proc.stderr
     assert f"Bad Pixel Database: {base}" in proc.stderr
+
+
+def test_isolated_storage_windows_branch_uses_localappdata_override(tmp_path):
+    overrides, config_dir = _isolated_storage(tmp_path, platform="win32")
+    assert overrides == {"WIN_PD_OVERRIDE_LOCAL_APPDATA": str(tmp_path / "localappdata")}
+    # Non-roaming PlatformDirs(appname, appauthor, roaming=False) config root:
+    # <LOCALAPPDATA>\ZeSoftware\ZeCalibrator — never a live Windows user path.
+    assert config_dir == tmp_path / "localappdata" / "ZeSoftware" / "ZeCalibrator"
+    assert "Users" not in str(config_dir)
+
+
+def test_isolated_storage_posix_branch_uses_xdg(tmp_path):
+    overrides, config_dir = _isolated_storage(tmp_path, platform="linux")
+    assert overrides == {
+        "XDG_CONFIG_HOME": str(tmp_path / "xdg-config"),
+        "XDG_DATA_HOME": str(tmp_path / "xdg-data"),
+    }
+    assert config_dir == tmp_path / "xdg-config" / "ZeCalibrator"
 
 
 def test_calibrate_without_destination_still_synthesizes(tmp_path):

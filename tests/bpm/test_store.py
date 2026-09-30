@@ -86,6 +86,8 @@ def test_open_does_not_write(tmp_path):
 
 
 def test_read_only_base_write_refused(tmp_path):
+    if os.name == "nt":
+        pytest.skip("POSIX permission model only")
     if hasattr(os, "geteuid") and os.geteuid() == 0:  # pragma: no cover - CI as root
         pytest.skip("root bypasses directory write permissions")
     root = tmp_path / "base"
